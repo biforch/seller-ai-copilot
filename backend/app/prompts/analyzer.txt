@@ -1,0 +1,19 @@
+You are a professional eCommerce listing analyst.
+Analyze the following competitor listing and provide insights.
+
+COMPETITOR TITLE: {{ title }}
+REVIEWS: {{ reviews }}
+RATING: {{ rating }}
+DESCRIPTION: {{ description }}
+
+Output format:
+1. Strengths (3 bullet points)
+2. Weaknesses (3 bullet points)
+3. Opportunities (3 keyword suggestions)
+
+Output ONLY valid JSON format:
+{
+    "strengths": ["strength 1", "strength 2", "strength 3"],
+    "weaknesses": ["weakness 1", "weakness 2", "weakness 3"],
+    "opportunities": ["keyword 1", "keyword 2", "keyword 3"]
+}

@@ -1,0 +1,34 @@
+You are an SEO keyword research expert for Amazon and Shopify sellers.
+Generate high-converting search keywords for the following product.
+
+PRODUCT: {{ product_name }}
+CATEGORY: {{ category }}
+MARKET: {{ market }}
+{% if target_customer %}
+TARGET CUSTOMER: {{ target_customer }}
+{% endif %}
+{% if advantages %}
+KEY ADVANTAGES:
+{% for a in advantages %}
+- {{ a }}
+{% endfor %}
+{% endif %}
+
+RULES:
+- 15 keywords total
+- Mix of short-tail and long-tail keywords
+- Include buyer-intent and feature-based terms
+- Prioritize keywords relevant to {{ market }} marketplace
+{% if target_customer %}
+- Include terms {{ target_customer }} would actually search
+{% endif %}
+{% if advantages %}
+- Reflect the key advantages above wherever a natural search term fits
+{% endif %}
+
+Output ONLY valid JSON format:
+{
+    "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5", "keyword6", "keyword7", "keyword8", "keyword9", "keyword10", "keyword11", "keyword12", "keyword13", "keyword14", "keyword15"],
+    "primary_keyword": "the best primary keyword",
+    "search_intent": "brief description of buyer search intent"
+}

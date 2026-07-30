@@ -1,0 +1,22 @@
+---
+description: Backend Python/FastAPI 编码规范
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Backend 规范
+
+- 格式化：black (100 字符)，import 顺序 isort
+- 命名：类 PascalCase，函数/变量 snake_case，常量 UPPER_SNAKE_CASE
+- 类型注解 + Google style docstrings
+- Pydantic schemas 放 `app/schemas/`，API 路由只做编排，业务逻辑放 `app/services/`
+- 统一用 `success_response()` 返回，`AppException` 抛错
+- 新增 API 路由注册到 `app/main.py`，prefix `/api/v1`
+
+```python
+# ✅ 正确响应
+return success_response(data=result.model_dump(), code=201)
+
+# ❌ 避免直接返回裸 dict
+return {"id": "..."}
+```

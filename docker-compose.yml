@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sellerai-postgres
+    environment:
+      POSTGRES_USER: sellerai
+      POSTGRES_PASSWORD: sellerai123
+      POSTGRES_DB: sellerai
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sellerai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sellerai-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: sellerai-backend
+
+    environment:
+      DATABASE_URL: postgresql://sellerai:sellerai123@postgres:5432/sellerai
+      REDIS_URL: redis://redis:6379
+
+      # Xray SOCKS5 proxy
+      HTTP_PROXY: socks5h://host.docker.internal:10808
+      HTTPS_PROXY: socks5h://host.docker.internal:10808
+      ALL_PROXY: socks5h://host.docker.internal:10808
+
+      # 不让内部服务走代理
+      NO_PROXY: postgres,redis,localhost,127.0.0.1
+
+    env_file:
+      - ./backend/.env
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    ports:
+      - "8000:8000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    volumes:
+      - ./backend:/app
+
+
+  frontend:
+    build: ./frontend
+    container_name: sellerai-frontend
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      NEXT_PUBLIC_APP_NAME: SellerAI Copilot
+
+    depends_on:
+      - backend
+
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+
+  nginx:
+    image: nginx:alpine
+    container_name: sellerai-nginx
+
+    ports:
+      - "80:80"
+
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+    depends_on:
+      - backend
+      - frontend
+
+
+volumes:
+  postgres_data:

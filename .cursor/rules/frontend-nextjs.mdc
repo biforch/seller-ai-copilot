@@ -1,0 +1,21 @@
+---
+description: Frontend Next.js/TypeScript 编码规范
+globs: frontend/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Frontend 规范
+
+- Prettier：semi, singleQuote, trailingComma es5, tabWidth 2
+- 组件 PascalCase，函数/变量 camelCase
+- API 调用统一走 `app/api/client.ts`，自动解包 `{code, message, data}`
+- 业务 hooks：`useAuth`, `useProducts`, `useGenerate`
+- 类型定义放 `types/index.ts`
+- 路由：`(auth)/login`, `(dashboard)/dashboard`, `(dashboard)/products`, `(dashboard)/generate`
+
+```typescript
+// ✅ 通过 apiClient 调用
+const products = await apiClient.get<Product[]>('/products');
+
+// ❌ 避免页面内直接 fetch 且不处理统一响应格式
+```

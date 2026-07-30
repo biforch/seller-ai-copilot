@@ -1,0 +1,31 @@
+---
+description: SellerAI Copilot 项目核心规范
+alwaysApply: true
+---
+
+# SellerAI Copilot
+
+AI-powered eCommerce Assistant。技术栈：Next.js 15 + FastAPI + PostgreSQL + Redis + OpenAI (gpt-4o-mini)。
+
+## API 响应格式
+
+成功：`{ "code": 200, "message": "success", "data": {...} }`
+失败：`{ "code": number, "message": string, "detail": string | null }`
+
+Base path: `/api/v1`
+
+## Git 提交
+
+格式：`<type>(<scope>): <subject>`，如 `feat(generate): add AI listing generator API`
+
+## 目录结构
+
+- Backend: `app/api/`, `services/`, `models/`, `schemas/`, `core/`, `prompts/`
+- Frontend: `app/(auth)/`, `app/(dashboard)/`, `components/`, `hooks/`, `lib/`, `types/`
+- Prompts 使用 Jinja2 模板，位于 `backend/app/prompts/`
+
+## 安全
+
+- JWT 认证，密码 8+ 字符且含字母和数字
+- CORS 限制允许来源，非 `*`
+- 速率限制：auth 10/min，generate 20/hour
