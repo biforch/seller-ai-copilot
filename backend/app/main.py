@@ -34,10 +34,6 @@ from app.core.rate_limit import limiter
 
 from app.core.response import success_response
 
-from app.database.session import engine
-
-from app.models import Base
-
 
 logging.basicConfig(
     level=logging.INFO
@@ -46,11 +42,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# 开发环境自动建表
-# 生产环境建议使用 Alembic
-Base.metadata.create_all(
-    bind=engine
-)
+# Schema 现在完全由 Alembic 管理：
+#   docker exec -it sellerai-backend bash
+#   alembic upgrade head
+# 部署/启动一个新环境时，先跑 alembic upgrade head，
+# 不要指望这里自动建表了。
 
 
 
