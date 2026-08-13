@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 
 from app.services.openai import OpenAIService
 
@@ -16,7 +16,7 @@ class AnalyzerService:
         reviews: int,
         rating: float,
         description: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
 
         result = await self._ai.analyze_listing(
             title=title,

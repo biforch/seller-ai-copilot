@@ -2,8 +2,7 @@ import os
 import sys
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
@@ -25,11 +24,11 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# 用 app 实际的 DATABASE_URL（来自 .env），
-# 不用 alembic.ini 里那行占位符
+# Prefer explicit migration/test override, otherwise application settings.
+database_url = os.environ.get("ALEMBIC_DATABASE_URL") or settings.DATABASE_URL
 config.set_main_option(
     "sqlalchemy.url",
-    settings.DATABASE_URL,
+    database_url,
 )
 
 # add your model's MetaData object here

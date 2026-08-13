@@ -1,101 +1,79 @@
-from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.common_fields import (
+    ADVANTAGE_ITEM_MAX,
+    ADVANTAGES_MAX_COUNT,
+    AnalyzeDescriptionField,
+    CategoryField,
+    ListingTitleField,
+    MarketField,
+    NameField,
+    PlatformField,
+    ProductIdField,
+    ProjectIdField,
+    TargetCustomerField,
+)
 
 
 class GenerateListingRequest(BaseModel):
+    project_id: ProjectIdField
+    product_id: ProductIdField | None = None
+    name: NameField
+    category: CategoryField
+    market: MarketField = "USA"
+    platform: PlatformField = "Amazon"
+    target_customer: TargetCustomerField = None
+    advantages: list[str] | None = Field(default=None, max_length=ADVANTAGES_MAX_COUNT)
 
-    # Product 必须属于 Project
-    project_id: str
-
-    # 已存在商品时使用
-    product_id: Optional[str] = None
-
-    name: str
-
-    category: str
-
-    market: str = "USA"
-
-    platform: str = "Amazon"
-
-    # 目标客户，未提供时沿用已保存的 Product 上下文
-    target_customer: Optional[str] = None
-
-    # 产品卖点/优势，未提供时沿用已保存的 Product 上下文
-    advantages: Optional[List[str]] = None
-
-
+    @field_validator("advantages")
+    @classmethod
+    def validate_advantages(cls, advantages: list[str] | None) -> list[str] | None:
+        if advantages is None:
+            return None
+        cleaned: list[str] = []
+        for item in advantages:
+            text = item.strip()
+            if not text:
+                raise ValueError("advantage must not be blank")
+            if len(text) > ADVANTAGE_ITEM_MAX:
+                raise ValueError(f"advantage exceeds {ADVANTAGE_ITEM_MAX} characters")
+            cleaned.append(text)
+        return cleaned
 
 
 class GenerateListingResponse(BaseModel):
-
     project_id: str
-
     product_id: str
-
     title: str
-
-    bullets: List[str]
-
+    bullets: list[str]
     description: str
-
-    keywords: List[str]
-
+    keywords: list[str]
     tokens_used: int
-
-
-
 
 
 class AnalyzeRequest(BaseModel):
-
-    # 分析结果可以只属于 Project
-    project_id: str
-
-    title: str
-
-    reviews: int
-
-    rating: float
-
-    description: str
-
-
-
+    project_id: ProjectIdField
+    title: ListingTitleField
+    reviews: int = Field(ge=0, le=50_000_000)
+    rating: float = Field(ge=0.0, le=5.0)
+    description: AnalyzeDescriptionField
 
 
 class AnalyzeResponse(BaseModel):
-
     project_id: str
-
-    strengths: List[str]
-
-    weaknesses: List[str]
-
-    opportunities: List[str]
-
+    strengths: list[str]
+    weaknesses: list[str]
+    opportunities: list[str]
     tokens_used: int
-
-
-
 
 
 class GenerationHistoryItem(BaseModel):
-
     id: str
-
     type: str
-
-    project_id: Optional[str] = None
-
-    product_id: Optional[str] = None
-
+    project_id: str | None = None
+    product_id: str | None = None
     input: dict
-
     output: dict
-
     tokens_used: int
-
     created_at: str

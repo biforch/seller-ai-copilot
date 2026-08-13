@@ -7,6 +7,7 @@ export interface ApiResponse<T = unknown> {
 
 export interface ApiError {
   code: number;
+  error_code?: string | null;
   message: string;
   detail: string | null;
 }

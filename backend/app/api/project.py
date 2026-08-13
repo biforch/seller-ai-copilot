@@ -3,16 +3,13 @@ import logging
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-
-from app.database.session import get_db
-
-from app.core.security import get_current_user
+from app.core.config import settings
 from app.core.exceptions import AppException
 from app.core.response import success_response
-
-
+from app.core.security import get_current_user
+from app.database.session import get_db
+from app.schemas.project import CreateProjectRequest
 from app.services.project import ProjectService
-
 
 router = APIRouter()
 
@@ -25,37 +22,18 @@ logger = logging.getLogger(__name__)
 
 @router.post("")
 async def create_project(
-
-    body: dict,
-
+    body: CreateProjectRequest,
     current_user: dict = Depends(get_current_user),
-
     db: Session = Depends(get_db),
-
 ):
-
     try:
-
         project = ProjectService.create(
-
             db=db,
-
             user_id=current_user["id"],
-
-            name=body.get("name"),
-
-            description=body.get("description"),
-
-            platform=body.get(
-                "platform",
-                "Amazon"
-            ),
-
-            market=body.get(
-                "market",
-                "USA"
-            ),
-
+            name=body.name,
+            description=body.description,
+            platform=body.platform,
+            market=body.market,
         )
 
 
@@ -96,13 +74,9 @@ async def create_project(
 
 
         raise AppException(
-
             message="Create project failed",
-
             code=500,
-
-            detail=str(e),
-
+            detail=str(e) if settings.DEBUG else None,
         )
 
 

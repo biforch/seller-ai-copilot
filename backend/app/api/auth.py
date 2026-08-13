@@ -44,8 +44,8 @@ async def register(request: Request, body: RegisterRequest, db: Session = Depend
 
     data = RegisterResponse(
         id=str(new_user.id),
-        email=new_user.email,
-        plan=new_user.plan,
+        email=str(new_user.email),
+        plan=str(new_user.plan),
         message="Registration successful",
     )
     return success_response(data=data.model_dump(), message="Registration successful", code=201)
@@ -56,7 +56,7 @@ async def register(request: Request, body: RegisterRequest, db: Session = Depend
 async def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
     """用户登录."""
     user = db.query(User).filter(User.email == body.email).first()
-    if not user or not verify_password(body.password, user.password_hash):
+    if not user or not verify_password(body.password, str(user.password_hash)):
         raise AppException(
             "Invalid email or password",
             status.HTTP_401_UNAUTHORIZED,
@@ -66,7 +66,7 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
     data = LoginResponse(
         access_token=access_token,
         token_type="bearer",
-        user=UserInfo(id=str(user.id), email=user.email, plan=user.plan),
+        user=UserInfo(id=str(user.id), email=str(user.email), plan=str(user.plan)),
     )
     return success_response(data=data.model_dump())
 
@@ -81,5 +81,5 @@ async def get_current_user_info(
     if not user:
         raise AppException("User not found", status.HTTP_404_NOT_FOUND)
 
-    data = UserResponse(id=str(user.id), email=user.email, plan=user.plan)
+    data = UserResponse(id=str(user.id), email=str(user.email), plan=str(user.plan))
     return success_response(data=data.model_dump())

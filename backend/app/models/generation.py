@@ -1,16 +1,15 @@
+import uuid
+
 from sqlalchemy import (
+    JSON,
     Column,
-    String,
     DateTime,
     ForeignKey,
     Integer,
-    JSON,
+    String,
     func,
 )
-
 from sqlalchemy.dialects.postgresql import UUID
-
-import uuid
 
 from app.database.session import Base
 

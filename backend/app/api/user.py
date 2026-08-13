@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.database.session import get_db
-from app.core.security import get_current_user
-from app.models.user import User
-from app.models.product import Product
-from app.models.generation import Generation
+from app.core.orm_utils import orm_int
 from app.core.response import success_response
-
+from app.core.security import get_current_user
+from app.database.session import get_db
+from app.models.generation import Generation
+from app.models.product import Product
+from app.models.user import User
 
 router = APIRouter()
 
@@ -46,22 +46,11 @@ async def get_usage(
     )
 
 
-    remaining = (
-        user.monthly_tokens
-        -
-        user.used_tokens
-    )
-
-
-    usage_percent = (
-        user.used_tokens
-        /
-        user.monthly_tokens
-        *
-        100
-        if user.monthly_tokens > 0
-        else 0
-    )
+    monthly = orm_int(user.monthly_tokens)
+    used = orm_int(user.used_tokens)
+    reserved = orm_int(user.reserved_tokens)
+    remaining = max(0, monthly - used - reserved)
+    usage_percent = (used / monthly * 100) if monthly > 0 else 0.0
 
 
     return success_response(
@@ -71,6 +60,8 @@ async def get_usage(
             "monthly_tokens": user.monthly_tokens,
 
             "used_tokens": user.used_tokens,
+
+            "reserved_tokens": user.reserved_tokens,
 
             "remaining_tokens": remaining,
 

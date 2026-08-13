@@ -1,4 +1,5 @@
 import { API_BASE_URL, TOKEN_KEY } from '@/lib/constants';
+import { formatApiErrorPayload } from '@/lib/api-errors';
 import type { ApiError, ApiResponse } from '@/types';
 
 class ApiClient {
@@ -35,7 +36,7 @@ class ApiClient {
 
     if (!response.ok) {
       const err = json as ApiError;
-      throw new Error(err.detail || err.message || 'Request failed');
+      throw new Error(formatApiErrorPayload(err, response.status));
     }
 
     const wrapped = json as ApiResponse<T>;
@@ -49,10 +50,11 @@ class ApiClient {
     return this.request<T>(path);
   }
 
-  post<T>(path: string, body?: unknown) {
+  post<T>(path: string, body?: unknown, extraHeaders?: Record<string, string>) {
     return this.request<T>(path, {
       method: 'POST',
       body: body ? JSON.stringify(body) : undefined,
+      headers: extraHeaders,
     });
   }
 

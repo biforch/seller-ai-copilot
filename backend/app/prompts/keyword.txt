@@ -15,10 +15,11 @@ KEY ADVANTAGES:
 {% endif %}
 
 RULES:
-- 15 keywords total
+- Exactly 15 keywords total
 - Mix of short-tail and long-tail keywords
 - Include buyer-intent and feature-based terms
 - Prioritize keywords relevant to {{ market }} marketplace
+- Do NOT invent product specs, certifications, or performance claims not provided above
 {% if target_customer %}
 - Include terms {{ target_customer }} would actually search
 {% endif %}
@@ -26,7 +27,7 @@ RULES:
 - Reflect the key advantages above wherever a natural search term fits
 {% endif %}
 
-Output ONLY valid JSON format:
+Output ONLY valid JSON with exactly these fields and no additional keys:
 {
     "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5", "keyword6", "keyword7", "keyword8", "keyword9", "keyword10", "keyword11", "keyword12", "keyword13", "keyword14", "keyword15"],
     "primary_keyword": "the best primary keyword",

@@ -1,14 +1,12 @@
 import uuid
 
-from typing import List, Optional
-
 from sqlalchemy.orm import Session
 
+from app.core.orm_utils import orm_dict, orm_uuid
 from app.models.generation import Generation
 from app.models.product import Product
 from app.models.project import Project
-from app.services.scoring import compute_listing_score, build_next_actions
-
+from app.services.scoring import build_next_actions, compute_listing_score
 
 
 class ProductService:
@@ -22,11 +20,13 @@ class ProductService:
         user_id: str,
         project_id: str,
         name: str,
-        category: Optional[str] = None,
+        category: str | None = None,
         platform: str = "Amazon",
         market: str = "USA",
-        target_customer: Optional[str] = None,
-        advantages: Optional[List[str]] = None,
+        target_customer: str | None = None,
+        advantages: list[str] | None = None,
+        *,
+        commit: bool = True,
     ) -> Product:
 
 
@@ -34,16 +34,13 @@ class ProductService:
             db.query(Project)
             .filter(
                 Project.id == project_id,
-                Project.user_id == user_id,
+                Project.user_id == uuid.UUID(str(user_id)),
             )
             .first()
         )
 
-
         if not project:
-            raise ValueError(
-                "Project not found"
-            )
+            raise ValueError("Project not found")
 
 
         product = Product(
@@ -60,10 +57,11 @@ class ProductService:
 
         db.add(product)
 
-        db.commit()
-
-        db.refresh(product)
-
+        if commit:
+            db.commit()
+            db.refresh(product)
+        else:
+            db.flush()
 
         return product
 
@@ -74,7 +72,7 @@ class ProductService:
     def get_user_products(
         db: Session,
         user_id: str,
-    ) -> List[dict]:
+    ) -> list[dict]:
 
 
         products = (
@@ -137,7 +135,7 @@ class ProductService:
         db: Session,
         product_id: str,
         user_id: str,
-    ) -> Optional[Product]:
+    ) -> Product | None:
 
 
         try:
@@ -156,8 +154,8 @@ class ProductService:
             .join(Project)
             .filter(
                 Product.id == product_uuid,
-
-                Project.user_id == user_id,
+                Product.user_id == uuid.UUID(str(user_id)),
+                Project.user_id == uuid.UUID(str(user_id)),
             )
             .first()
         )
@@ -185,7 +183,7 @@ class ProductService:
     def get_generations(
         db: Session,
         product_id: uuid.UUID,
-    ) -> List[Generation]:
+    ) -> list[Generation]:
 
 
         return (
@@ -237,17 +235,14 @@ class ProductService:
 
         generations = ProductService.get_generations(
             db,
-            product.id,
+            orm_uuid(product.id),
         )
 
-
-        generation_types = {}
+        generation_types: dict[str, int] = {}
 
         for g in generations:
-
-            generation_types[g.type] = (
-                generation_types.get(g.type, 0) + 1
-            )
+            gtype = str(g.type)
+            generation_types[gtype] = generation_types.get(gtype, 0) + 1
 
 
         stats = {
@@ -276,7 +271,7 @@ class ProductService:
 
         if latest_listing:
 
-            output = latest_listing.output or {}
+            output: dict = orm_dict(latest_listing.output) if latest_listing.output else {}
 
             score = (
                 output.get("score")
@@ -349,13 +344,15 @@ class ProductService:
         db: Session,
         user_id: str,
         project_id: str,
-        product_id: Optional[str],
+        product_id: str | None,
         name: str,
         category: str,
         platform: str,
         market: str,
-        target_customer: Optional[str] = None,
-        advantages: Optional[List[str]] = None,
+        target_customer: str | None = None,
+        advantages: list[str] | None = None,
+        *,
+        commit: bool = True,
     ) -> uuid.UUID:
         """
         查找当前 Project 下已有 Product，
@@ -367,24 +364,21 @@ class ProductService:
 
 
         if product_id:
-
-
             try:
-
-                product_uuid = uuid.UUID(product_id)
-
+                product_uuid = uuid.UUID(str(product_id))
+                owner_uuid = uuid.UUID(str(user_id))
 
                 product = (
                     db.query(Product)
                     .join(Project)
                     .filter(
                         Product.id == product_uuid,
-
-                        Project.id == project_id
+                        Product.user_id == owner_uuid,
+                        Project.id == project_id,
+                        Project.user_id == owner_uuid,
                     )
                     .first()
                 )
-
 
                 if product:
 
@@ -392,25 +386,25 @@ class ProductService:
 
                     if target_customer and target_customer != product.target_customer:
 
-                        product.target_customer = target_customer
+                        product.target_customer = target_customer  # type: ignore[assignment]  # SQLAlchemy Product legacy Column typing
 
                         updated = True
 
                     if advantages:
 
-                        product.advantages = advantages
+                        product.advantages = advantages  # type: ignore[assignment]  # SQLAlchemy Product legacy Column typing
 
                         updated = True
 
                     if updated:
-
                         db.add(product)
+                        if commit:
+                            db.commit()
+                            db.refresh(product)
+                        else:
+                            db.flush()
 
-                        db.commit()
-
-                        db.refresh(product)
-
-                    return product.id
+                    return uuid.UUID(str(product.id))
 
 
 
@@ -424,23 +418,15 @@ class ProductService:
 
         product = ProductService.create(
             db=db,
-
             user_id=user_id,
-
             project_id=project_id,
-
             name=name,
-
             category=category,
-
             platform=platform,
-
             market=market,
-
             target_customer=target_customer,
-
             advantages=advantages,
+            commit=commit,
         )
 
-
-        return product.id
+        return uuid.UUID(str(product.id))

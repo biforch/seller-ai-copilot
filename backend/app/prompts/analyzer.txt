@@ -6,12 +6,11 @@ REVIEWS: {{ reviews }}
 RATING: {{ rating }}
 DESCRIPTION: {{ description }}
 
-Output format:
-1. Strengths (3 bullet points)
-2. Weaknesses (3 bullet points)
-3. Opportunities (3 keyword suggestions)
+Rules:
+- Base strengths, weaknesses, and opportunities only on the listing data provided above
+- Do NOT invent product specs, sales numbers, certifications, or market facts not present in the input
 
-Output ONLY valid JSON format:
+Output ONLY valid JSON with exactly these fields and no additional keys:
 {
     "strengths": ["strength 1", "strength 2", "strength 3"],
     "weaknesses": ["weakness 1", "weakness 2", "weakness 3"],

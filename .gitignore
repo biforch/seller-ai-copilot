@@ -23,3 +23,9 @@ backend/*.egg-info/
 *.log
 .idea/
 .vscode/
+
+# ---- Review artifacts (local only) ----
+p1.*-review.patch
+p1.*-review.md
+p1.*-pytest.txt
+p1.*-mypy.txt

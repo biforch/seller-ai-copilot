@@ -7,8 +7,7 @@ Product Score + AI Next Action.
 但目前先用规则打分，保证稳定、免费、可解释。
 """
 
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 BENEFIT_WORDS = [
     "improve",
@@ -61,7 +60,7 @@ def _score_title(title: str) -> int:
 
 
 def _score_keyword_coverage(
-    keywords: List[str],
+    keywords: list[str],
     target: int = 10,
 ) -> int:
 
@@ -97,7 +96,7 @@ def _score_bullet(bullet: str) -> int:
 
 
 def _score_benefit_clarity(
-    bullets: List[str],
+    bullets: list[str],
 ) -> int:
 
     if not bullets:
@@ -136,9 +135,9 @@ def _score_conversion_potential(
 
 
 def compute_listing_score(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     target_keyword_count: int = 10,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """
     从一次 Listing 生成结果计算质量评分。
     result 需要包含 title / bullets / description / keywords。
@@ -181,14 +180,14 @@ def compute_listing_score(
 
 
 def build_next_actions(
-    score: Optional[Dict[str, int]],
-    generation_type_counts: Dict[str, int],
-) -> List[Dict[str, str]]:
+    score: dict[str, int] | None,
+    generation_type_counts: dict[str, int],
+) -> list[dict[str, str]]:
     """
     根据评分短板 + 缺失的生成类型，给出下一步建议。
     """
 
-    actions: List[Dict[str, str]] = []
+    actions: list[dict[str, str]] = []
 
 
     if score:

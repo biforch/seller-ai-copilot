@@ -1,15 +1,10 @@
 import uuid
 
-from typing import List, Optional
-
 from sqlalchemy.orm import Session
 
-from app.models.project import Project
-from app.models.product import Product
 from app.models.generation import Generation
-
-
-
+from app.models.product import Product
+from app.models.project import Project
 
 
 class ProjectService:
@@ -62,7 +57,7 @@ class ProjectService:
     def get_user_projects(
         db: Session,
         user_id,
-    ) -> List[dict]:
+    ) -> list[dict]:
 
 
 
@@ -143,7 +138,7 @@ class ProjectService:
         db: Session,
         project_id: str,
         user_id,
-    ) -> Optional[dict]:
+    ) -> dict | None:
 
         try:
 

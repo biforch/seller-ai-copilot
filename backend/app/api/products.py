@@ -5,12 +5,8 @@ from app.core.exceptions import AppException
 from app.core.response import success_response
 from app.core.security import get_current_user
 from app.database.session import get_db
-
 from app.schemas.product import CreateProductRequest
-
 from app.services.product import ProductService
-
-
 
 router = APIRouter()
 
@@ -30,23 +26,23 @@ async def create_product(
 ):
 
 
-    product = ProductService.create(
-
-        db=db,
-
-        user_id=current_user["id"],
-
-        project_id=request.project_id,
-
-        name=request.name,
-
-        category=request.category,
-
-        platform=request.platform,
-
-        market=request.market,
-
-    )
+    try:
+        product = ProductService.create(
+            db=db,
+            user_id=current_user["id"],
+            project_id=request.project_id,
+            name=request.name,
+            category=request.category,
+            platform=request.platform,
+            market=request.market,
+            target_customer=request.target_customer,
+            advantages=request.advantages,
+        )
+    except ValueError:
+        raise AppException(
+            "Project not found",
+            status.HTTP_404_NOT_FOUND,
+        )
 
 
 

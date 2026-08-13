@@ -1,7 +1,5 @@
 import logging
 
-from typing import Optional
-
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -10,8 +8,18 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.config import settings
 from app.schemas.common import ErrorResponse
 
-
 logger = logging.getLogger(__name__)
+
+AI_RESPONSE_INVALID = "AI_RESPONSE_INVALID"
+AI_PROVIDER_UNAVAILABLE = "AI_PROVIDER_UNAVAILABLE"
+IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
+GENERATION_IN_PROGRESS = "GENERATION_IN_PROGRESS"
+GENERATION_FINALIZE_FAILED = "GENERATION_FINALIZE_FAILED"
+GENERATION_UNRECOVERABLE = "GENERATION_UNRECOVERABLE"
+QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
+AI_RESPONSE_INVALID_MESSAGE = (
+    "The AI service returned an invalid response. Please try again."
+)
 
 
 class AppException(Exception):
@@ -21,13 +29,15 @@ class AppException(Exception):
         self,
         message: str,
         code: int = status.HTTP_400_BAD_REQUEST,
-        detail: Optional[str] = None,
-        cause: Optional[Exception] = None,
+        detail: str | None = None,
+        cause: Exception | None = None,
+        error_code: str | None = None,
     ):
         self.message = message
         self.code = code
         self.detail = detail
         self.cause = cause
+        self.error_code = error_code
 
         super().__init__(message)
 
@@ -37,24 +47,38 @@ class AppException(Exception):
         return self.message
 
 
+def ai_response_invalid_exception(cause: Exception | None = None) -> AppException:
+    """Upstream LLM output could not be validated."""
+    return AppException(
+        message=AI_RESPONSE_INVALID_MESSAGE,
+        code=status.HTTP_502_BAD_GATEWAY,
+        error_code=AI_RESPONSE_INVALID,
+        detail=None,
+        cause=cause,
+    )
+
+
 def error_response(
     code: int,
     message: str,
-    detail: Optional[str] = None,
+    detail: str | None = None,
+    error_code: str | None = None,
 ) -> dict:
     return ErrorResponse(
         code=code,
         message=message,
         detail=detail,
+        error_code=error_code,
     ).model_dump()
 
 
 def _error_response(
     code: int,
     message: str,
-    detail: Optional[str] = None,
+    detail: str | None = None,
+    error_code: str | None = None,
 ) -> dict:
-    return error_response(code, message, detail)
+    return error_response(code, message, detail, error_code=error_code)
 
 
 async def app_exception_handler(
@@ -67,6 +91,7 @@ async def app_exception_handler(
             exc.code,
             exc.message,
             exc.detail,
+            error_code=exc.error_code,
         ),
     )
 
@@ -117,7 +142,6 @@ async def unhandled_exception_handler(
     exc: Exception,
 ) -> JSONResponse:
 
-    # 完整堆栈打到后端日志，方便排查
     logger.exception(
         "Unhandled exception on %s %s",
         request.method,
@@ -139,11 +163,6 @@ async def unhandled_exception_handler(
         ),
     )
 
-    # 注意：这里注册的是裸 Exception，Starlette 会把它挂到
-    # ServerErrorMiddleware（在 CORSMiddleware 外层），
-    # 所以正常走完的响应不会经过 CORSMiddleware 加 CORS 头。
-    # 不手动加的话，前端看到的会是一个具有迷惑性的 CORS 报错，
-    # 而看不到真正的 500 原因（我们这周已经踩过两次这个坑）。
     origin = request.headers.get("origin")
 
     if origin and (

@@ -1,39 +1,30 @@
 import logging
 
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-
 from slowapi.errors import RateLimitExceeded
-
 from starlette.exceptions import HTTPException as StarletteHTTPException
-
 
 from app.api import (
     auth,
     generate,
     products,
-    user,
     project,
+    user,
 )
-
-
 from app.core.config import settings
-
 from app.core.exceptions import (
     AppException,
+    _error_response,
     app_exception_handler,
     http_exception_handler,
-    validation_exception_handler,
     unhandled_exception_handler,
-    _error_response,
+    validation_exception_handler,
 )
-
 from app.core.rate_limit import limiter
-
 from app.core.response import success_response
-
 
 logging.basicConfig(
     level=logging.INFO
@@ -85,25 +76,25 @@ async def rate_limit_handler(
 
 app.add_exception_handler(
     RateLimitExceeded,
-    rate_limit_handler,
+    rate_limit_handler,  # type: ignore[arg-type]  # Starlette handler variance
 )
 
 
 app.add_exception_handler(
     AppException,
-    app_exception_handler,
+    app_exception_handler,  # type: ignore[arg-type]
 )
 
 
 app.add_exception_handler(
     StarletteHTTPException,
-    http_exception_handler,
+    http_exception_handler,  # type: ignore[arg-type]
 )
 
 
 app.add_exception_handler(
     RequestValidationError,
-    validation_exception_handler,
+    validation_exception_handler,  # type: ignore[arg-type]
 )
 
 
@@ -194,25 +185,14 @@ async def health_check():
 
 @app.get("/")
 async def root():
-
     return success_response(
-
         data={
-
             "name": settings.APP_NAME,
-
             "docs": "/docs",
-
             "version": "1.0.0",
-
         },
-
         message="Welcome to SellerAI Copilot API",
-
     )
-
-
-
 
 
 if __name__ == "__main__":

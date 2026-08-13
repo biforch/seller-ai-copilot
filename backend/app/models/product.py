@@ -1,14 +1,13 @@
 import uuid
 
 from sqlalchemy import (
+    JSON,
     Column,
-    String,
     DateTime,
     ForeignKey,
-    JSON,
+    String,
     func,
 )
-
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 

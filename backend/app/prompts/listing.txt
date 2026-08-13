@@ -31,13 +31,15 @@ Generate:
 1. An SEO-optimized title (max 200 characters)
 2. 5 benefit-driven bullet points
 3. A conversion-focused description with HTML formatting
-4. 10 backend search keywords
+4. Exactly 10 backend search keywords
 
 Rules:
 - Avoid generic marketing words ("amazing", "best ever", "high quality")
 - Use customer language, not corporate language
 - Highlight measurable benefits, not just features
 - Follow Amazon listing policy (no medical claims, no competitor names)
+- Do NOT invent specifications, certifications, materials, warranty terms, performance metrics, or compatibility claims unless explicitly provided above in product information or key advantages
+- Use only qualitative benefit language when exact numbers or certifications are not provided
 {% if target_customer %}
 - Write in a tone that resonates with {{ target_customer }}
 {% endif %}
@@ -45,7 +47,7 @@ Rules:
 - Make sure the listed advantages above are clearly reflected in the bullets and description
 {% endif %}
 
-Output ONLY valid JSON format:
+Output ONLY valid JSON with exactly these fields and no additional keys:
 {
     "title": "your optimized title here",
     "bullets": ["bullet 1", "bullet 2", "bullet 3", "bullet 4", "bullet 5"],
