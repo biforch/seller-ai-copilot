@@ -355,3 +355,46 @@ ListingProposalDetailApiResponse = ApiResponse[ListingProposalDetailResponse]
 PatchProposalDecisionsApiResponse = ApiResponse[PatchProposalDecisionsResponse]
 ApproveProposalApiResponse = ApiResponse[ApproveProposalResponse]
 RejectProposalApiResponse = ApiResponse[RejectProposalResponse]
+
+
+class ListingProposalListItemResponse(BaseModel):
+    """Lightweight listing proposal fields for paginated list responses."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    product_id: uuid.UUID
+    base_version_id: uuid.UUID | None
+    approved_version_id: uuid.UUID | None
+    status: str
+    revision: int
+    candidate_title: str
+    generation_request_id: uuid.UUID | None
+    reviewed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_proposal(cls, proposal: Any) -> ListingProposalListItemResponse:
+        snapshot = ListingSnapshot.model_validate(proposal.candidate_snapshot)
+        return cls(
+            id=proposal.id,
+            product_id=proposal.product_id,
+            base_version_id=proposal.base_version_id,
+            approved_version_id=proposal.approved_version_id,
+            status=proposal.status,
+            revision=proposal.revision,
+            candidate_title=snapshot.title,
+            generation_request_id=proposal.generation_request_id,
+            reviewed_at=proposal.reviewed_at,
+            created_at=proposal.created_at,
+            updated_at=proposal.updated_at,
+        )
+
+
+class ListingProposalPageResponse(BaseModel):
+    items: list[ListingProposalListItemResponse]
+    pagination: PaginationMeta
+
+
+ListingProposalPageApiResponse = ApiResponse[ListingProposalPageResponse]

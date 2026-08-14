@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, status
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import AppException
 from app.core.security import get_current_user
 from app.database.session import get_db
 from app.schemas.common import ErrorResponse
@@ -24,6 +27,9 @@ from app.schemas.listing import (
     ListingProposalDetailApiResponse,
     ListingProposalDetailResponse,
     ListingProposalDiffResponse,
+    ListingProposalListItemResponse,
+    ListingProposalPageApiResponse,
+    ListingProposalPageResponse,
     ListingProposalResponse,
     ListingScoreResponse,
     ListingVersionPageApiResponse,
@@ -41,6 +47,7 @@ from app.services.idempotency import IDEMPOTENCY_KEY_HEADER, require_idempotency
 from app.services.listing_proposal import (
     approve_listing_proposal,
     get_listing_proposal_detail,
+    list_listing_proposals,
     patch_proposal_decisions,
     reject_listing_proposal,
 )
@@ -54,12 +61,24 @@ from app.services.scoring import compute_listing_score
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
+ProposalListStatus = Literal["reviewing", "approved", "rejected", "superseded", "all"]
+
 _LISTING_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "Not found"},
     status.HTTP_409_CONFLICT: {"model": ErrorResponse, "description": "Conflict"},
     status.HTTP_422_UNPROCESSABLE_ENTITY: {
         "model": ErrorResponse,
         "description": "Validation error",
+    },
+}
+
+_LISTING_PROPOSAL_LIST_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    **_LISTING_ERROR_RESPONSES,
+    status.HTTP_500_INTERNAL_SERVER_ERROR: {
+        "model": ErrorResponse,
+        "description": "Internal server error",
     },
 }
 
@@ -109,6 +128,24 @@ def _build_proposal_detail_payload(detail) -> ListingProposalDetailResponse:
         ),
         diff=ListingProposalDiffResponse.from_diff(detail.diff),
     )
+
+
+def _build_proposal_list_items(proposals) -> list[ListingProposalListItemResponse]:
+    items: list[ListingProposalListItemResponse] = []
+    for proposal in proposals:
+        try:
+            items.append(ListingProposalListItemResponse.from_proposal(proposal))
+        except ValidationError:
+            logger.warning(
+                "Invalid proposal candidate snapshot proposal_id=%s product_id=%s category=validation_error",
+                proposal.id,
+                proposal.product_id,
+            )
+            raise AppException(
+                message="Internal server error",
+                code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            ) from None
+    return items
 
 
 @router.post(
@@ -207,6 +244,38 @@ def get_listing_versions(
     )
     envelope = ListingVersionPageApiResponse(code=status.HTTP_200_OK, message="success", data=payload)
     return envelope
+
+
+@router.get(
+    "/{product_id}/listing/proposals",
+    response_model=ListingProposalPageApiResponse,
+    responses=_LISTING_PROPOSAL_LIST_ERROR_RESPONSES,
+)
+def list_product_listing_proposals(
+    product_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status_filter: ProposalListStatus = Query("reviewing", alias="status"),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _product, proposals, total = list_listing_proposals(
+        db,
+        product_id=product_id,
+        current_user_id=uuid.UUID(str(current_user["id"])),
+        page=page,
+        page_size=page_size,
+        status_filter=status_filter,
+    )
+    payload = ListingProposalPageResponse(
+        items=_build_proposal_list_items(proposals),
+        pagination=build_pagination_meta(page, page_size, total),
+    )
+    return ListingProposalPageApiResponse(
+        code=status.HTTP_200_OK,
+        message="success",
+        data=payload,
+    )
 
 
 @router.get(

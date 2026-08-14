@@ -35,6 +35,8 @@ from app.schemas.listing import (
 from app.services.listing_diff import build_listing_diff, compute_final_snapshot
 from app.services.listing_version import set_product_current_listing_version
 
+PROPOSAL_LIST_STATUS_ALL = "all"
+
 
 @dataclass(frozen=True)
 class ApproveProposalResult:
@@ -90,6 +92,58 @@ def _get_proposal_for_product(
         )
         .one_or_none()
     )
+
+
+def _get_owned_product_for_read(
+    db: Session,
+    product_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> Product:
+    product = (
+        db.query(Product)
+        .filter(Product.id == product_id, Product.user_id == user_id)
+        .one_or_none()
+    )
+    if product is None:
+        raise AppException(
+            message="Product not found",
+            code=status.HTTP_404_NOT_FOUND,
+        )
+    return product
+
+
+def list_listing_proposals(
+    db: Session,
+    *,
+    product_id: uuid.UUID,
+    current_user_id: uuid.UUID,
+    page: int,
+    page_size: int,
+    status_filter: str = ListingProposalStatus.REVIEWING,
+) -> tuple[Product, list[ListingProposal], int]:
+    """List proposals for an owned product with fixed stable ordering."""
+    product = _get_owned_product_for_read(db, product_id, current_user_id)
+
+    count_query = db.query(func.count(ListingProposal.id)).filter(
+        ListingProposal.product_id == product_id,
+    )
+    items_query = db.query(ListingProposal).filter(ListingProposal.product_id == product_id)
+
+    if status_filter != PROPOSAL_LIST_STATUS_ALL:
+        count_query = count_query.filter(ListingProposal.status == status_filter)
+        items_query = items_query.filter(ListingProposal.status == status_filter)
+
+    total = count_query.scalar() or 0
+    proposals = (
+        items_query.order_by(
+            ListingProposal.created_at.desc(),
+            ListingProposal.id.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return product, proposals, total
 
 
 def _snapshot_to_version_fields(snapshot: ListingSnapshot) -> dict[str, object]:

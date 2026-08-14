@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import threading
 import uuid
+from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
 
 from app.core.exceptions import (
@@ -24,7 +26,12 @@ from app.models.listing_version import ListingVersion
 from app.models.product import Product
 from app.schemas.ai_output import ListingAIOutput
 from app.schemas.listing import FieldDecisions, listing_snapshot_from_ai_output
-from app.services.listing_proposal import create_proposal_from_generation
+from app.services.listing_proposal import (
+    approve_listing_proposal,
+    create_proposal_from_generation,
+    list_listing_proposals,
+    reject_listing_proposal,
+)
 from app.services.listing_version import import_listing_version
 from app.services.openai import OpenAIService
 from tests.fixtures.ai_outputs import (
@@ -53,6 +60,98 @@ def _approve_url(product_id, proposal_id) -> str:
 
 def _reject_url(product_id, proposal_id) -> str:
     return f"/api/v1/products/{product_id}/listing/proposals/{proposal_id}/reject"
+
+
+def _list_url(product_id) -> str:
+    return f"/api/v1/products/{product_id}/listing/proposals"
+
+
+_LIST_ITEM_KEYS = frozenset(
+    {
+        "id",
+        "product_id",
+        "base_version_id",
+        "approved_version_id",
+        "status",
+        "revision",
+        "candidate_title",
+        "generation_request_id",
+        "reviewed_at",
+        "created_at",
+        "updated_at",
+    }
+)
+
+
+def _create_proposal_for_tenant(db_session, tenant, *, title: str | None = None):
+    generation_request = create_generation_request(
+        db_session,
+        user_id=tenant["user"].id,
+        product_id=tenant["product"].id,
+        project_id=tenant["project"].id,
+    )
+    snapshot = sample_listing_snapshot()
+    if title is not None:
+        snapshot = sample_listing_snapshot(title=title)
+    return create_proposal_from_generation(
+        db_session,
+        product_id=tenant["product"].id,
+        current_user_id=tenant["user"].id,
+        generation_request_id=generation_request.id,
+        candidate=snapshot,
+    )
+
+
+def _create_proposals_for_tenant(db_session, tenant, count: int):
+    return [
+        _create_proposal_for_tenant(db_session, tenant, title=f"List Proposal {index}")
+        for index in range(count)
+    ]
+
+
+def _run_list_listing_proposals_with_sql_capture(
+    engine,
+    db_session,
+    tenant,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    status_filter: str = ListingProposalStatus.REVIEWING,
+) -> list[str]:
+    product_id = tenant["product"].id
+    user_id = tenant["user"].id
+    db_session.expunge_all()
+
+    statements: list[str] = []
+
+    def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _before_cursor_execute)
+    try:
+        list_listing_proposals(
+            db_session,
+            product_id=product_id,
+            current_user_id=user_id,
+            page=page,
+            page_size=page_size,
+            status_filter=status_filter,
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", _before_cursor_execute)
+    return statements
+
+
+def _assert_three_list_proposals_selects(statements: list[str]) -> None:
+    selects = [statement for statement in statements if statement.lstrip().lower().startswith("select")]
+    assert len(selects) == 3
+    lowered = [statement.lower() for statement in selects]
+    assert any("from products" in statement for statement in lowered)
+    assert any("count(" in statement and "listing_proposals" in statement for statement in lowered)
+    assert any(
+        "from listing_proposals" in statement and "order by" in statement and "limit" in statement
+        for statement in lowered
+    )
 
 
 def _assert_no_internal_fields(payload: dict) -> None:
@@ -1250,12 +1349,452 @@ def test_proposal_detail_corrupt_candidate_error_does_not_leak_internals(
     assert "only title" not in serialized
 
 
+# --- F. Proposal list API ---
+
+
+def test_proposal_list_unauthenticated_returns_403(client, tenant_bundle, db_session):
+    tenant = tenant_bundle("prop-list-unauth")
+    _create_proposal_via_service(db_session, tenant)
+    response = client.get(_list_url(tenant["product"].id))
+    assert response.status_code == 403
+
+
+def test_proposal_list_empty_returns_200(client, tenant_bundle, auth_header):
+    tenant = tenant_bundle("prop-list-empty")
+    response = client.get(
+        _list_url(tenant["product"].id),
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["items"] == []
+    assert data["pagination"]["total"] == 0
+    assert data["pagination"]["total_pages"] == 0
+
+
+def test_proposal_list_defaults_to_reviewing(client, tenant_bundle, auth_header, db_session):
+    tenant = tenant_bundle("prop-list-default-reviewing")
+    approved = _create_proposal_for_tenant(db_session, tenant, title="Approved Title")
+    approve_listing_proposal(
+        db_session,
+        product_id=tenant["product"].id,
+        current_user_id=tenant["user"].id,
+        proposal_id=approved.id,
+        expected_revision=approved.revision,
+        decisions=accept_all_decisions(),
+    )
+    reviewing = _create_proposal_for_tenant(db_session, tenant, title="Reviewing Title")
+    response = client.get(
+        _list_url(tenant["product"].id),
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert len(items) == 1
+    assert items[0]["id"] == str(reviewing.id)
+    assert items[0]["status"] == ListingProposalStatus.REVIEWING
+
+
+def test_proposal_list_status_approved(client, tenant_bundle, auth_header, db_session):
+    tenant = tenant_bundle("prop-list-approved")
+    _create_proposal_for_tenant(db_session, tenant, title="Still Reviewing")
+    approved = _create_proposal_for_tenant(db_session, tenant, title="Approved Only")
+    approve_listing_proposal(
+        db_session,
+        product_id=tenant["product"].id,
+        current_user_id=tenant["user"].id,
+        proposal_id=approved.id,
+        expected_revision=approved.revision,
+        decisions=accept_all_decisions(),
+    )
+    response = client.get(
+        f"{_list_url(tenant['product'].id)}?status=approved",
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert len(items) == 1
+    assert items[0]["id"] == str(approved.id)
+    assert items[0]["status"] == ListingProposalStatus.APPROVED
+
+
+def test_proposal_list_status_rejected(client, tenant_bundle, auth_header, db_session):
+    tenant = tenant_bundle("prop-list-rejected")
+    rejected = _create_proposal_for_tenant(db_session, tenant, title="Rejected Title")
+    reject_listing_proposal(
+        db_session,
+        product_id=tenant["product"].id,
+        current_user_id=tenant["user"].id,
+        proposal_id=rejected.id,
+        expected_revision=rejected.revision,
+    )
+    response = client.get(
+        f"{_list_url(tenant['product'].id)}?status=rejected",
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert len(items) == 1
+    assert items[0]["id"] == str(rejected.id)
+    assert items[0]["status"] == ListingProposalStatus.REJECTED
+
+
+def test_proposal_list_status_superseded(client, tenant_bundle, auth_header, db_session):
+    tenant = tenant_bundle("prop-list-superseded")
+    first = _create_proposal_for_tenant(db_session, tenant, title="Superseded Title")
+    second = _create_proposal_for_tenant(db_session, tenant, title="Approved Title")
+    approve_listing_proposal(
+        db_session,
+        product_id=tenant["product"].id,
+        current_user_id=tenant["user"].id,
+        proposal_id=second.id,
+        expected_revision=second.revision,
+        decisions=accept_all_decisions(),
+    )
+    db_session.refresh(first)
+    assert first.status == ListingProposalStatus.SUPERSEDED
+    response = client.get(
+        f"{_list_url(tenant['product'].id)}?status=superseded",
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert len(items) == 1
+    assert items[0]["id"] == str(first.id)
+    assert items[0]["status"] == ListingProposalStatus.SUPERSEDED
+
+
+def test_proposal_list_status_all_returns_every_status(client, tenant_bundle, auth_header, db_session):
+    tenant = tenant_bundle("prop-list-all-statuses")
+    rejected = _create_proposal_for_tenant(db_session, tenant, title="All Rejected")
+    reject_listing_proposal(
+        db_session,
+        product_id=tenant["product"].id,
+        current_user_id=tenant["user"].id,
+        proposal_id=rejected.id,
+        expected_revision=rejected.revision,
+    )
+    approved = _create_proposal_for_tenant(db_session, tenant, title="All Approved")
+    approve_listing_proposal(
+        db_session,
+        product_id=tenant["product"].id,
+        current_user_id=tenant["user"].id,
+        proposal_id=approved.id,
+        expected_revision=approved.revision,
+        decisions=accept_all_decisions(),
+    )
+    superseded = _create_proposal_for_tenant(db_session, tenant, title="All Superseded")
+    newer = _create_proposal_for_tenant(db_session, tenant, title="All Newer Approved")
+    approve_listing_proposal(
+        db_session,
+        product_id=tenant["product"].id,
+        current_user_id=tenant["user"].id,
+        proposal_id=newer.id,
+        expected_revision=newer.revision,
+        decisions=accept_all_decisions(),
+    )
+    reviewing = _create_proposal_for_tenant(db_session, tenant, title="All Reviewing")
+    db_session.refresh(superseded)
+    assert superseded.status == ListingProposalStatus.SUPERSEDED
+
+    response = client.get(
+        f"{_list_url(tenant['product'].id)}?status=all",
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["pagination"]["total"] == 5
+    statuses = {item["status"] for item in response.json()["data"]["items"]}
+    assert statuses == {
+        ListingProposalStatus.REVIEWING,
+        ListingProposalStatus.REJECTED,
+        ListingProposalStatus.APPROVED,
+        ListingProposalStatus.SUPERSEDED,
+    }
+    assert str(reviewing.id) in {item["id"] for item in response.json()["data"]["items"]}
+
+
+def test_proposal_list_invalid_status_returns_422(client, tenant_bundle, auth_header):
+    tenant = tenant_bundle("prop-list-invalid-status")
+    response = client.get(
+        f"{_list_url(tenant['product'].id)}?status=unknown",
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 422
+
+
+def test_proposal_list_page_validation_returns_422(client, tenant_bundle, auth_header):
+    tenant = tenant_bundle("prop-list-page-validation")
+    assert (
+        client.get(
+            f"{_list_url(tenant['product'].id)}?page=0",
+            headers=auth_header(tenant["user"]),
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            f"{_list_url(tenant['product'].id)}?page_size=0",
+            headers=auth_header(tenant["user"]),
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            f"{_list_url(tenant['product'].id)}?page_size=101",
+            headers=auth_header(tenant["user"]),
+        ).status_code
+        == 422
+    )
+
+
+def test_proposal_list_pagination_totals(client, tenant_bundle, auth_header, db_session):
+    tenant = tenant_bundle("prop-list-pagination")
+    _create_proposals_for_tenant(db_session, tenant, 5)
+    response = client.get(
+        f"{_list_url(tenant['product'].id)}?status=all&page=1&page_size=2",
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["pagination"]["total"] == 5
+    assert data["pagination"]["total_pages"] == 3
+    assert data["pagination"]["has_next"] is True
+    assert data["pagination"]["has_previous"] is False
+    assert len(data["items"]) == 2
+
+
+def test_proposal_list_beyond_last_page_returns_empty_items(
+    client, tenant_bundle, auth_header, db_session
+):
+    tenant = tenant_bundle("prop-list-beyond-page")
+    _create_proposal_for_tenant(db_session, tenant)
+    response = client.get(
+        f"{_list_url(tenant['product'].id)}?status=all&page=99&page_size=20",
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["items"] == []
+
+
+def test_proposal_list_default_sort_created_at_desc(client, tenant_bundle, auth_header, db_session):
+    tenant = tenant_bundle("prop-list-sort-created-at")
+    proposals = _create_proposals_for_tenant(db_session, tenant, 3)
+    base_created_at = datetime(2026, 2, 1, 10, 0, 0, tzinfo=UTC)
+    for index, proposal in enumerate(proposals):
+        db_session.query(ListingProposal).filter(ListingProposal.id == proposal.id).update(
+            {"created_at": base_created_at.replace(minute=index)},
+            synchronize_session=False,
+        )
+    db_session.commit()
+    response = client.get(
+        f"{_list_url(tenant['product'].id)}?status=all",
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 200
+    returned_ids = [item["id"] for item in response.json()["data"]["items"]]
+    db_session.expire_all()
+    expected_ids = [
+        str(row.id)
+        for row in (
+            db_session.query(ListingProposal)
+            .filter(ListingProposal.product_id == tenant["product"].id)
+            .order_by(ListingProposal.created_at.desc(), ListingProposal.id.desc())
+            .all()
+        )
+    ]
+    assert returned_ids == expected_ids
+    created_at_values = [item["created_at"] for item in response.json()["data"]["items"]]
+    assert created_at_values == sorted(created_at_values, reverse=True)
+
+
+def test_proposal_list_pagination_stable_with_same_created_at(
+    client, tenant_bundle, auth_header, db_session
+):
+    tenant = tenant_bundle("prop-list-stable-created-at")
+    proposals = _create_proposals_for_tenant(db_session, tenant, 4)
+    shared_created_at = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    db_session.query(ListingProposal).filter(
+        ListingProposal.id.in_([proposal.id for proposal in proposals])
+    ).update({"created_at": shared_created_at}, synchronize_session=False)
+    db_session.commit()
+
+    first_page = client.get(
+        f"{_list_url(tenant['product'].id)}?status=all&page=1&page_size=2",
+        headers=auth_header(tenant["user"]),
+    ).json()["data"]["items"]
+    second_page = client.get(
+        f"{_list_url(tenant['product'].id)}?status=all&page=2&page_size=2",
+        headers=auth_header(tenant["user"]),
+    ).json()["data"]["items"]
+    first_ids = {item["id"] for item in first_page}
+    second_ids = {item["id"] for item in second_page}
+    assert first_ids.isdisjoint(second_ids)
+    assert len(first_ids | second_ids) == 4
+
+    repeat_first = client.get(
+        f"{_list_url(tenant['product'].id)}?status=all&page=1&page_size=2",
+        headers=auth_header(tenant["user"]),
+    ).json()["data"]["items"]
+    assert [item["id"] for item in first_page] == [item["id"] for item in repeat_first]
+
+
+def test_proposal_list_cross_tenant_returns_404(client, tenant_bundle, auth_header):
+    owner = tenant_bundle("prop-list-cross-owner")
+    other = tenant_bundle("prop-list-cross-other")
+    response = client.get(
+        _list_url(owner["product"].id),
+        headers=auth_header(other["user"]),
+    )
+    assert response.status_code == 404
+    assert response.json()["message"] == "Product not found"
+
+
+def test_proposal_list_missing_product_returns_404(client, tenant_bundle, auth_header):
+    tenant = tenant_bundle("prop-list-missing-product")
+    missing_id = uuid.uuid4()
+    response = client.get(
+        _list_url(missing_id),
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 404
+    assert response.json()["message"] == "Product not found"
+
+
+def test_proposal_list_does_not_leak_other_products(
+    client, tenant_bundle, auth_header, db_session, user_factory
+):
+    tenant = tenant_bundle("prop-list-scope")
+    user = tenant["user"]
+    other_product = Product(
+        user_id=user.id,
+        project_id=tenant["project"].id,
+        name="Other product",
+        category="Electronics",
+        platform="Amazon",
+        market="USA",
+    )
+    db_session.add(other_product)
+    db_session.commit()
+    db_session.refresh(other_product)
+
+    primary = _create_proposal_for_tenant(db_session, tenant, title="Primary Product Proposal")
+    other_generation = create_generation_request(
+        db_session,
+        user_id=user.id,
+        product_id=other_product.id,
+        project_id=tenant["project"].id,
+    )
+    create_proposal_from_generation(
+        db_session,
+        product_id=other_product.id,
+        current_user_id=user.id,
+        generation_request_id=other_generation.id,
+        candidate=sample_listing_snapshot(title="Other Product Proposal"),
+    )
+
+    response = client.get(
+        f"{_list_url(tenant['product'].id)}?status=all",
+        headers=auth_header(user),
+    )
+    assert response.status_code == 200
+    items = response.json()["data"]["items"]
+    assert len(items) == 1
+    assert items[0]["id"] == str(primary.id)
+    assert items[0]["product_id"] == str(tenant["product"].id)
+
+
+def test_proposal_list_items_are_lightweight(client, tenant_bundle, auth_header, db_session):
+    tenant = tenant_bundle("prop-list-lightweight")
+    proposal, generation_request = _create_proposal_via_service(db_session, tenant)
+    response = client.get(
+        _list_url(tenant["product"].id),
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 200
+    item = response.json()["data"]["items"][0]
+    assert set(item.keys()) == _LIST_ITEM_KEYS
+    assert item["candidate_title"] == sample_listing_snapshot().title
+    assert item["generation_request_id"] == str(generation_request.id)
+    serialized = json.dumps(response.json()).lower()
+    for forbidden in (
+        "candidate_snapshot",
+        "field_decisions",
+        "bullets",
+        "backend_keywords",
+        "description",
+        "request_hash",
+        "operation_idempotency_key",
+        "idempotency_key",
+        "traceback",
+    ):
+        assert forbidden not in serialized
+    _assert_no_internal_fields(response.json())
+
+
+def test_proposal_list_corrupt_candidate_returns_generic_500(
+    client, tenant_bundle, auth_header, db_session
+):
+    tenant = tenant_bundle("prop-list-corrupt")
+    proposal, _ = _create_proposal_via_service(db_session, tenant)
+    db_session.query(ListingProposal).filter(ListingProposal.id == proposal.id).update(
+        {"candidate_snapshot": {"title": "only title", "sql": "select * from users"}}
+    )
+    db_session.commit()
+    response = client.get(
+        _list_url(tenant["product"].id),
+        headers=auth_header(tenant["user"]),
+    )
+    assert response.status_code == 500
+    assert response.json()["message"] == "Internal server error"
+    serialized = json.dumps(response.json()).lower()
+    assert "traceback" not in serialized
+    assert "select " not in serialized
+    assert "only title" not in serialized
+
+
+def test_list_listing_proposals_executes_three_sql_statements_with_25_rows(
+    engine,
+    db_session,
+    tenant_bundle,
+):
+    tenant = tenant_bundle("prop-list-sql-25")
+    _create_proposals_for_tenant(db_session, tenant, 25)
+    statements = _run_list_listing_proposals_with_sql_capture(
+        engine,
+        db_session,
+        tenant,
+        page=1,
+        page_size=20,
+        status_filter="all",
+    )
+    _assert_three_list_proposals_selects(statements)
+
+
+def test_list_listing_proposals_executes_three_sql_statements_with_50_rows(
+    engine,
+    db_session,
+    tenant_bundle,
+):
+    tenant = tenant_bundle("prop-list-sql-50")
+    _create_proposals_for_tenant(db_session, tenant, 50)
+    statements = _run_list_listing_proposals_with_sql_capture(
+        engine,
+        db_session,
+        tenant,
+        page=2,
+        page_size=20,
+        status_filter="all",
+    )
+    _assert_three_list_proposals_selects(statements)
+
+
 # --- G. OpenAPI ---
 
 
 def test_openapi_includes_proposal_detail_path():
     paths = app.openapi()["paths"]
     assert "/api/v1/products/{product_id}/listing/proposals/{proposal_id}" in paths
+    assert "/api/v1/products/{product_id}/listing/proposals" in paths
 
 
 def test_openapi_includes_proposal_mutation_paths():
@@ -1268,6 +1807,8 @@ def test_openapi_includes_proposal_mutation_paths():
 def test_openapi_proposal_responses_have_typed_schemas():
     schema = app.openapi()["components"]["schemas"]
     assert "ListingProposalDetailResponse" in schema
+    assert "ListingProposalPageResponse" in schema
+    assert "ListingProposalListItemResponse" in schema
     assert "ApproveProposalResponse" in schema
     assert "RejectProposalResponse" in schema
 
@@ -1276,6 +1817,10 @@ def test_openapi_proposal_paths_declare_error_responses():
     paths = app.openapi()["paths"]
     detail = paths["/api/v1/products/{product_id}/listing/proposals/{proposal_id}"]["get"]
     assert "404" in detail["responses"]
+    listing = paths["/api/v1/products/{product_id}/listing/proposals"]["get"]
+    assert "404" in listing["responses"]
+    assert "422" in listing["responses"]
+    assert "500" in listing["responses"]
     approve = paths["/api/v1/products/{product_id}/listing/proposals/{proposal_id}/approve"]["post"]
     assert "409" in approve["responses"]
     assert "422" in approve["responses"]
