@@ -28,6 +28,9 @@ backend/*.egg-info/
 /p1-listing-*.md
 /p1-listing-*.patch
 /p1-listing-*.txt
+/p2-listing-*.md
+/p2-listing-*.patch
+/p2-listing-*.txt
 p1.*-review.patch
 p1.*-review.md
 p1.*-pytest.txt
