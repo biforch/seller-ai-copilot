@@ -63,10 +63,9 @@ export function ListingResultView({ result }: ListingResultProps) {
           <h3 className="text-sm font-medium text-gray-500">Description</h3>
           <CopyButton text={result.description} id="description" />
         </div>
-        <div
-          className="prose prose-sm max-w-none text-gray-800"
-          dangerouslySetInnerHTML={{ __html: result.description }}
-        />
+        <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">
+          {result.description}
+        </p>
       </div>
 
       <div className="bg-white rounded-xl border p-6">
