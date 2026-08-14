@@ -40,6 +40,9 @@ backend/*.egg-info/
 /p4b-listing-*.md
 /p4b-listing-*.patch
 /p4b-listing-*.txt
+/security-frontend-xss-*.md
+/security-frontend-xss-*.patch
+/security-frontend-xss-*.txt
 p1.*-review.patch
 p1.*-review.md
 p1.*-pytest.txt
