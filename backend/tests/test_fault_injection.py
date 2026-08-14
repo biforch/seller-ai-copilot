@@ -18,6 +18,7 @@ from app.core.exceptions import (
 )
 from app.models.generation import Generation
 from app.models.generation_request import GenerationRequest, GenerationRequestStatus
+from app.models.listing_proposal import ListingProposal
 from app.models.product import Product
 from app.models.project import Project
 from app.models.user import User
@@ -754,7 +755,12 @@ def test_llm_invalid_response_marks_failed_and_releases_quota(
     )
     assert record.status == GenerationRequestStatus.FAILED
     assert tenant["user"].reserved_tokens == 0
-    assert db_session.query(Generation).count() == 0
+    assert (
+        db_session.query(Generation)
+        .filter(Generation.user_id == tenant["user"].id)
+        .count()
+        == 0
+    )
 
 
 def test_succeeded_request_cannot_be_overwritten_by_failure_path(db_session, user_factory):
@@ -822,3 +828,453 @@ async def test_failed_key_replay_does_not_call_llm(
     )
     assert second.status_code == 409
     assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_tx2_proposal_flush_failure_rolls_back_entire_finalize(engine, monkeypatch):
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    user, project, body, key, request_hash, _canonical = _listing_fixture(session_factory)
+    llm_calls = {"count": 0}
+
+    async def fake_listing(self, **kwargs):
+        llm_calls["count"] += 1
+        result = dict(VALID_LISTING_OUTPUT)
+        result["tokens_used"] = 20
+        return result
+
+    monkeypatch.setattr(OpenAIService, "generate_listing", fake_listing)
+    monkeypatch.setattr(
+        "app.services.generation_executor.create_proposal_in_transaction",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("proposal flush failed")),
+    )
+
+    db = session_factory()
+    try:
+        with pytest.raises(AppException) as exc_info:
+            await GenerationExecutor(db).execute_listing(
+                user_id=str(user.id),
+                body=body,
+                idempotency_key=key,
+                request_hash=request_hash,
+            )
+        assert exc_info.value.error_code == GENERATION_FINALIZE_FAILED
+    finally:
+        db.close()
+
+    verify = session_factory()
+    try:
+        _assert_failed_cleanup(
+            verify,
+            user_id=user.id,
+            idempotency_key=key,
+            llm_calls=llm_calls["count"],
+        )
+        proposal_count = (
+            verify.query(ListingProposal)
+            .join(Product, ListingProposal.product_id == Product.id)
+            .filter(Product.user_id == user.id)
+            .count()
+        )
+        assert proposal_count == 0
+        product = verify.query(Product).filter(Product.user_id == user.id).one_or_none()
+        if product is not None:
+            assert product.current_listing_version_id is None
+    finally:
+        verify.close()
+
+
+@pytest.mark.asyncio
+async def test_tx2_commit_failure_leaves_no_proposal(engine, monkeypatch):
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    user, project, body, key, request_hash, _canonical = _listing_fixture(session_factory)
+    llm_calls = {"count": 0}
+
+    async def fake_listing(self, **kwargs):
+        llm_calls["count"] += 1
+        result = dict(VALID_LISTING_OUTPUT)
+        result["tokens_used"] = 20
+        return result
+
+    monkeypatch.setattr(OpenAIService, "generate_listing", fake_listing)
+
+    original_finalize = GenerationExecutor._finalize_success
+
+    def finalize_with_commit_failure(self, *args, **kwargs):
+        self.db.commit = lambda: (_ for _ in ()).throw(SQLAlchemyError("tx2 commit failed"))
+        return original_finalize(self, *args, **kwargs)
+
+    monkeypatch.setattr(GenerationExecutor, "_finalize_success", finalize_with_commit_failure)
+
+    db = session_factory()
+    try:
+        with pytest.raises(AppException):
+            await GenerationExecutor(db).execute_listing(
+                user_id=str(user.id),
+                body=body,
+                idempotency_key=key,
+                request_hash=request_hash,
+            )
+    finally:
+        db.close()
+
+    verify = session_factory()
+    try:
+        assert llm_calls["count"] == 1
+        record = (
+            verify.query(GenerationRequest)
+            .filter(GenerationRequest.idempotency_key == key)
+            .one()
+        )
+        proposal_count = (
+            verify.query(ListingProposal)
+            .filter(ListingProposal.generation_request_id == record.id)
+            .count()
+        )
+        assert proposal_count == 0
+        assert verify.query(Generation).filter(Generation.user_id == user.id).count() == 0
+    finally:
+        verify.close()
+
+
+@pytest.mark.asyncio
+async def test_listing_finalize_locks_product_before_capturing_base(engine, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    import app.services.generation_executor as generation_executor_module
+
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    user, project, body, key, _request_hash, _canonical = _listing_fixture(session_factory)
+    db = session_factory()
+    try:
+        product = Product(
+            user_id=user.id,
+            project_id=project.id,
+            name="Lock Product",
+            category="Electronics",
+            platform="Amazon",
+            market="USA",
+        )
+        db.add(product)
+        db.commit()
+        db.refresh(product)
+    finally:
+        db.close()
+
+    body.product_id = str(product.id)
+    lock_state = {"nowait_failed": False}
+    original_create = generation_executor_module.create_proposal_in_transaction
+
+    def create_with_lock_check(db, **kwargs):
+        locked_product = kwargs["product"]
+        probe = session_factory()
+        try:
+            probe.query(Product).filter(Product.id == locked_product.id).with_for_update(
+                nowait=True
+            ).one()
+        except OperationalError:
+            lock_state["nowait_failed"] = True
+        finally:
+            probe.close()
+        return original_create(db, **kwargs)
+
+    monkeypatch.setattr(
+        generation_executor_module,
+        "create_proposal_in_transaction",
+        create_with_lock_check,
+    )
+
+    async def fake_listing(self, **kwargs):
+        result = dict(VALID_LISTING_OUTPUT)
+        result["tokens_used"] = 20
+        return result
+
+    monkeypatch.setattr(OpenAIService, "generate_listing", fake_listing)
+
+    db = session_factory()
+    try:
+        await GenerationExecutor(db).execute_listing(
+            user_id=str(user.id),
+            body=body,
+            idempotency_key=key,
+            request_hash=canonical_request_hash(
+                {
+                    "project_id": str(project.id),
+                    "product_id": str(product.id),
+                    "name": body.name,
+                    "category": body.category,
+                    "market": body.market,
+                    "platform": body.platform,
+                    "target_customer": None,
+                    "advantages": None,
+                }
+            ),
+        )
+    finally:
+        db.close()
+
+    assert lock_state["nowait_failed"] is True
+
+    after = session_factory()
+    try:
+        after.query(Product).filter(Product.id == product.id).with_for_update(nowait=True).one()
+        after.commit()
+    finally:
+        after.close()
+
+
+@pytest.mark.asyncio
+async def test_listing_finalize_uses_latest_committed_current_as_base(engine, monkeypatch):
+    import asyncio
+    import threading
+
+    from app.services.listing_version import import_listing_version
+    from tests.test_listing_versions import sample_listing_snapshot
+
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    user, project, body, key, _request_hash, _canonical = _listing_fixture(session_factory)
+    setup = session_factory()
+    try:
+        product = Product(
+            user_id=user.id,
+            project_id=project.id,
+            name="Base Product",
+            category="Electronics",
+            platform="Amazon",
+            market="USA",
+        )
+        setup.add(product)
+        setup.flush()
+        v1 = import_listing_version(
+            setup,
+            product_id=product.id,
+            current_user_id=user.id,
+            snapshot=sample_listing_snapshot(title="Version One"),
+            idempotency_key=str(uuid.uuid4()),
+            request_hash=str(uuid.uuid4()),
+        )
+        setup.commit()
+        product_id = product.id
+        v1_id = v1.version.id
+    finally:
+        setup.close()
+
+    body.product_id = str(product_id)
+    request_hash = canonical_request_hash(
+        {
+            "project_id": str(project.id),
+            "product_id": str(product_id),
+            "name": body.name,
+            "category": body.category,
+            "market": body.market,
+            "platform": body.platform,
+            "target_customer": None,
+            "advantages": None,
+        }
+    )
+    sync = {
+        "ready_for_base_update": threading.Event(),
+        "base_update_done": threading.Event(),
+    }
+    thread_errors: list[BaseException] = []
+    original_finalize = GenerationExecutor._finalize_success
+
+    def finalize_pause_before_product_lock(self, *args, **kwargs):
+        if kwargs.get("listing_proposal_candidate") is not None:
+            sync["ready_for_base_update"].set()
+            if not sync["base_update_done"].wait(timeout=5):
+                raise TimeoutError("timed out waiting for committed current update")
+        return original_finalize(self, *args, **kwargs)
+
+    monkeypatch.setattr(GenerationExecutor, "_finalize_success", finalize_pause_before_product_lock)
+
+    async def fake_listing(self, **kwargs):
+        result = dict(VALID_LISTING_OUTPUT)
+        result["tokens_used"] = 20
+        return result
+
+    monkeypatch.setattr(OpenAIService, "generate_listing", fake_listing)
+
+    def run_finalize():
+        db = session_factory()
+        try:
+            asyncio.run(
+                GenerationExecutor(db).execute_listing(
+                    user_id=str(user.id),
+                    body=body,
+                    idempotency_key=key,
+                    request_hash=request_hash,
+                )
+            )
+        except BaseException as exc:
+            thread_errors.append(exc)
+        finally:
+            db.close()
+
+    worker = threading.Thread(target=run_finalize)
+    worker.start()
+    assert sync["ready_for_base_update"].wait(timeout=5), "finalize should pause before product lock"
+
+    update_session = session_factory()
+    v2_id = None
+    try:
+        v2 = import_listing_version(
+            update_session,
+            product_id=product_id,
+            current_user_id=user.id,
+            snapshot=sample_listing_snapshot(title="Version Two"),
+            idempotency_key=str(uuid.uuid4()),
+            request_hash=str(uuid.uuid4()),
+        )
+        v2_id = v2.version.id
+        assert v2_id != v1_id
+        update_session.commit()
+    finally:
+        update_session.close()
+
+    sync["base_update_done"].set()
+    worker.join(timeout=10)
+    assert not worker.is_alive()
+    if thread_errors:
+        raise thread_errors[0]
+
+    verify = session_factory()
+    try:
+        proposal = (
+            verify.query(ListingProposal)
+            .filter(ListingProposal.product_id == product_id)
+            .one()
+        )
+        assert proposal.base_version_id == v2_id
+        assert proposal.base_version_id != v1_id
+    finally:
+        verify.close()
+
+
+@pytest.mark.asyncio
+async def test_proposal_finalize_failure_and_cleanup_failure_leaves_processing(engine, monkeypatch):
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    user, project, body, key, request_hash, _canonical = _listing_fixture(session_factory)
+    llm_calls = {"count": 0}
+
+    async def fake_listing(self, **kwargs):
+        llm_calls["count"] += 1
+        result = dict(VALID_LISTING_OUTPUT)
+        result["tokens_used"] = 20
+        return result
+
+    monkeypatch.setattr(OpenAIService, "generate_listing", fake_listing)
+    monkeypatch.setattr(
+        "app.services.generation_executor.create_proposal_in_transaction",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("proposal flush failed")),
+    )
+    monkeypatch.setattr(
+        GenerationExecutor,
+        "_attempt_finalize_failure_fresh",
+        lambda *_args, **_kwargs: False,
+    )
+
+    db = session_factory()
+    try:
+        with pytest.raises(AppException) as exc_info:
+            await GenerationExecutor(db).execute_listing(
+                user_id=str(user.id),
+                body=body,
+                idempotency_key=key,
+                request_hash=request_hash,
+            )
+        assert exc_info.value.error_code == GENERATION_FINALIZE_FAILED
+    finally:
+        db.close()
+
+    verify = session_factory()
+    try:
+        assert llm_calls["count"] == 1
+        row = (
+            verify.query(GenerationRequest)
+            .filter(GenerationRequest.idempotency_key == key)
+            .one()
+        )
+        assert row.status == GenerationRequestStatus.PROCESSING
+        assert verify.query(Generation).filter(Generation.user_id == user.id).count() == 0
+        assert (
+            verify.query(ListingProposal)
+            .join(Product, ListingProposal.product_id == Product.id)
+            .filter(Product.user_id == user.id)
+            .count()
+            == 0
+        )
+        refreshed_user = verify.query(User).filter(User.id == user.id).one()
+        assert refreshed_user.reserved_tokens > 0
+        stale = find_stale_processing_requests(verify, older_than_minutes=0)
+        assert any(item.id == row.id for item in stale)
+    finally:
+        verify.close()
+
+
+@pytest.mark.asyncio
+async def test_listing_candidate_without_product_id_cannot_succeed(engine, monkeypatch):
+    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    user, project, body, key, request_hash, _canonical = _listing_fixture(session_factory)
+    llm_calls = {"count": 0}
+
+    async def fake_listing(self, **kwargs):
+        llm_calls["count"] += 1
+        result = dict(VALID_LISTING_OUTPUT)
+        result["tokens_used"] = 20
+        return result
+
+    monkeypatch.setattr(OpenAIService, "generate_listing", fake_listing)
+    monkeypatch.setattr(
+        "app.services.generation_executor.ProductService.resolve_or_create",
+        lambda **_kwargs: None,
+    )
+
+    db = session_factory()
+    try:
+        with pytest.raises(AppException) as exc_info:
+            await GenerationExecutor(db).execute_listing(
+                user_id=str(user.id),
+                body=body,
+                idempotency_key=key,
+                request_hash=request_hash,
+            )
+        assert exc_info.value.error_code == GENERATION_FINALIZE_FAILED
+    finally:
+        db.close()
+
+    verify = session_factory()
+    try:
+        assert llm_calls["count"] == 1
+        record = (
+            verify.query(GenerationRequest)
+            .filter(GenerationRequest.idempotency_key == key)
+            .one()
+        )
+        assert record.status == GenerationRequestStatus.FAILED
+        assert record.error_code == GENERATION_FINALIZE_FAILED
+        assert verify.query(Generation).filter(Generation.user_id == user.id).count() == 0
+        assert (
+            verify.query(ListingProposal)
+            .join(Product, ListingProposal.product_id == Product.id)
+            .filter(Product.user_id == user.id)
+            .count()
+            == 0
+        )
+        refreshed_user = verify.query(User).filter(User.id == user.id).one()
+        assert refreshed_user.reserved_tokens == 0
+    finally:
+        verify.close()
+
+    db2 = session_factory()
+    try:
+        with pytest.raises(AppException) as replay_exc:
+            await GenerationExecutor(db2).execute_listing(
+                user_id=str(user.id),
+                body=body,
+                idempotency_key=key,
+                request_hash=request_hash,
+            )
+        assert llm_calls["count"] == 1
+        assert replay_exc.value.error_code == GENERATION_FINALIZE_FAILED
+    finally:
+        db2.close()

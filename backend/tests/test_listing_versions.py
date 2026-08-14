@@ -33,6 +33,7 @@ from app.services.listing_diff import build_listing_diff, compute_final_snapshot
 from app.services.listing_proposal import (
     approve_listing_proposal,
     create_proposal_from_generation,
+    create_proposal_in_transaction,
     patch_proposal_decisions,
     reject_listing_proposal,
 )
@@ -523,7 +524,12 @@ def test_all_reject_does_not_create_version_via_approve(db_session, tenant_bundl
             decisions=reject_all_decisions(),
         )
     assert exc.value.error_code == LISTING_PROPOSAL_NOT_REVIEWING
-    assert db_session.query(ListingVersion).count() == 0
+    assert (
+        db_session.query(ListingVersion)
+        .filter(ListingVersion.product_id == tenant["product"].id)
+        .count()
+        == 0
+    )
 
 
 def test_reject_does_not_create_version(db_session, tenant_bundle):
@@ -548,8 +554,13 @@ def test_reject_does_not_create_version(db_session, tenant_bundle):
         proposal_id=proposal.id,
         expected_revision=proposal.revision,
     )
-    assert rejected.status == ListingProposalStatus.REJECTED
-    assert db_session.query(ListingVersion).count() == 0
+    assert rejected.proposal.status == ListingProposalStatus.REJECTED
+    assert (
+        db_session.query(ListingVersion)
+        .filter(ListingVersion.product_id == tenant["product"].id)
+        .count()
+        == 0
+    )
 
 
 def test_reject_is_idempotent(db_session, tenant_bundle):
@@ -579,9 +590,10 @@ def test_reject_is_idempotent(db_session, tenant_bundle):
         product_id=tenant["product"].id,
         current_user_id=tenant["user"].id,
         proposal_id=proposal.id,
-        expected_revision=first.revision,
+        expected_revision=first.proposal.revision,
     )
-    assert second.status == ListingProposalStatus.REJECTED
+    assert second.proposal.status == ListingProposalStatus.REJECTED
+    assert second.replay is True
 
 
 def test_duplicate_approve_does_not_create_second_version(db_session, tenant_bundle):
@@ -616,7 +628,12 @@ def test_duplicate_approve_does_not_create_second_version(db_session, tenant_bun
         decisions=accept_all_decisions(),
     )
     assert second.replay is True
-    assert db_session.query(ListingVersion).count() == 1
+    assert (
+        db_session.query(ListingVersion)
+        .filter(ListingVersion.product_id == tenant["product"].id)
+        .count()
+        == 1
+    )
 
 
 def test_stale_base_blocks_approve(db_session, tenant_bundle):
@@ -1300,7 +1317,8 @@ def test_reject_replay_releases_product_and_proposal_locks(engine):
         proposal_id=proposal_id,
         expected_revision=revision + 1,
     )
-    assert replay.status == ListingProposalStatus.REJECTED
+    assert replay.proposal.status == ListingProposalStatus.REJECTED
+    assert replay.replay is True
 
     lock_session = session_factory()
     try:
@@ -1654,3 +1672,192 @@ def test_proposal_state_machine_rejects_approved(db_session, tenant_bundle):
             expected_revision=approved.proposal.revision,
         )
     assert exc.value.error_code == LISTING_PROPOSAL_NOT_REVIEWING
+
+
+def test_approve_explicit_marketplace_preserves_domain_override(db_session, tenant_bundle):
+    tenant = tenant_bundle("listing-approve-marketplace-override")
+    generation_request = create_generation_request(
+        db_session,
+        user_id=tenant["user"].id,
+        product_id=tenant["product"].id,
+        project_id=tenant["project"].id,
+    )
+    proposal = create_proposal_from_generation(
+        db_session,
+        product_id=tenant["product"].id,
+        current_user_id=tenant["user"].id,
+        generation_request_id=generation_request.id,
+        candidate=sample_listing_snapshot(),
+    )
+    result = approve_listing_proposal(
+        db_session,
+        product_id=tenant["product"].id,
+        current_user_id=tenant["user"].id,
+        proposal_id=proposal.id,
+        expected_revision=proposal.revision,
+        decisions=accept_all_decisions(),
+        marketplace="CustomMarket",
+    )
+    assert result.version.marketplace == "CustomMarket"
+
+
+def test_create_proposal_in_transaction_rejects_product_request_mismatch(db_session, tenant_bundle):
+    owner = tenant_bundle("proposal-domain-product-mismatch-a")
+    other = tenant_bundle("proposal-domain-product-mismatch-b")
+    generation_request = create_generation_request(
+        db_session,
+        user_id=owner["user"].id,
+        product_id=other["product"].id,
+        project_id=other["project"].id,
+    )
+    product = (
+        db_session.query(Product)
+        .filter(Product.id == owner["product"].id)
+        .with_for_update()
+        .one()
+    )
+    before = db_session.query(ListingProposal).count()
+    with pytest.raises(AppException):
+        create_proposal_in_transaction(
+            db_session,
+            product=product,
+            generation_request=generation_request,
+            candidate=sample_listing_snapshot(),
+            allowed_statuses=frozenset({GenerationRequestStatus.SUCCEEDED}),
+        )
+    assert db_session.query(ListingProposal).count() == before
+
+
+def test_create_proposal_in_transaction_rejects_user_mismatch(db_session, tenant_bundle, user_factory):
+    owner = tenant_bundle("proposal-domain-user-owner")
+    other = user_factory("proposal-domain-user-other@example.com")
+    generation_request = create_generation_request(
+        db_session,
+        user_id=other.id,
+        product_id=owner["product"].id,
+        project_id=owner["project"].id,
+    )
+    product = (
+        db_session.query(Product)
+        .filter(Product.id == owner["product"].id)
+        .with_for_update()
+        .one()
+    )
+    with pytest.raises(AppException):
+        create_proposal_in_transaction(
+            db_session,
+            product=product,
+            generation_request=generation_request,
+            candidate=sample_listing_snapshot(),
+            allowed_statuses=frozenset({GenerationRequestStatus.SUCCEEDED}),
+        )
+
+
+def test_create_proposal_in_transaction_rejects_non_listing_request(db_session, tenant_bundle):
+    tenant = tenant_bundle("proposal-domain-non-listing")
+    generation = Generation(
+        user_id=tenant["user"].id,
+        product_id=tenant["product"].id,
+        project_id=tenant["project"].id,
+        type="analysis",
+        input={"title": "x"},
+        output={"strengths": [], "weaknesses": [], "opportunities": []},
+        tokens_used=10,
+    )
+    db_session.add(generation)
+    db_session.flush()
+    generation_request = GenerationRequest(
+        user_id=tenant["user"].id,
+        request_type="analysis",
+        idempotency_key=str(uuid.uuid4()),
+        request_hash=str(uuid.uuid4()),
+        status=GenerationRequestStatus.SUCCEEDED,
+        project_id=tenant["project"].id,
+        product_id=tenant["product"].id,
+        input={"title": "x"},
+        generation_id=generation.id,
+        tokens_used=10,
+    )
+    db_session.add(generation_request)
+    db_session.flush()
+    product = (
+        db_session.query(Product)
+        .filter(Product.id == tenant["product"].id)
+        .with_for_update()
+        .one()
+    )
+    with pytest.raises(AppException):
+        create_proposal_in_transaction(
+            db_session,
+            product=product,
+            generation_request=generation_request,
+            candidate=sample_listing_snapshot(),
+            allowed_statuses=frozenset({GenerationRequestStatus.SUCCEEDED}),
+        )
+
+
+def test_create_proposal_in_transaction_rejects_missing_generation_id(db_session, tenant_bundle):
+    tenant = tenant_bundle("proposal-domain-no-generation-id")
+    generation_request = GenerationRequest(
+        user_id=tenant["user"].id,
+        request_type="listing",
+        idempotency_key=str(uuid.uuid4()),
+        request_hash=str(uuid.uuid4()),
+        status=GenerationRequestStatus.SUCCEEDED,
+        project_id=tenant["project"].id,
+        product_id=tenant["product"].id,
+        input={"name": "x"},
+        generation_id=None,
+        tokens_used=10,
+    )
+    db_session.add(generation_request)
+    db_session.flush()
+    product = (
+        db_session.query(Product)
+        .filter(Product.id == tenant["product"].id)
+        .with_for_update()
+        .one()
+    )
+    with pytest.raises(AppException):
+        create_proposal_in_transaction(
+            db_session,
+            product=product,
+            generation_request=generation_request,
+            candidate=sample_listing_snapshot(),
+            allowed_statuses=frozenset({GenerationRequestStatus.SUCCEEDED}),
+        )
+
+
+def test_create_proposal_in_transaction_rejects_cross_product_replay(db_session, tenant_bundle):
+    owner = tenant_bundle("proposal-domain-replay-owner")
+    other = tenant_bundle("proposal-domain-replay-other")
+    generation_request = create_generation_request(
+        db_session,
+        user_id=owner["user"].id,
+        product_id=owner["product"].id,
+        project_id=owner["project"].id,
+    )
+    existing = ListingProposal(
+        product_id=other["product"].id,
+        candidate_snapshot=sample_listing_snapshot().canonical_dict(),
+        field_decisions=default_pending_field_decisions().to_json(),
+        status=ListingProposalStatus.REVIEWING,
+        revision=1,
+        generation_request_id=generation_request.id,
+    )
+    db_session.add(existing)
+    db_session.flush()
+    product = (
+        db_session.query(Product)
+        .filter(Product.id == owner["product"].id)
+        .with_for_update()
+        .one()
+    )
+    with pytest.raises(AppException):
+        create_proposal_in_transaction(
+            db_session,
+            product=product,
+            generation_request=generation_request,
+            candidate=sample_listing_snapshot(),
+            allowed_statuses=frozenset({GenerationRequestStatus.SUCCEEDED}),
+        )

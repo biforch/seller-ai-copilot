@@ -28,11 +28,15 @@ from app.core.payload_safety import prepare_request_input, prepare_response_payl
 from app.database.session import SessionLocal
 from app.models.generation import Generation
 from app.models.generation_request import GenerationRequest, GenerationRequestStatus
+from app.models.product import Product
 from app.models.project import Project
 from app.models.user import User
 from app.prompts.versions import PROMPT_VERSIONS
+from app.schemas.ai_output import ListingAIOutput
+from app.schemas.listing import ListingSnapshot, listing_snapshot_from_ai_output
 from app.services.analyzer import AnalyzerService
 from app.services.generation_state import mark_failed, mark_succeeded
+from app.services.listing_proposal import create_proposal_in_transaction, proposal_summary_dict
 from app.services.openai import OpenAIService
 from app.services.product import ProductService
 from app.services.quota import (
@@ -456,6 +460,7 @@ class GenerationExecutor:
         generation_input: dict[str, Any],
         generation_output: dict[str, Any],
         product_args: ProductFinalizeArgs | None = None,
+        listing_proposal_candidate: ListingSnapshot | None = None,
     ) -> dict[str, Any]:
         safe_response = prepare_response_payload(response_payload)
         user = lock_user_for_quota(self.db, ctx.user_id)
@@ -505,6 +510,36 @@ class GenerationExecutor:
         self.db.flush()
 
         settle_reserved_to_consumed(user, ctx.reserve_amount, tokens_used)
+
+        request.generation_id = generation.id
+        request.product_id = product_id
+
+        if listing_proposal_candidate is not None:
+            if product_id is None:
+                raise AppException(
+                    message="Product not found",
+                    code=status.HTTP_404_NOT_FOUND,
+                )
+            product = (
+                self.db.query(Product)
+                .filter(Product.id == product_id, Product.user_id == ctx.user_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if product is None:
+                raise AppException(
+                    message="Product not found",
+                    code=status.HTTP_404_NOT_FOUND,
+                )
+            proposal = create_proposal_in_transaction(
+                self.db,
+                product=product,
+                generation_request=request,
+                candidate=listing_proposal_candidate,
+                allowed_statuses=frozenset({GenerationRequestStatus.PROCESSING}),
+            )
+            safe_response["proposal"] = proposal_summary_dict(proposal)
+
         mark_succeeded(
             request,
             response_payload=safe_response,
@@ -516,7 +551,6 @@ class GenerationExecutor:
             tokens_used=tokens_used,
             latency_ms=latency_ms,
         )
-        request.product_id = product_id
         self.db.add(user)
         self.db.add(request)
         self.db.commit()
@@ -665,6 +699,15 @@ class GenerationExecutor:
         latency_ms = int(result.pop("_latency_ms", 0))
 
         def finalize_listing() -> dict[str, Any]:
+            ai_output = ListingAIOutput.model_validate(
+                {
+                    "title": result["title"],
+                    "bullets": result["bullets"],
+                    "description": result["description"],
+                    "keywords": result["keywords"],
+                }
+            )
+            candidate = listing_snapshot_from_ai_output(ai_output)
             score = compute_listing_score(result)
             result_with_score = {**result, "score": score}
             response_payload = {
@@ -704,6 +747,7 @@ class GenerationExecutor:
                 },
                 generation_output=result_with_score,
                 product_args=product_args,
+                listing_proposal_candidate=candidate,
             )
 
         return self._finalize_with_boundary(

@@ -241,3 +241,117 @@ class ListingVersionPageResponse(BaseModel):
 ImportListingApiResponse = ApiResponse[ImportListingResponse]
 CurrentListingApiResponse = ApiResponse[CurrentListingResponse]
 ListingVersionPageApiResponse = ApiResponse[ListingVersionPageResponse]
+
+
+class ListingProposalSummaryResponse(BaseModel):
+    """Public proposal summary included in listing generation responses."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: uuid.UUID
+    status: str
+    revision: int
+    base_version_id: uuid.UUID | None
+
+
+class ListingProposalResponse(BaseModel):
+    """Public listing proposal fields exposed by the REST API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    product_id: uuid.UUID
+    base_version_id: uuid.UUID | None
+    candidate_snapshot: ListingSnapshot
+    field_decisions: FieldDecisions
+    status: str
+    revision: int
+    generation_request_id: uuid.UUID | None
+    approved_version_id: uuid.UUID | None
+    reviewed_by: uuid.UUID | None
+    reviewed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_proposal(cls, proposal: Any) -> ListingProposalResponse:
+        return cls(
+            id=proposal.id,
+            product_id=proposal.product_id,
+            base_version_id=proposal.base_version_id,
+            candidate_snapshot=ListingSnapshot.model_validate(proposal.candidate_snapshot),
+            field_decisions=FieldDecisions.model_validate(proposal.field_decisions),
+            status=proposal.status,
+            revision=proposal.revision,
+            generation_request_id=proposal.generation_request_id,
+            approved_version_id=proposal.approved_version_id,
+            reviewed_by=proposal.reviewed_by,
+            reviewed_at=proposal.reviewed_at,
+            created_at=proposal.created_at,
+            updated_at=proposal.updated_at,
+        )
+
+
+class ListingFieldDiffEntry(BaseModel):
+    base: str | list[str] | None
+    candidate: str | list[str]
+    changed: bool
+
+
+class ListingProposalDiffResponse(BaseModel):
+    title: ListingFieldDiffEntry
+    bullets: ListingFieldDiffEntry
+    description: ListingFieldDiffEntry
+    backend_keywords: ListingFieldDiffEntry
+
+    @classmethod
+    def from_diff(cls, diff: dict[str, dict[str, Any]]) -> ListingProposalDiffResponse:
+        return cls.model_validate(diff)
+
+
+class ListingProposalDetailResponse(BaseModel):
+    proposal: ListingProposalResponse
+    base_version: ListingVersionResponse | None
+    approved_version: ListingVersionResponse | None
+    diff: ListingProposalDiffResponse
+
+
+class PatchProposalDecisionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: Annotated[int, Field(ge=1)]
+    decisions: FieldDecisions
+
+
+class PatchProposalDecisionsResponse(BaseModel):
+    proposal: ListingProposalResponse
+
+
+class ApproveProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: Annotated[int, Field(ge=1)]
+    decisions: FieldDecisions | None = None
+
+
+class ApproveProposalResponse(BaseModel):
+    proposal: ListingProposalResponse
+    approved_version: ListingVersionResponse
+    replay: bool
+
+
+class RejectProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: Annotated[int, Field(ge=1)]
+
+
+class RejectProposalResponse(BaseModel):
+    proposal: ListingProposalResponse
+    replay: bool
+
+
+ListingProposalDetailApiResponse = ApiResponse[ListingProposalDetailResponse]
+PatchProposalDecisionsApiResponse = ApiResponse[PatchProposalDecisionsResponse]
+ApproveProposalApiResponse = ApiResponse[ApproveProposalResponse]
+RejectProposalApiResponse = ApiResponse[RejectProposalResponse]

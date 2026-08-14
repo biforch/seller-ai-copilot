@@ -5,8 +5,10 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import status
+from pydantic import ValidationError
 from sqlalchemy import func, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,6 +21,7 @@ from app.core.exceptions import (
     LISTING_PROPOSAL_STALE,
     AppException,
 )
+from app.core.orm_utils import orm_str, orm_uuid
 from app.models.generation_request import GenerationRequest, GenerationRequestStatus
 from app.models.listing_proposal import ListingProposal, ListingProposalStatus
 from app.models.listing_version import ListingVersion, ListingVersionSource
@@ -29,7 +32,7 @@ from app.schemas.listing import (
     ListingSnapshot,
     default_pending_field_decisions,
 )
-from app.services.listing_diff import compute_final_snapshot
+from app.services.listing_diff import build_listing_diff, compute_final_snapshot
 from app.services.listing_version import set_product_current_listing_version
 
 
@@ -38,6 +41,21 @@ class ApproveProposalResult:
     proposal: ListingProposal
     version: ListingVersion
     replay: bool
+
+
+@dataclass(frozen=True)
+class RejectProposalResult:
+    proposal: ListingProposal
+    replay: bool
+
+
+@dataclass(frozen=True)
+class ListingProposalDetailResult:
+    proposal: ListingProposal
+    base_version: ListingVersion | None
+    approved_version: ListingVersion | None
+    diff: dict[str, dict[str, Any]]
+    current_listing_version_id: uuid.UUID | None
 
 
 def _lock_product_for_user(
@@ -95,6 +113,126 @@ def _load_base_snapshot(db: Session, base_version_id: uuid.UUID | None) -> Listi
     )
 
 
+def _version_to_snapshot(version: ListingVersion) -> ListingSnapshot:
+    return ListingSnapshot(
+        title=version.title,
+        bullets=version.bullets,
+        description=version.description,
+        backend_keywords=version.backend_keywords,
+    )
+
+
+def proposal_summary_dict(proposal: ListingProposal) -> dict[str, Any]:
+    """Public proposal summary for generation response payloads."""
+    return {
+        "id": str(proposal.id),
+        "status": proposal.status,
+        "revision": proposal.revision,
+        "base_version_id": str(proposal.base_version_id) if proposal.base_version_id else None,
+    }
+
+
+def _proposal_base_version_id(product: Product) -> uuid.UUID | None:
+    if product.current_listing_version_id is None:
+        return None
+    return orm_uuid(product.current_listing_version_id)
+
+
+def _validate_proposal_creation_context(
+    *,
+    product: Product,
+    generation_request: GenerationRequest,
+    allowed_statuses: frozenset[str],
+) -> None:
+    if generation_request.product_id != product.id:
+        raise AppException(
+            message="Proposal creation rejected",
+            code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    if generation_request.user_id != product.user_id:
+        raise AppException(
+            message="Proposal creation rejected",
+            code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    if generation_request.request_type != "listing":
+        raise AppException(
+            message="Proposal creation rejected",
+            code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    if generation_request.generation_id is None:
+        raise AppException(
+            message="Proposal creation rejected",
+            code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    if orm_str(generation_request.status) not in allowed_statuses:
+        raise AppException(
+            message="Proposal creation rejected",
+            code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+def _return_existing_proposal_for_product(
+    existing: ListingProposal,
+    *,
+    product: Product,
+) -> ListingProposal:
+    if existing.product_id != product.id:
+        raise AppException(
+            message="Proposal creation rejected",
+            code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return existing
+
+
+def create_proposal_in_transaction(
+    db: Session,
+    *,
+    product: Product,
+    generation_request: GenerationRequest,
+    candidate: ListingSnapshot,
+    allowed_statuses: frozenset[str],
+) -> ListingProposal:
+    """Insert a reviewing proposal within the caller's transaction (no commit)."""
+    _validate_proposal_creation_context(
+        product=product,
+        generation_request=generation_request,
+        allowed_statuses=allowed_statuses,
+    )
+    base_version_id = _proposal_base_version_id(product)
+
+    existing = (
+        db.query(ListingProposal)
+        .filter(ListingProposal.generation_request_id == generation_request.id)
+        .one_or_none()
+    )
+    if existing is not None:
+        return _return_existing_proposal_for_product(existing, product=product)
+
+    pending_decisions = default_pending_field_decisions()
+    proposal = ListingProposal(
+        product_id=product.id,
+        base_version_id=base_version_id,
+        candidate_snapshot=candidate.canonical_dict(),
+        field_decisions=pending_decisions.to_json(),
+        status=ListingProposalStatus.REVIEWING,
+        revision=1,
+        generation_request_id=generation_request.id,
+    )
+    savepoint = db.begin_nested()
+    try:
+        db.add(proposal)
+        db.flush()
+    except IntegrityError:
+        savepoint.rollback()
+        replay = (
+            db.query(ListingProposal)
+            .filter(ListingProposal.generation_request_id == generation_request.id)
+            .one()
+        )
+        return _return_existing_proposal_for_product(replay, product=product)
+    return proposal
+
+
 def create_proposal_from_generation(
     db: Session,
     *,
@@ -104,7 +242,7 @@ def create_proposal_from_generation(
     candidate: ListingSnapshot,
 ) -> ListingProposal:
     """Create a reviewing proposal from a succeeded listing generation request."""
-    _lock_product_for_user(db, product_id, current_user_id)
+    product = _lock_product_for_user(db, product_id, current_user_id)
 
     generation_request = (
         db.query(GenerationRequest)
@@ -134,38 +272,101 @@ def create_proposal_from_generation(
     if existing is not None:
         db.commit()
         db.refresh(existing)
-        return existing
+        return _return_existing_proposal_for_product(existing, product=product)
 
-    product = db.query(Product).filter(Product.id == product_id).one()
-    pending_decisions = default_pending_field_decisions()
-
-    proposal = ListingProposal(
-        product_id=product_id,
-        base_version_id=product.current_listing_version_id,
-        candidate_snapshot=candidate.canonical_dict(),
-        field_decisions=pending_decisions.to_json(),
-        status=ListingProposalStatus.REVIEWING,
-        revision=1,
-        generation_request_id=generation_request_id,
+    proposal = create_proposal_in_transaction(
+        db,
+        product=product,
+        generation_request=generation_request,
+        candidate=candidate,
+        allowed_statuses=frozenset({GenerationRequestStatus.SUCCEEDED}),
     )
-    savepoint = db.begin_nested()
-    try:
-        db.add(proposal)
-        db.flush()
-    except IntegrityError:
-        savepoint.rollback()
-        replay = (
-            db.query(ListingProposal)
-            .filter(ListingProposal.generation_request_id == generation_request_id)
-            .one()
-        )
-        db.commit()
-        db.refresh(replay)
-        return replay
-
     db.commit()
     db.refresh(proposal)
     return proposal
+
+
+def get_listing_proposal_detail(
+    db: Session,
+    *,
+    product_id: uuid.UUID,
+    current_user_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+) -> ListingProposalDetailResult:
+    """Load proposal detail with scoped base/approved versions and diff."""
+    product = (
+        db.query(Product)
+        .filter(Product.id == product_id, Product.user_id == current_user_id)
+        .one_or_none()
+    )
+    if product is None:
+        raise AppException(
+            message="Proposal not found",
+            code=status.HTTP_404_NOT_FOUND,
+        )
+
+    proposal = _get_proposal_for_product(db, proposal_id, product_id)
+    if proposal is None:
+        raise AppException(
+            message="Proposal not found",
+            code=status.HTTP_404_NOT_FOUND,
+        )
+
+    try:
+        candidate = ListingSnapshot.model_validate(proposal.candidate_snapshot)
+        FieldDecisions.model_validate(proposal.field_decisions)
+    except ValidationError:
+        raise AppException(
+            message="Proposal not found",
+            code=status.HTTP_404_NOT_FOUND,
+        ) from None
+
+    base_version: ListingVersion | None = None
+    base_snapshot: ListingSnapshot | None = None
+    if proposal.base_version_id is not None:
+        base_version = (
+            db.query(ListingVersion)
+            .filter(
+                ListingVersion.id == proposal.base_version_id,
+                ListingVersion.product_id == product_id,
+            )
+            .one_or_none()
+        )
+        if base_version is None:
+            raise AppException(
+                message="Proposal not found",
+                code=status.HTTP_404_NOT_FOUND,
+            )
+        base_snapshot = _version_to_snapshot(base_version)
+
+    approved_version: ListingVersion | None = None
+    if proposal.approved_version_id is not None:
+        approved_version = (
+            db.query(ListingVersion)
+            .filter(
+                ListingVersion.id == proposal.approved_version_id,
+                ListingVersion.product_id == product_id,
+            )
+            .one_or_none()
+        )
+        if approved_version is None:
+            raise AppException(
+                message="Proposal not found",
+                code=status.HTTP_404_NOT_FOUND,
+            )
+
+    diff = build_listing_diff(base_snapshot, candidate)
+    return ListingProposalDetailResult(
+        proposal=proposal,
+        base_version=base_version,
+        approved_version=approved_version,
+        diff=diff,
+        current_listing_version_id=(
+            orm_uuid(product.current_listing_version_id)
+            if product.current_listing_version_id is not None
+            else None
+        ),
+    )
 
 
 def patch_proposal_decisions(
@@ -232,11 +433,12 @@ def approve_listing_proposal(
     proposal_id: uuid.UUID,
     expected_revision: int,
     decisions: FieldDecisions | None = None,
-    marketplace: str = "Amazon",
+    marketplace: str | None = None,
     language: str = "en-US",
 ) -> ApproveProposalResult:
     """Approve a proposal and materialize an immutable AI listing version."""
     product = _lock_product_for_user(db, product_id, current_user_id)
+    resolved_marketplace = marketplace if marketplace is not None else orm_str(product.platform)
 
     proposal = (
         db.query(ListingProposal)
@@ -350,7 +552,7 @@ def approve_listing_proposal(
         product_id=product.id,
         version_number=next_version_number,
         source=ListingVersionSource.AI,
-        marketplace=marketplace,
+        marketplace=resolved_marketplace,
         language=language,
         generation_id=generation_id,
         parent_version_id=proposal.base_version_id,
@@ -402,7 +604,7 @@ def reject_listing_proposal(
     current_user_id: uuid.UUID,
     proposal_id: uuid.UUID,
     expected_revision: int,
-) -> ListingProposal:
+) -> RejectProposalResult:
     """Reject a reviewing proposal without creating a version."""
     product = _lock_product_for_user(db, product_id, current_user_id)
 
@@ -424,7 +626,7 @@ def reject_listing_proposal(
     if proposal.status == ListingProposalStatus.REJECTED:
         db.commit()
         db.refresh(proposal)
-        return proposal
+        return RejectProposalResult(proposal=proposal, replay=True)
 
     if proposal.status in {
         ListingProposalStatus.APPROVED,
@@ -459,4 +661,4 @@ def reject_listing_proposal(
     db.add(proposal)
     db.commit()
     db.refresh(proposal)
-    return proposal
+    return RejectProposalResult(proposal=proposal, replay=False)

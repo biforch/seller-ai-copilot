@@ -13,18 +13,37 @@ from app.core.security import get_current_user
 from app.database.session import get_db
 from app.schemas.common import ErrorResponse
 from app.schemas.listing import (
+    ApproveProposalApiResponse,
+    ApproveProposalRequest,
+    ApproveProposalResponse,
     CurrentListingApiResponse,
     CurrentListingResponse,
     ImportListingApiResponse,
     ImportListingRequest,
     ImportListingResponse,
+    ListingProposalDetailApiResponse,
+    ListingProposalDetailResponse,
+    ListingProposalDiffResponse,
+    ListingProposalResponse,
     ListingScoreResponse,
     ListingVersionPageApiResponse,
     ListingVersionPageResponse,
     ListingVersionResponse,
+    PatchProposalDecisionsApiResponse,
+    PatchProposalDecisionsRequest,
+    PatchProposalDecisionsResponse,
+    RejectProposalApiResponse,
+    RejectProposalRequest,
+    RejectProposalResponse,
 )
 from app.schemas.pagination import build_pagination_meta
 from app.services.idempotency import IDEMPOTENCY_KEY_HEADER, require_idempotency_key
+from app.services.listing_proposal import (
+    approve_listing_proposal,
+    get_listing_proposal_detail,
+    patch_proposal_decisions,
+    reject_listing_proposal,
+)
 from app.services.listing_version import (
     get_current_listing_version,
     import_api_request_hash,
@@ -65,6 +84,30 @@ def _build_import_payload(result) -> ImportListingResponse:
         ),
         replay=result.replay,
         is_first=result.version.version_number == 1,
+    )
+
+
+def _build_proposal_detail_payload(detail) -> ListingProposalDetailResponse:
+    current_id = detail.current_listing_version_id
+    return ListingProposalDetailResponse(
+        proposal=ListingProposalResponse.from_proposal(detail.proposal),
+        base_version=(
+            ListingVersionResponse.from_version(
+                detail.base_version,
+                is_current=current_id is not None and detail.base_version.id == current_id,
+            )
+            if detail.base_version is not None
+            else None
+        ),
+        approved_version=(
+            ListingVersionResponse.from_version(
+                detail.approved_version,
+                is_current=current_id is not None and detail.approved_version.id == current_id,
+            )
+            if detail.approved_version is not None
+            else None
+        ),
+        diff=ListingProposalDiffResponse.from_diff(detail.diff),
     )
 
 
@@ -164,3 +207,123 @@ def get_listing_versions(
     )
     envelope = ListingVersionPageApiResponse(code=status.HTTP_200_OK, message="success", data=payload)
     return envelope
+
+
+@router.get(
+    "/{product_id}/listing/proposals/{proposal_id}",
+    response_model=ListingProposalDetailApiResponse,
+    responses=_LISTING_ERROR_RESPONSES,
+)
+def get_listing_proposal(
+    product_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    detail = get_listing_proposal_detail(
+        db,
+        product_id=product_id,
+        current_user_id=uuid.UUID(str(current_user["id"])),
+        proposal_id=proposal_id,
+    )
+    payload = _build_proposal_detail_payload(detail)
+    return ListingProposalDetailApiResponse(
+        code=status.HTTP_200_OK,
+        message="success",
+        data=payload,
+    )
+
+
+@router.patch(
+    "/{product_id}/listing/proposals/{proposal_id}/decisions",
+    response_model=PatchProposalDecisionsApiResponse,
+    responses=_LISTING_ERROR_RESPONSES,
+)
+def patch_listing_proposal_decisions(
+    product_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    body: PatchProposalDecisionsRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    proposal = patch_proposal_decisions(
+        db,
+        product_id=product_id,
+        current_user_id=uuid.UUID(str(current_user["id"])),
+        proposal_id=proposal_id,
+        decisions=body.decisions,
+        expected_revision=body.expected_revision,
+    )
+    payload = PatchProposalDecisionsResponse(
+        proposal=ListingProposalResponse.from_proposal(proposal),
+    )
+    return PatchProposalDecisionsApiResponse(
+        code=status.HTTP_200_OK,
+        message="success",
+        data=payload,
+    )
+
+
+@router.post(
+    "/{product_id}/listing/proposals/{proposal_id}/approve",
+    response_model=ApproveProposalApiResponse,
+    responses=_LISTING_ERROR_RESPONSES,
+)
+def approve_listing_proposal_endpoint(
+    product_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    body: ApproveProposalRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    result = approve_listing_proposal(
+        db,
+        product_id=product_id,
+        current_user_id=uuid.UUID(str(current_user["id"])),
+        proposal_id=proposal_id,
+        expected_revision=body.expected_revision,
+        decisions=body.decisions,
+    )
+    payload = ApproveProposalResponse(
+        proposal=ListingProposalResponse.from_proposal(result.proposal),
+        approved_version=ListingVersionResponse.from_version(
+            result.version,
+            is_current=True,
+        ),
+        replay=result.replay,
+    )
+    return ApproveProposalApiResponse(
+        code=status.HTTP_200_OK,
+        message="success",
+        data=payload,
+    )
+
+
+@router.post(
+    "/{product_id}/listing/proposals/{proposal_id}/reject",
+    response_model=RejectProposalApiResponse,
+    responses=_LISTING_ERROR_RESPONSES,
+)
+def reject_listing_proposal_endpoint(
+    product_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    body: RejectProposalRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    result = reject_listing_proposal(
+        db,
+        product_id=product_id,
+        current_user_id=uuid.UUID(str(current_user["id"])),
+        proposal_id=proposal_id,
+        expected_revision=body.expected_revision,
+    )
+    payload = RejectProposalResponse(
+        proposal=ListingProposalResponse.from_proposal(result.proposal),
+        replay=result.replay,
+    )
+    return RejectProposalApiResponse(
+        code=status.HTTP_200_OK,
+        message="success",
+        data=payload,
+    )
