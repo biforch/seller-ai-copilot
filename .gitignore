@@ -34,6 +34,9 @@ backend/*.egg-info/
 /p3-listing-*.md
 /p3-listing-*.patch
 /p3-listing-*.txt
+/p4a-listing-*.md
+/p4a-listing-*.patch
+/p4a-listing-*.txt
 p1.*-review.patch
 p1.*-review.md
 p1.*-pytest.txt
