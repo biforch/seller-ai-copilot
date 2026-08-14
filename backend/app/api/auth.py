@@ -26,7 +26,7 @@ router = APIRouter()
 
 @router.post("/register")
 @limiter.limit("10/minute")
-async def register(request: Request, body: RegisterRequest, db: Session = Depends(get_db)):
+def register(request: Request, body: RegisterRequest, db: Session = Depends(get_db)):
     """用户注册."""
     existing_user = db.query(User).filter(User.email == body.email).first()
     if existing_user:
@@ -53,7 +53,7 @@ async def register(request: Request, body: RegisterRequest, db: Session = Depend
 
 @router.post("/login")
 @limiter.limit("10/minute")
-async def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
+def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
     """用户登录."""
     user = db.query(User).filter(User.email == body.email).first()
     if not user or not verify_password(body.password, str(user.password_hash)):
@@ -72,7 +72,7 @@ async def login(request: Request, body: LoginRequest, db: Session = Depends(get_
 
 
 @router.get("/me")
-async def get_current_user_info(
+def get_current_user_info(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

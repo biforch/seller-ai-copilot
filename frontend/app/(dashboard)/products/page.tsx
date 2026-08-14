@@ -1,17 +1,65 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 
 import { useProducts } from '@/hooks/useProducts';
 
+function PaginationBar({
+  pagination,
+  onPageChange,
+  disabled,
+}: {
+  pagination: {
+    page: number;
+    total_pages: number;
+    has_next: boolean;
+    has_previous: boolean;
+  };
+  onPageChange: (page: number) => void;
+  disabled?: boolean;
+}) {
+  if (pagination.total_pages <= 1) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+      <p className="text-sm text-gray-500">
+        Page {pagination.page} of {pagination.total_pages}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={disabled || !pagination.has_previous}
+          onClick={() => onPageChange(pagination.page - 1)}
+          className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Previous
+        </button>
+        <button
+          type="button"
+          disabled={disabled || !pagination.has_next}
+          onClick={() => onPageChange(pagination.page + 1)}
+          className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+        >
+          Next
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ProductsPage() {
   const router = useRouter();
-  const { products, isLoading, error, fetchProducts, deleteProduct } = useProducts();
+  const { products, pagination, isLoading, error, fetchProducts, deleteProduct, setPage } =
+    useProducts();
 
   useEffect(() => {
-    fetchProducts();
+    fetchProducts({ page: 1 });
   }, [fetchProducts]);
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -39,7 +87,7 @@ export default function ProductsPage() {
         <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4">{error}</div>
       )}
 
-      <div className="bg-white rounded-xl border">
+      <div className="bg-white rounded-xl border overflow-hidden">
         {isLoading ? (
           <p className="p-6 text-gray-500">Loading...</p>
         ) : products.length === 0 ? (
@@ -55,8 +103,7 @@ export default function ProductsPage() {
                 <div>
                   <p className="font-medium">{product.name}</p>
                   <p className="text-sm text-gray-500">
-                    {product.category || 'Uncategorized'} • {product.platform} •{' '}
-                    {product.market}
+                    {product.category || 'Uncategorized'} • {product.platform} • {product.market}
                   </p>
                   <p className="text-xs text-gray-400 mt-1">
                     {product.generations_count || 0} generations •{' '}
@@ -72,6 +119,15 @@ export default function ProductsPage() {
               </div>
             ))}
           </div>
+        )}
+        {pagination && products.length > 0 && (
+          <PaginationBar
+            pagination={pagination}
+            disabled={isLoading}
+            onPageChange={(nextPage) => {
+              void setPage(nextPage);
+            }}
+          />
         )}
       </div>
     </div>

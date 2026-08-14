@@ -24,8 +24,10 @@ class ProjectResponse(BaseModel):
     market: str
     status: str
     product_count: int = 0
+    generation_count: int = 0
     created_at: str
+    updated_at: str | None = None
 
 
 class ProjectDetailResponse(ProjectResponse):
-    products: list[dict] = []
+    products: dict = {}

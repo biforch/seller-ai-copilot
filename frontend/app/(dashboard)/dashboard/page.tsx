@@ -44,9 +44,9 @@ export default function DashboardPage() {
   useEffect(()=>{
 
 
-    fetchProducts();
+    fetchProducts({ page: 1, page_size: 5 });
 
-    loadProjects();
+    loadProjects({ page: 1, page_size: 5 });
 
 
 
@@ -243,7 +243,7 @@ No projects yet.
 
 
 {
-projects.slice(0,5).map(project=>(
+projects.map(project=>(
 
 
 <div
@@ -342,7 +342,7 @@ No products yet.
 
 
 {
-products.slice(0,5).map(product=>(
+products.map(product=>(
 
 
 <div

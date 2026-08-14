@@ -112,7 +112,7 @@ def test_cannot_bypass_with_own_product_and_foreign_project(
     before_products = client.get(
         "/api/v1/products",
         headers=auth_header(intruder["user"]),
-    ).json()["data"]
+    ).json()["data"]["items"]
     before_count = len(before_products)
 
     response = client.post(
@@ -131,7 +131,7 @@ def test_cannot_bypass_with_own_product_and_foreign_project(
     after_products = client.get(
         "/api/v1/products",
         headers=auth_header(intruder["user"]),
-    ).json()["data"]
+    ).json()["data"]["items"]
     assert len(after_products) == before_count + 1
     assert response.json()["data"]["product_id"] != str(owner["product"].id)
 

@@ -5,27 +5,19 @@ from app.core.exceptions import AppException
 from app.core.response import success_response
 from app.core.security import get_current_user
 from app.database.session import get_db
+from app.schemas.pagination import PaginationParams, ProductPagination
 from app.schemas.product import CreateProductRequest
 from app.services.product import ProductService
 
 router = APIRouter()
 
 
-
-
-
 @router.post("")
-async def create_product(
-
+def create_product(
     request: CreateProductRequest,
-
     current_user: dict = Depends(get_current_user),
-
     db: Session = Depends(get_db),
-
 ):
-
-
     try:
         product = ProductService.create(
             db=db,
@@ -44,155 +36,74 @@ async def create_product(
             status.HTTP_404_NOT_FOUND,
         )
 
-
-
     return success_response(
-
         data=ProductService.serialize_product(product),
-
         message="Product created successfully",
-
         code=201,
-
     )
-
-
-
-
-
 
 
 @router.get("")
-async def get_products(
-
+def get_products(
+    pagination: PaginationParams = Depends(ProductPagination),
     current_user: dict = Depends(get_current_user),
-
     db: Session = Depends(get_db),
-
 ):
-
-
     products = ProductService.get_user_products(
-
         db,
-
-        current_user["id"]
-
+        current_user["id"],
+        pagination,
     )
-
-
-    return success_response(
-
-        data=products
-
-    )
-
-
-
-
-
-
+    return success_response(data=products)
 
 
 @router.get("/{product_id}")
-async def get_product(
-
+def get_product(
     product_id: str,
-
     current_user: dict = Depends(get_current_user),
-
     db: Session = Depends(get_db),
-
 ):
-
-
     product = ProductService.get_by_id(
-
         db,
-
         product_id,
-
-        current_user["id"]
-
+        current_user["id"],
     )
-
-
-
     if not product:
-
         raise AppException(
-
             "Product not found",
-
-            status.HTTP_404_NOT_FOUND
-
+            status.HTTP_404_NOT_FOUND,
         )
-
-
 
     return success_response(
-
         data=ProductService.get_detail(
-
             db,
-
-            product
-
-        )
-
+            product,
+        ),
     )
-
-
-
-
-
 
 
 @router.delete("/{product_id}")
-async def delete_product(
-
+def delete_product(
     product_id: str,
-
     current_user: dict = Depends(get_current_user),
-
     db: Session = Depends(get_db),
-
 ):
-
-
     product = ProductService.get_by_id(
-
         db,
-
         product_id,
-
-        current_user["id"]
-
+        current_user["id"],
     )
-
-
     if not product:
-
         raise AppException(
-
             "Product not found",
-
-            status.HTTP_404_NOT_FOUND
-
+            status.HTTP_404_NOT_FOUND,
         )
 
-
     ProductService.delete(
-
         db,
-
-        product
-
+        product,
     )
 
-
     return success_response(
-
-        message="Product deleted successfully"
-
+        message="Product deleted successfully",
     )

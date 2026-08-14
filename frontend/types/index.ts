@@ -1,3 +1,17 @@
+export interface PaginationMeta {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  pagination: PaginationMeta;
+}
+
 export interface ApiResponse<T = unknown> {
   code: number;
   message: string;
@@ -54,6 +68,10 @@ export interface Project {
 
   product_count?: number;
 
+  generation_count?: number;
+
+  updated_at?: string;
+
   created_at: string;
 
 }
@@ -84,7 +102,7 @@ export interface ProjectDetail extends Project {
 
   updated_at?: string;
 
-  products: ProjectProductSummary[];
+  products: PaginatedResponse<ProjectProductSummary>;
 
 }
 

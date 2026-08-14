@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 @router.get("/usage")
-async def get_usage(
+def get_usage(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

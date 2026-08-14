@@ -139,7 +139,19 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "a1b2c3d4e5f6"
+        assert current == "b2c3d4e5f6a7"
+
+    project_indexes = {idx["name"] for idx in inspector.get_indexes("projects")}
+    product_indexes = {idx["name"] for idx in inspector.get_indexes("products")}
+    generation_indexes = {idx["name"] for idx in inspector.get_indexes("generations")}
+    assert "ix_projects_user_id_updated_at_created_at_id" in project_indexes
+    project_index = next(
+        idx for idx in inspector.get_indexes("projects")
+        if idx["name"] == "ix_projects_user_id_updated_at_created_at_id"
+    )
+    assert project_index["column_names"] == ["user_id", "updated_at", "created_at", "id"]
+    assert "ix_products_project_id_created_at_id" in product_indexes
+    assert "ix_generations_product_id" in generation_indexes
 
     command.downgrade(cfg, "34b6d855017a")
 

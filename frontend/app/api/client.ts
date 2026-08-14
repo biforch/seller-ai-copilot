@@ -14,6 +14,18 @@ class ApiClient {
     return localStorage.getItem(TOKEN_KEY);
   }
 
+  private buildPath(path: string, params?: Record<string, string | number | undefined>) {
+    if (!params) return path;
+    const search = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) {
+        search.set(key, String(value));
+      }
+    });
+    const query = search.toString();
+    return query ? `${path}?${query}` : path;
+  }
+
   private async request<T>(
     path: string,
     options: RequestInit = {}
@@ -46,8 +58,16 @@ class ApiClient {
     return json as T;
   }
 
-  get<T>(path: string) {
-    return this.request<T>(path);
+  get<T>(
+    path: string,
+    options?: {
+      params?: Record<string, string | number | undefined>;
+      signal?: AbortSignal;
+    }
+  ) {
+    return this.request<T>(this.buildPath(path, options?.params), {
+      signal: options?.signal,
+    });
   }
 
   post<T>(path: string, body?: unknown, extraHeaders?: Record<string, string>) {

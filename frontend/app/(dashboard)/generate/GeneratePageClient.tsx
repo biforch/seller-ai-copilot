@@ -51,7 +51,7 @@ export function GeneratePageClient(){
 
   useEffect(()=>{
 
-    fetchProjects();
+    fetchProjects({ page_size: 100 });
 
   },[fetchProjects]);
 
