@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api import (
     auth,
     generate,
+    listing,
     products,
     project,
     user,
@@ -142,6 +143,13 @@ app.include_router(
     products.router,
     prefix="/api/v1/products",
     tags=["Products"],
+)
+
+
+app.include_router(
+    listing.router,
+    prefix="/api/v1/products",
+    tags=["Listing"],
 )
 
 

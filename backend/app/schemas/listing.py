@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.ai_output import ListingAIOutput
+from app.schemas.common import ApiResponse
 from app.schemas.common_fields import LISTING_BULLET_MAX, LISTING_BULLETS_COUNT
+from app.schemas.pagination import PaginationMeta
 
 LISTING_SNAPSHOT_TITLE_MIN = 1
 LISTING_SNAPSHOT_TITLE_MAX = 500
@@ -155,3 +159,85 @@ def listing_snapshot_from_ai_output(output: ListingAIOutput) -> ListingSnapshot:
         description=output.description,
         backend_keywords=output.keywords,
     )
+
+
+class ImportListingRequest(ListingSnapshot):
+    """Request body for manual listing import; reuses ListingSnapshot validation."""
+
+
+class ListingVersionResponse(BaseModel):
+    """Public listing version fields exposed by the REST API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    product_id: uuid.UUID
+    version_number: int
+    source: str
+    title: str
+    bullets: list[str]
+    description: str
+    backend_keywords: list[str]
+    marketplace: str
+    language: str
+    generation_id: uuid.UUID | None
+    parent_version_id: uuid.UUID | None
+    created_by: uuid.UUID | None
+    created_at: datetime
+    is_current: bool
+
+    @classmethod
+    def from_version(
+        cls,
+        version: Any,
+        *,
+        is_current: bool,
+    ) -> ListingVersionResponse:
+        return cls(
+            id=version.id,
+            product_id=version.product_id,
+            version_number=version.version_number,
+            source=version.source,
+            title=version.title,
+            bullets=version.bullets,
+            description=version.description,
+            backend_keywords=version.backend_keywords,
+            marketplace=version.marketplace,
+            language=version.language,
+            generation_id=version.generation_id,
+            parent_version_id=version.parent_version_id,
+            created_by=version.created_by,
+            created_at=version.created_at,
+            is_current=is_current,
+        )
+
+
+class ListingScoreResponse(BaseModel):
+    """Quality score dimensions for a listing version."""
+
+    overall: int
+    title_seo: int
+    keyword_coverage: int
+    benefit_clarity: int
+    conversion_potential: int
+
+
+class ImportListingResponse(BaseModel):
+    version: ListingVersionResponse
+    replay: bool
+    is_first: bool
+
+
+class CurrentListingResponse(BaseModel):
+    version: ListingVersionResponse
+    score: ListingScoreResponse | None
+
+
+class ListingVersionPageResponse(BaseModel):
+    items: list[ListingVersionResponse]
+    pagination: PaginationMeta
+
+
+ImportListingApiResponse = ApiResponse[ImportListingResponse]
+CurrentListingApiResponse = ApiResponse[CurrentListingResponse]
+ListingVersionPageApiResponse = ApiResponse[ListingVersionPageResponse]

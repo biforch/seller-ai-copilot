@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import IDEMPOTENCY_CONFLICT, AppException
+from app.core.exceptions import IDEMPOTENCY_CONFLICT, LISTING_NOT_FOUND, AppException
 from app.models.listing_version import ListingVersion, ListingVersionSource
 from app.models.product import Product
 from app.schemas.listing import ListingSnapshot
@@ -26,15 +26,30 @@ class ImportListingResult:
 def _import_request_hash(
     snapshot: ListingSnapshot,
     *,
-    marketplace: str,
-    language: str,
+    marketplace: str | None = None,
+    language: str = "en-US",
+    include_marketplace: bool = True,
 ) -> str:
-    payload = {
+    payload: dict[str, object] = {
         **snapshot.canonical_dict(),
-        "marketplace": marketplace,
         "language": language,
     }
+    if include_marketplace and marketplace is not None:
+        payload["marketplace"] = marketplace
     return canonical_request_hash(payload)
+
+
+def import_api_request_hash(
+    snapshot: ListingSnapshot,
+    *,
+    language: str = "en-US",
+) -> str:
+    """Hash for HTTP Import idempotency: client snapshot only (no derived marketplace)."""
+    return _import_request_hash(
+        snapshot,
+        language=language,
+        include_marketplace=False,
+    )
 
 
 def _lock_product_for_user(
@@ -111,6 +126,87 @@ def set_product_current_listing_version(
     product.current_listing_version_id = uuid.UUID(str(version.id))  # type: ignore[assignment]
 
 
+def _get_owned_product(
+    db: Session,
+    product_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> Product | None:
+    return (
+        db.query(Product)
+        .filter(Product.id == product_id, Product.user_id == user_id)
+        .one_or_none()
+    )
+
+
+def get_current_listing_version(
+    db: Session,
+    *,
+    product_id: uuid.UUID,
+    current_user_id: uuid.UUID,
+) -> tuple[Product, ListingVersion]:
+    """Return the product and its current listing version for an owned product."""
+    product = _get_owned_product(db, product_id, current_user_id)
+    if product is None:
+        raise AppException(
+            message="Product not found",
+            code=status.HTTP_404_NOT_FOUND,
+        )
+    if product.current_listing_version_id is None:
+        raise AppException(
+            message="Current listing not found",
+            code=status.HTTP_404_NOT_FOUND,
+            error_code=LISTING_NOT_FOUND,
+        )
+    version = (
+        db.query(ListingVersion)
+        .filter(
+            ListingVersion.id == product.current_listing_version_id,
+            ListingVersion.product_id == product_id,
+        )
+        .one_or_none()
+    )
+    if version is None:
+        raise AppException(
+            message="Current listing not found",
+            code=status.HTTP_404_NOT_FOUND,
+            error_code=LISTING_NOT_FOUND,
+        )
+    return product, version
+
+
+def list_listing_versions(
+    db: Session,
+    *,
+    product_id: uuid.UUID,
+    current_user_id: uuid.UUID,
+    page: int,
+    page_size: int,
+) -> tuple[Product, list[ListingVersion], int]:
+    """List listing versions for an owned product with fixed stable ordering."""
+    product = _get_owned_product(db, product_id, current_user_id)
+    if product is None:
+        raise AppException(
+            message="Product not found",
+            code=status.HTTP_404_NOT_FOUND,
+        )
+
+    total = (
+        db.query(func.count(ListingVersion.id))
+        .filter(ListingVersion.product_id == product_id)
+        .scalar()
+        or 0
+    )
+    items = (
+        db.query(ListingVersion)
+        .filter(ListingVersion.product_id == product_id)
+        .order_by(ListingVersion.version_number.desc(), ListingVersion.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return product, items, total
+
+
 def import_listing_version(
     db: Session,
     *,
@@ -118,18 +214,27 @@ def import_listing_version(
     current_user_id: uuid.UUID,
     snapshot: ListingSnapshot,
     idempotency_key: str,
-    marketplace: str,
+    marketplace: str | None = None,
     language: str = "en-US",
+    request_hash: str | None = None,
 ) -> ImportListingResult:
     """Import a manual listing version with idempotent replay semantics."""
     normalized_key = require_idempotency_key(idempotency_key)
-    request_hash = _import_request_hash(snapshot, marketplace=marketplace, language=language)
 
     product = _lock_product_for_user(db, product_id, current_user_id)
+    resolved_marketplace = marketplace if marketplace is not None else str(product.platform)
+    resolved_request_hash = request_hash
+    if resolved_request_hash is None:
+        resolved_request_hash = _import_request_hash(
+            snapshot,
+            marketplace=resolved_marketplace,
+            language=language,
+            include_marketplace=True,
+        )
 
     existing = _find_idempotent_version(db, product_id, normalized_key)
     if existing is not None:
-        if existing.request_hash == request_hash:
+        if existing.request_hash == resolved_request_hash:
             return _finalize_import_replay(db, existing)
         raise AppException(
             message="Idempotency conflict",
@@ -154,11 +259,11 @@ def import_listing_version(
             bullets=snapshot.bullets,
             description=snapshot.description,
             backend_keywords=snapshot.backend_keywords,
-            marketplace=marketplace,
+            marketplace=resolved_marketplace,
             language=language,
             parent_version_id=product.current_listing_version_id,
             operation_idempotency_key=normalized_key,
-            request_hash=request_hash,
+            request_hash=resolved_request_hash,
             created_by=current_user_id,
         )
         db.add(version)
@@ -167,7 +272,12 @@ def import_listing_version(
         db.flush()
     except IntegrityError:
         savepoint.rollback()
-        return _resolve_idempotency_conflict(db, product_id, normalized_key, request_hash)
+        return _resolve_idempotency_conflict(
+            db,
+            product_id,
+            normalized_key,
+            resolved_request_hash,
+        )
 
     db.commit()
     db.refresh(version)
