@@ -17,6 +17,8 @@ import { useGenerate } from '@/hooks/useGenerate';
 
 import { useProjects } from '@/hooks/useProjects';
 
+import { buildReviewPath } from '@/lib/listing-proposals';
+
 
 import type {
   AnalyzeFormData,
@@ -813,6 +815,8 @@ export function GeneratePageClient(){
             listingResult &&
 
 
+            <div className="space-y-4">
+
             <ListingResultView
 
               result={
@@ -820,6 +824,28 @@ export function GeneratePageClient(){
               }
 
             />
+
+            {listingResult.proposal && listingResult.product_id && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-sm text-blue-900 mb-3">
+                  A reviewable AI proposal was created. Open the review workspace to accept or reject
+                  individual fields before approving a new listing version.
+                </p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push(
+                      buildReviewPath(listingResult.product_id, listingResult.proposal!.id),
+                    )
+                  }
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  Review AI Proposal
+                </button>
+              </div>
+            )}
+
+            </div>
 
           }
 

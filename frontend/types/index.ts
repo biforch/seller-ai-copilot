@@ -26,6 +26,122 @@ export interface ApiError {
   detail: string | null;
 }
 
+export type FieldDecisionValue = 'accept' | 'reject' | 'pending';
+
+export type ProposalStatus = 'reviewing' | 'approved' | 'rejected' | 'superseded';
+
+export type ProposalListStatus = ProposalStatus | 'all';
+
+export interface FieldDecisions {
+  title: FieldDecisionValue;
+  bullets: FieldDecisionValue;
+  description: FieldDecisionValue;
+  backend_keywords: FieldDecisionValue;
+}
+
+export interface ListingSnapshot {
+  title: string;
+  bullets: string[];
+  description: string;
+  backend_keywords: string[];
+}
+
+export interface ListingVersionSummary {
+  id: string;
+  product_id: string;
+  version_number: number;
+  source: string;
+  title: string;
+  bullets: string[];
+  description: string;
+  backend_keywords: string[];
+  marketplace: string;
+  language: string;
+  generation_id: string | null;
+  parent_version_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  is_current: boolean;
+}
+
+export interface ListingFieldDiffEntry {
+  base: string | string[] | null;
+  candidate: string | string[];
+  changed: boolean;
+}
+
+export interface ListingProposalDiff {
+  title: ListingFieldDiffEntry;
+  bullets: ListingFieldDiffEntry;
+  description: ListingFieldDiffEntry;
+  backend_keywords: ListingFieldDiffEntry;
+}
+
+export interface ListingProposalSummary {
+  id: string;
+  status: ProposalStatus;
+  revision: number;
+  base_version_id: string | null;
+}
+
+export interface ListingProposalListItem {
+  id: string;
+  product_id: string;
+  base_version_id: string | null;
+  approved_version_id: string | null;
+  status: ProposalStatus;
+  revision: number;
+  candidate_title: string;
+  generation_request_id: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListingProposal {
+  id: string;
+  product_id: string;
+  base_version_id: string | null;
+  candidate_snapshot: ListingSnapshot;
+  field_decisions: FieldDecisions;
+  status: ProposalStatus;
+  revision: number;
+  generation_request_id: string | null;
+  approved_version_id: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListingProposalDetail {
+  proposal: ListingProposal;
+  base_version: ListingVersionSummary | null;
+  approved_version: ListingVersionSummary | null;
+  diff: ListingProposalDiff;
+}
+
+export interface PatchProposalDecisionsResponse {
+  proposal: ListingProposal;
+}
+
+export interface ApproveProposalResponse {
+  proposal: ListingProposal;
+  approved_version: ListingVersionSummary;
+  replay: boolean;
+}
+
+export interface RejectProposalResponse {
+  proposal: ListingProposal;
+  replay: boolean;
+}
+
+export interface ListListingProposalsParams {
+  page?: number;
+  page_size?: number;
+  status?: ProposalListStatus;
+}
+
 
 
 export interface User {
@@ -225,6 +341,8 @@ export interface ListingResult {
   score?: ListingScore;
 
   tokens_used: number;
+
+  proposal?: ListingProposalSummary;
 
 }
 

@@ -1,6 +1,12 @@
 import { API_BASE_URL, TOKEN_KEY } from '@/lib/constants';
+import { ApiClientError } from '@/lib/api-client-error';
 import { formatApiErrorPayload } from '@/lib/api-errors';
 import type { ApiError, ApiResponse } from '@/types';
+
+type RequestOptions = {
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+};
 
 class ApiClient {
   private baseUrl: string;
@@ -48,7 +54,12 @@ class ApiClient {
 
     if (!response.ok) {
       const err = json as ApiError;
-      throw new Error(formatApiErrorPayload(err, response.status));
+      throw new ApiClientError(
+        formatApiErrorPayload(err, response.status),
+        response.status,
+        err.error_code,
+        err.detail,
+      );
     }
 
     const wrapped = json as ApiResponse<T>;
@@ -70,17 +81,52 @@ class ApiClient {
     });
   }
 
-  post<T>(path: string, body?: unknown, extraHeaders?: Record<string, string>) {
+  post<T>(
+    path: string,
+    body?: unknown,
+    options?: RequestOptions | Record<string, string>,
+    legacySignal?: AbortSignal,
+  ) {
+    const resolved = normalizeRequestOptions(options, legacySignal);
     return this.request<T>(path, {
       method: 'POST',
       body: body ? JSON.stringify(body) : undefined,
-      headers: extraHeaders,
+      headers: resolved.headers,
+      signal: resolved.signal,
     });
   }
 
-  delete<T>(path: string) {
-    return this.request<T>(path, { method: 'DELETE' });
+  patch<T>(path: string, body?: unknown, options?: RequestOptions) {
+    return this.request<T>(path, {
+      method: 'PATCH',
+      body: body ? JSON.stringify(body) : undefined,
+      headers: options?.headers,
+      signal: options?.signal,
+    });
   }
+
+  delete<T>(path: string, options?: RequestOptions) {
+    return this.request<T>(path, {
+      method: 'DELETE',
+      signal: options?.signal,
+    });
+  }
+}
+
+function normalizeRequestOptions(
+  options?: RequestOptions | Record<string, string>,
+  legacySignal?: AbortSignal,
+): RequestOptions {
+  if (!options) {
+    return { signal: legacySignal };
+  }
+  if ('signal' in options || 'headers' in options) {
+    return options as RequestOptions;
+  }
+  return {
+    headers: options as Record<string, string>,
+    signal: legacySignal,
+  };
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

@@ -4,6 +4,14 @@ export const AI_RESPONSE_INVALID = 'AI_RESPONSE_INVALID';
 export const GENERATION_IN_PROGRESS = 'GENERATION_IN_PROGRESS';
 export const IDEMPOTENCY_CONFLICT = 'IDEMPOTENCY_CONFLICT';
 export const QUOTA_EXCEEDED = 'QUOTA_EXCEEDED';
+export const LISTING_DECISIONS_INCOMPLETE = 'LISTING_DECISIONS_INCOMPLETE';
+export const LISTING_NO_BASE_PARTIAL_ACCEPT_FORBIDDEN = 'LISTING_NO_BASE_PARTIAL_ACCEPT_FORBIDDEN';
+export const LISTING_PROPOSAL_NOT_REVIEWING = 'LISTING_PROPOSAL_NOT_REVIEWING';
+export const LISTING_PROPOSAL_REVISION_CONFLICT = 'LISTING_PROPOSAL_REVISION_CONFLICT';
+export const LISTING_PROPOSAL_STALE = 'LISTING_PROPOSAL_STALE';
+
+const PROPOSAL_CONFLICT_MESSAGE =
+  'This proposal was updated elsewhere. Reload to continue with the latest revision.';
 
 export function formatApiErrorPayload(
   payload: ApiError,
@@ -27,8 +35,34 @@ export function formatApiErrorPayload(
     );
   }
 
+  if (
+    payload.error_code === LISTING_PROPOSAL_REVISION_CONFLICT ||
+    payload.error_code === LISTING_PROPOSAL_STALE
+  ) {
+    return PROPOSAL_CONFLICT_MESSAGE;
+  }
+
+  if (payload.error_code === LISTING_PROPOSAL_NOT_REVIEWING) {
+    return payload.message || 'This proposal is no longer open for review.';
+  }
+
+  if (payload.error_code === LISTING_DECISIONS_INCOMPLETE) {
+    return payload.message || 'Accept or reject every listing field before continuing.';
+  }
+
+  if (payload.error_code === LISTING_NO_BASE_PARTIAL_ACCEPT_FORBIDDEN) {
+    return (
+      payload.message ||
+      'Partial accept is not allowed when there is no base listing version.'
+    );
+  }
+
   if (payload.error_code === QUOTA_EXCEEDED || httpStatus === 403) {
     return payload.detail || payload.message || 'Your AI quota has been exceeded.';
+  }
+
+  if (httpStatus === 404) {
+    return payload.message || 'The requested resource was not found.';
   }
 
   if (httpStatus === 422) {

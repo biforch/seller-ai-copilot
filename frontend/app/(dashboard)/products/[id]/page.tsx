@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ClipboardList } from 'lucide-react';
 
 import { ListingResultView } from '@/components/features/ListingResult';
 import { ScoreCard } from '@/components/features/ScoreCard';
@@ -86,6 +86,19 @@ export default function ProductDetailPage() {
                 Target customer: {product.target_customer}
               </p>
             )}
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => router.push(`/products/${product.id}/listing/reviews`)}
+                className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+              >
+                <ClipboardList className="h-4 w-4" />
+                AI Listing Reviews
+              </button>
+              <p className="text-sm text-gray-500 mt-2">
+                Review AI suggestions before creating a new listing version.
+              </p>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
