@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+pytest_plugins = ("pytest_asyncio",)
+
 os.environ["ENVIRONMENT"] = "testing"
 os.environ["DATABASE_URL"] = os.environ.get(
     "TEST_DATABASE_URL",
@@ -25,6 +27,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.core.security import create_access_token, get_password_hash
 from app.database.session import Base, get_db
+from app.db.listing_version_immutability import (
+    LISTING_VERSION_IMMUTABILITY_FUNCTION,
+    LISTING_VERSION_IMMUTABILITY_TRIGGER_SQL,
+)
 from app.main import app
 from app.models.product import Product
 from app.models.project import Project
@@ -40,6 +46,35 @@ def _assert_test_database(url: str) -> None:
 _assert_test_database(settings.DATABASE_URL)
 
 
+def _reset_test_schema(engine) -> None:
+    with engine.begin() as connection:
+        table_names = connection.execute(
+            text(
+                """
+                SELECT tablename
+                FROM pg_tables
+                WHERE schemaname = 'public'
+                  AND tablename != 'alembic_version'
+                """
+            )
+        ).scalars()
+        for table_name in table_names:
+            connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text(LISTING_VERSION_IMMUTABILITY_FUNCTION))
+        connection.execute(text(LISTING_VERSION_IMMUTABILITY_TRIGGER_SQL))
+        connection.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_listing_proposals_generation_request_id
+                ON listing_proposals (generation_request_id)
+                WHERE generation_request_id IS NOT NULL
+                """
+            )
+        )
+
+
 @pytest.fixture(scope="session")
 def engine():
     eng = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
@@ -49,10 +84,9 @@ def engine():
     except OperationalError as exc:
         pytest.skip(f"PostgreSQL test database unavailable: {exc}")
 
-    Base.metadata.drop_all(eng)
-    Base.metadata.create_all(eng)
+    _reset_test_schema(eng)
     yield eng
-    Base.metadata.drop_all(eng)
+    _reset_test_schema(eng)
 
 
 @pytest.fixture
@@ -64,7 +98,8 @@ def db_session(engine) -> Session:
         yield session
     finally:
         session.close()
-        transaction.rollback()
+        if transaction.is_active:
+            transaction.rollback()
         connection.close()
 
 

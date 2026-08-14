@@ -2,11 +2,11 @@ import os
 from pathlib import Path
 
 import pytest
-from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
 
 from alembic import command
+from alembic.config import Config
 from app.core.migration_guard import validate_before_destructive_migration
 from app.database.session import Base
 
@@ -16,6 +16,8 @@ EXPECTED_TABLES = {
     "products",
     "generations",
     "generation_requests",
+    "listing_versions",
+    "listing_proposals",
     "subscriptions",
     "alembic_version",
 }
@@ -28,9 +30,18 @@ def _reset_migration_database(url: str) -> None:
         migration_test_database_url=url,
         engine=engine,
     )
-    Base.metadata.drop_all(bind=engine)
     with engine.begin() as connection:
-        connection.execute(text("DROP TABLE IF EXISTS alembic_version"))
+        table_names = connection.execute(
+            text(
+                """
+                SELECT tablename
+                FROM pg_tables
+                WHERE schemaname = 'public'
+                """
+            )
+        ).scalars()
+        for table_name in table_names:
+            connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
     engine.dispose()
 
 
@@ -139,7 +150,60 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "b2c3d4e5f6a7"
+        assert current == "c3d4e5f6a7b8"
+
+    listing_version_indexes = {idx["name"] for idx in inspector.get_indexes("listing_versions")}
+    assert "ix_listing_versions_product_id_created_at" in listing_version_indexes
+    listing_unique = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("listing_versions")
+    }
+    assert ("product_id", "version_number") in listing_unique
+    assert ("product_id", "operation_idempotency_key") in listing_unique
+
+    proposal_indexes = {idx["name"] for idx in inspector.get_indexes("listing_proposals")}
+    assert "ix_listing_proposals_product_id_status" in proposal_indexes
+    assert "ix_listing_proposals_product_id_created_at" in proposal_indexes
+    assert "uq_listing_proposals_generation_request_id" in proposal_indexes
+
+    product_columns = {column["name"] for column in inspector.get_columns("products")}
+    assert "current_listing_version_id" in product_columns
+    assert _fk_ondelete(inspector, "products", "current_listing_version_id") == "SETNULL"
+    product_fks = inspector.get_foreign_keys("products")
+    current_fk = next(
+        fk for fk in product_fks if fk.get("constrained_columns") == ["current_listing_version_id"]
+    )
+    assert current_fk["name"] == "fk_products_current_listing_version_id_listing_versions"
+
+    assert _fk_ondelete(inspector, "listing_versions", "product_id") == "CASCADE"
+    assert _fk_ondelete(inspector, "listing_versions", "generation_id") == "SETNULL"
+    assert _fk_ondelete(inspector, "listing_versions", "created_by") == "SETNULL"
+    assert _fk_ondelete(inspector, "listing_proposals", "product_id") == "CASCADE"
+    assert _fk_ondelete(inspector, "listing_proposals", "base_version_id") == "SETNULL"
+    assert _fk_ondelete(inspector, "listing_proposals", "approved_version_id") == "SETNULL"
+    assert _fk_ondelete(inspector, "listing_proposals", "reviewed_by") == "SETNULL"
+
+    with engine.connect() as connection:
+        trigger_exists = connection.execute(
+            text(
+                """
+                SELECT 1
+                FROM pg_trigger
+                WHERE tgname = 'trg_listing_versions_immutable'
+                """
+            )
+        ).scalar_one_or_none()
+        assert trigger_exists == 1
+        function_exists = connection.execute(
+            text(
+                """
+                SELECT 1
+                FROM pg_proc
+                WHERE proname = 'prevent_listing_version_mutation'
+                """
+            )
+        ).scalar_one_or_none()
+        assert function_exists == 1
 
     project_indexes = {idx["name"] for idx in inspector.get_indexes("projects")}
     product_indexes = {idx["name"] for idx in inspector.get_indexes("products")}
@@ -152,6 +216,39 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert project_index["column_names"] == ["user_id", "updated_at", "created_at", "id"]
     assert "ix_products_project_id_created_at_id" in product_indexes
     assert "ix_generations_product_id" in generation_indexes
+
+    command.downgrade(cfg, "b2c3d4e5f6a7")
+    inspector_mid = inspect(engine)
+    mid_tables = set(inspector_mid.get_table_names())
+    assert "listing_versions" not in mid_tables
+    assert "listing_proposals" not in mid_tables
+    mid_product_columns = {column["name"] for column in inspector_mid.get_columns("products")}
+    assert "current_listing_version_id" not in mid_product_columns
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text(
+                    """
+                    SELECT 1
+                    FROM pg_trigger
+                    WHERE tgname = 'trg_listing_versions_immutable'
+                    """
+                )
+            ).scalar_one_or_none()
+            is None
+        )
+        assert (
+            connection.execute(
+                text(
+                    """
+                    SELECT 1
+                    FROM pg_proc
+                    WHERE proname = 'prevent_listing_version_mutation'
+                    """
+                )
+            ).scalar_one_or_none()
+            is None
+        )
 
     command.downgrade(cfg, "34b6d855017a")
 
@@ -173,6 +270,8 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
         "products",
         "generations",
         "generation_requests",
+        "listing_versions",
+        "listing_proposals",
         "subscriptions",
     ]:
         model_columns = {column.name for column in Base.metadata.tables[table_name].columns}

@@ -8,3 +8,4 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "alembic/versions/34b6d855017a_baseline_schema.py" = ["I001"]
+"tests/conftest.py" = ["E402"]

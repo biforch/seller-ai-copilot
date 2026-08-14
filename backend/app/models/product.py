@@ -78,6 +78,17 @@ class Product(Base):
         nullable=True,
     )
 
+    current_listing_version_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "listing_versions.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_products_current_listing_version_id_listing_versions",
+        ),
+        nullable=True,
+    )
+
     created_at = Column(
         DateTime,
         server_default=func.now(),
@@ -91,4 +102,25 @@ class Product(Base):
     user = relationship(
         "User",
         back_populates="products",
+    )
+
+    listing_versions = relationship(
+        "ListingVersion",
+        back_populates="product",
+        foreign_keys="ListingVersion.product_id",
+        passive_deletes=True,
+    )
+
+    listing_proposals = relationship(
+        "ListingProposal",
+        back_populates="product",
+        foreign_keys="ListingProposal.product_id",
+        passive_deletes=True,
+    )
+
+    current_listing_version = relationship(
+        "ListingVersion",
+        foreign_keys=[current_listing_version_id],
+        uselist=False,
+        post_update=True,
     )
