@@ -27,3 +27,9 @@ class User(Base):
 
     products = relationship("Product", back_populates="user", cascade="all, delete")
     projects = relationship("Project", back_populates="user", cascade="all, delete")
+    amazon_accounts = relationship(
+        "AmazonAccount",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )

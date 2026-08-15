@@ -19,6 +19,9 @@ EXPECTED_TABLES = {
     "listing_versions",
     "listing_proposals",
     "subscriptions",
+    "amazon_accounts",
+    "amazon_marketplace_participations",
+    "amazon_sync_logs",
     "alembic_version",
 }
 
@@ -150,7 +153,41 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "c3d4e5f6a7b8"
+        assert current == "558e1071cb88"
+
+    amazon_unique = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("amazon_accounts")
+    }
+    assert ("account_key",) in amazon_unique
+    assert ("user_id", "refresh_token_fingerprint") in amazon_unique
+    assert ("user_id", "region", "endpoint_mode") not in amazon_unique
+
+    account_checks = {c["name"] for c in inspector.get_check_constraints("amazon_accounts")}
+    assert "ck_amazon_accounts_key_version_max" in account_checks
+    assert "ck_amazon_accounts_region" in account_checks
+    assert "ck_amazon_accounts_endpoint_mode" in account_checks
+    assert "ck_amazon_accounts_status" in account_checks
+
+    amp_columns = {
+        column["name"] for column in inspector.get_columns("amazon_marketplace_participations")
+    }
+    assert "sync_eligible" not in amp_columns
+
+    amp_unique = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("amazon_marketplace_participations")
+    }
+    assert ("amazon_account_id", "marketplace_id") in amp_unique
+
+    sync_checks = {c["name"] for c in inspector.get_check_constraints("amazon_sync_logs")}
+    assert "ck_amazon_sync_logs_operation" in sync_checks
+    assert "ck_amazon_sync_logs_status" in sync_checks
+    assert "ck_amazon_sync_logs_items_seen_nonneg" in sync_checks
+
+    assert _fk_ondelete(inspector, "amazon_accounts", "user_id") == "CASCADE"
+    assert _fk_ondelete(inspector, "amazon_marketplace_participations", "amazon_account_id") == "CASCADE"
+    assert _fk_ondelete(inspector, "amazon_sync_logs", "amazon_account_id") == "CASCADE"
 
     listing_version_indexes = {idx["name"] for idx in inspector.get_indexes("listing_versions")}
     assert "ix_listing_versions_product_id_created_at" in listing_version_indexes
@@ -217,6 +254,13 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert "ix_products_project_id_created_at_id" in product_indexes
     assert "ix_generations_product_id" in generation_indexes
 
+    command.downgrade(cfg, "c3d4e5f6a7b8")
+    inspector_amazon_down = inspect(engine)
+    amazon_down_tables = set(inspector_amazon_down.get_table_names())
+    assert "amazon_accounts" not in amazon_down_tables
+    assert "amazon_marketplace_participations" not in amazon_down_tables
+    assert "amazon_sync_logs" not in amazon_down_tables
+
     command.downgrade(cfg, "b2c3d4e5f6a7")
     inspector_mid = inspect(engine)
     mid_tables = set(inspector_mid.get_table_names())
@@ -273,6 +317,9 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
         "listing_versions",
         "listing_proposals",
         "subscriptions",
+        "amazon_accounts",
+        "amazon_marketplace_participations",
+        "amazon_sync_logs",
     ]:
         model_columns = {column.name for column in Base.metadata.tables[table_name].columns}
         db_columns = {column["name"] for column in inspector_reup.get_columns(table_name)}

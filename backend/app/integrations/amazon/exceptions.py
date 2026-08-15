@@ -15,6 +15,7 @@ AMAZON_SP_API_SERVER_ERROR = "AMAZON_SP_API_SERVER_ERROR"
 AMAZON_SP_API_TRANSPORT_ERROR = "AMAZON_SP_API_TRANSPORT_ERROR"
 AMAZON_RESPONSE_INVALID = "AMAZON_RESPONSE_INVALID"
 AMAZON_RESPONSE_TOO_LARGE = "AMAZON_RESPONSE_TOO_LARGE"
+AMAZON_TOKEN_DECRYPTION_FAILED = "AMAZON_TOKEN_DECRYPTION_FAILED"
 
 ERROR_BODY_MAX_LEN = 500
 
@@ -62,6 +63,13 @@ def amazon_response_too_large_error() -> AmazonError:
     return AmazonError(
         "Amazon integration response exceeded size limit",
         error_code=AMAZON_RESPONSE_TOO_LARGE,
+    )
+
+
+def amazon_token_decryption_failed_error() -> AmazonError:
+    return AmazonError(
+        "Amazon refresh token could not be decrypted",
+        error_code=AMAZON_TOKEN_DECRYPTION_FAILED,
     )
 
 

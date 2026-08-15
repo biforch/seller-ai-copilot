@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     AMAZON_SP_API_ENDPOINT_MODE: Literal["mock", "sandbox", "production"] = "mock"
     AMAZON_SP_API_USER_AGENT: str = "SellerAI-Copilot/1.0.0 (Language=Python)"
 
+    AMAZON_TOKEN_ACTIVE_KEY_VERSION: int = 0
+    AMAZON_TOKEN_KEY_V1: str = ""
+    AMAZON_TOKEN_KEY_V0: str = ""
+    AMAZON_TOKEN_FINGERPRINT_PEPPER: str = ""
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> str:
