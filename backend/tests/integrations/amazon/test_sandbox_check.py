@@ -98,16 +98,25 @@ def _sandbox_settings(**overrides: Any) -> AmazonSettings:
     return AmazonSettings(**defaults)
 
 
-def _participation_payload() -> list[dict[str, Any]]:
-    return [
-        {
-            "marketplace": {"id": "ATVPDKIKX0DER", "countryCode": "US"},
-            "participation": {
-                "isParticipating": True,
-                "hasSuspendedListings": False,
-            },
-        }
-    ]
+def _participation_payload() -> dict[str, Any]:
+    return {
+        "payload": [
+            {
+                "marketplace": {
+                    "id": "ATVPDKIKX0DER",
+                    "countryCode": "US",
+                    "name": "Amazon.com",
+                    "defaultCurrencyCode": "USD",
+                    "defaultLanguageCode": "en_US",
+                    "domainName": "www.amazon.com",
+                },
+                "participation": {
+                    "isParticipating": True,
+                    "hasSuspendedListings": False,
+                },
+            }
+        ]
+    }
 
 
 def _make_mock_transport(
@@ -664,9 +673,56 @@ async def test_execute_sandbox_check_validates_success_schema():
         refresh_token=FAKE_REFRESH_TOKEN,
         transport=transport,
     )
-    assert result.payload_type == "list"
+    assert result.payload_type == "dict"
     assert result.participations[0].country_code == "US"
     assert result.participations[0].marketplace_id == "ATVPDKIKX0DER"
+
+
+MAPPER_CANARY = "SENSITIVE_RESPONSE_CANARY_7f3e"
+
+
+@pytest.mark.asyncio
+async def test_execute_sandbox_check_mapper_failure_does_not_leak_payload(
+    caplog: pytest.LogCaptureFixture,
+):
+    transport = _make_mock_transport(
+        sp_api_payload={
+            "payload": [
+                {
+                    "marketplace": {
+                        "id": "M1",
+                        "countryCode": "US",
+                        "name": MAPPER_CANARY,
+                        "defaultCurrencyCode": "USD",
+                        "defaultLanguageCode": "en_US",
+                        "domainName": "www.amazon.com",
+                    },
+                    "participation": {
+                        "isParticipating": MAPPER_CANARY,
+                        "hasSuspendedListings": False,
+                    },
+                }
+            ]
+        }
+    )
+    settings = _sandbox_settings()
+    with caplog.at_level("WARNING"):
+        with pytest.raises(sandbox_script.SandboxCheckError) as exc_info:
+            await sandbox_script.execute_sandbox_check(
+                settings=settings,
+                refresh_token=FAKE_REFRESH_TOKEN,
+                transport=transport,
+            )
+    assert exc_info.value.stage == "response"
+    assert exc_info.value.error_code == AMAZON_RESPONSE_INVALID
+    combined = " ".join(
+        [
+            str(exc_info.value),
+            repr(exc_info.value),
+            " ".join(record.message for record in caplog.records),
+        ]
+    )
+    assert MAPPER_CANARY not in combined
 
 
 @pytest.mark.asyncio

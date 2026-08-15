@@ -14,7 +14,6 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlparse
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +22,6 @@ if _backend_root_str not in sys.path:
     sys.path.insert(0, _backend_root_str)
 
 # ruff: noqa: E402
-from pydantic import BaseModel, Field, ValidationError
 
 from app.integrations.amazon.client import SpApiClient
 from app.integrations.amazon.config import AmazonEndpointMode, AmazonSettings
@@ -36,12 +34,17 @@ from app.integrations.amazon.exceptions import (
     AmazonError,
 )
 from app.integrations.amazon.lwa import CachingRefreshTokenProvider, LwaTokenClient
+from app.integrations.amazon.sellers import (
+    MARKETPLACE_PARTICIPATIONS_PATH,
+    SellerMarketplaceParticipation,
+    map_marketplace_participations,
+)
 from app.integrations.amazon.token_cache import InMemoryTokenCache
 from app.integrations.amazon.transport import HttpTransport, HttpxTransport
 
 CONFIRM_PHRASE = "LIVE_SANDBOX_ONLY"
 SANDBOX_ACCOUNT_KEY = "sandbox-check"
-SANDBOX_MARKETPLACE_PATH = "/sellers/v1/marketplaceParticipations"
+SANDBOX_MARKETPLACE_PATH = MARKETPLACE_PARTICIPATIONS_PATH
 SANDBOX_NA_HOST = "sandbox.sellingpartnerapi-na.amazon.com"
 OFFICIAL_LWA_TOKEN_URL = DEFAULT_LWA_TOKEN_URL
 ALLOWED_LWA_HOSTS = frozenset({"api.amazon.com"})
@@ -104,27 +107,23 @@ class SandboxEnvConfig:
     user_agent: str
 
 
-class MarketplacePayload(BaseModel):
-    id: str = Field(min_length=1)
-    countryCode: str = Field(min_length=1)
-
-
-class ParticipationPayload(BaseModel):
-    isParticipating: bool
-    hasSuspendedListings: bool
-
-
-class MarketplaceParticipationPayload(BaseModel):
-    marketplace: MarketplacePayload
-    participation: ParticipationPayload
-
-
 @dataclass(frozen=True)
 class MarketplaceParticipationSummary:
     country_code: str
     marketplace_id: str
     is_participating: bool
     has_suspended_listings: bool
+
+
+def _to_participation_summary(
+    participation: SellerMarketplaceParticipation,
+) -> MarketplaceParticipationSummary:
+    return MarketplaceParticipationSummary(
+        country_code=participation.country_code,
+        marketplace_id=participation.marketplace_id,
+        is_participating=participation.participating,
+        has_suspended_listings=participation.suspended_listings,
+    )
 
 
 @dataclass(frozen=True)
@@ -500,35 +499,13 @@ def build_amazon_settings(config: SandboxEnvConfig) -> AmazonSettings:
     )
 
 
-def parse_marketplace_participations(payload: Any) -> list[MarketplaceParticipationSummary]:
-    if isinstance(payload, dict) and "payload" in payload:
-        payload = payload["payload"]
-    if not isinstance(payload, list):
-        raise SandboxCheckError(
-            stage="response",
-            error_code=AMAZON_RESPONSE_INVALID,
-            message="Marketplace participations payload must be an array",
-        )
-
-    summaries: list[MarketplaceParticipationSummary] = []
-    for item in payload:
-        try:
-            parsed = MarketplaceParticipationPayload.model_validate(item)
-        except ValidationError:
-            raise SandboxCheckError(
-                stage="response",
-                error_code=AMAZON_RESPONSE_INVALID,
-                message="Marketplace participations payload failed schema validation",
-            )
-        summaries.append(
-            MarketplaceParticipationSummary(
-                country_code=parsed.marketplace.countryCode,
-                marketplace_id=parsed.marketplace.id,
-                is_participating=parsed.participation.isParticipating,
-                has_suspended_listings=parsed.participation.hasSuspendedListings,
-            )
-        )
-    return summaries
+def _response_invalid_sandbox_error(*, request_id: str | None = None) -> SandboxCheckError:
+    return SandboxCheckError(
+        stage="response",
+        error_code=AMAZON_RESPONSE_INVALID,
+        message="Marketplace participations payload failed schema validation",
+        request_id=request_id,
+    )
 
 
 def validate_live_cli(*, live_sandbox: bool, confirm: str | None, env_file: Path | None) -> None:
@@ -646,16 +623,22 @@ async def execute_sandbox_check(
         SANDBOX_MARKETPLACE_PATH,
         account_key=SANDBOX_ACCOUNT_KEY,
     )
-
-    participations = parse_marketplace_participations(response.payload)
-    payload_type = type(response.payload).__name__
     request_id = response.headers.get("x-amzn-requestid")
+    try:
+        domain_participations = map_marketplace_participations(response.payload)
+    except AmazonError as exc:
+        if exc.error_code == AMAZON_RESPONSE_INVALID:
+            raise _response_invalid_sandbox_error(request_id=request_id) from None
+        raise
+
+    participations = tuple(_to_participation_summary(item) for item in domain_participations)
+    payload_type = type(response.payload).__name__
     return SandboxCheckSuccess(
         http_status=response.status_code,
         request_id=request_id,
         payload_type=payload_type,
         participation_count=len(participations),
-        participations=tuple(participations),
+        participations=participations,
     )
 
 

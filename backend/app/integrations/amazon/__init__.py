@@ -16,6 +16,7 @@ from app.integrations.amazon.lwa import (
     LwaTokenResponse,
     RefreshTokenProvider,
 )
+from app.integrations.amazon.sellers import SellerMarketplaceParticipation, SellersClient
 from app.integrations.amazon.token_cache import InMemoryTokenCache, SingleFlightCoordinator
 from app.integrations.amazon.transport import HttpResponse, HttpxTransport
 
@@ -30,6 +31,8 @@ __all__ = [
     "LwaTokenClient",
     "LwaTokenResponse",
     "RefreshTokenProvider",
+    "SellerMarketplaceParticipation",
+    "SellersClient",
     "SingleFlightCoordinator",
     "SpApiClient",
     "SpApiResponse",
