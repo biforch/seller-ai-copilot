@@ -63,6 +63,12 @@ backend/*.egg-info/
 /a2-sp-api-sandbox-*.md
 /a2-sp-api-sandbox-*.patch
 /a2-sp-api-sandbox-*.txt
+/a2.2-sellers-api-*.md
+/a2.2-sellers-api-*.patch
+/a2.2-sellers-api-*.txt
+/a2.2.1-sellers-api-*.md
+/a2.2.1-sellers-api-*.patch
+/a2.2.1-sellers-api-*.txt
 p1.*-review.patch
 p1.*-review.md
 p1.*-pytest.txt
