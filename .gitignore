@@ -56,6 +56,9 @@ backend/*.egg-info/
 /rc1.2.1-docker-fix-*.md
 /rc1.2.1-docker-fix-*.patch
 /rc1.2.1-docker-fix-*.txt
+/a1-sp-api-foundation-*.md
+/a1-sp-api-foundation-*.patch
+/a1-sp-api-foundation-*.txt
 p1.*-review.patch
 p1.*-review.md
 p1.*-pytest.txt
