@@ -5,6 +5,8 @@ from typing import Literal
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.integrations.amazon.config import AmazonEndpointMode, AmazonSettings
+
 WEAK_JWT_SECRETS = frozenset(
     {
         "",
@@ -49,6 +51,14 @@ class Settings(BaseSettings):
     APP_NAME: str = "SellerAI Copilot"
     DEBUG: bool = False
 
+    AMAZON_SP_API_ENABLED: bool = False
+    AMAZON_LWA_CLIENT_ID: str = ""
+    AMAZON_LWA_CLIENT_SECRET: str = ""
+    AMAZON_LWA_TOKEN_URL: str = "https://api.amazon.com/auth/o2/token"
+    AMAZON_SP_API_REGION: Literal["na", "eu", "fe"] = "na"
+    AMAZON_SP_API_ENDPOINT_MODE: Literal["mock", "sandbox", "production"] = "mock"
+    AMAZON_SP_API_USER_AGENT: str = "SellerAI-Copilot/1.0.0 (Language=Python)"
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> str:
@@ -66,6 +76,19 @@ class Settings(BaseSettings):
     def is_dev_like(self) -> bool:
         return self.ENVIRONMENT in {"development", "testing"}
 
+    @property
+    def amazon_settings(self) -> AmazonSettings:
+        return AmazonSettings(
+            enabled=self.AMAZON_SP_API_ENABLED,
+            lwa_client_id=self.AMAZON_LWA_CLIENT_ID,
+            lwa_client_secret=self.AMAZON_LWA_CLIENT_SECRET,
+            lwa_token_url=self.AMAZON_LWA_TOKEN_URL,
+            sp_api_region=self.AMAZON_SP_API_REGION,
+            endpoint_mode=AmazonEndpointMode(self.AMAZON_SP_API_ENDPOINT_MODE),
+            user_agent=self.AMAZON_SP_API_USER_AGENT,
+            environment=self.ENVIRONMENT,
+        )
+
     @model_validator(mode="after")
     def validate_environment(self) -> Settings:
         if self.ENVIRONMENT == "testing":
@@ -80,6 +103,11 @@ class Settings(BaseSettings):
                 self.JWT_SECRET_KEY = "pytest-jwt-secret-key-min-32-chars-long"
             if not self.OPENAI_API_KEY:
                 self.OPENAI_API_KEY = "test-openai-key-not-used"
+            if self.AMAZON_SP_API_ENDPOINT_MODE != "mock":
+                raise ValueError(
+                    "Testing environment requires AMAZON_SP_API_ENDPOINT_MODE=mock"
+                )
+            _ = self.amazon_settings
             return self
 
         if not self.DATABASE_URL:
@@ -93,6 +121,7 @@ class Settings(BaseSettings):
                 self.JWT_SECRET_KEY = "dev-only-jwt-secret-key-min-32-chars"
             if not self.OPENAI_API_KEY:
                 raise ValueError("OPENAI_API_KEY is required in development")
+            _ = self.amazon_settings
             return self
 
         if not self.JWT_SECRET_KEY or self.JWT_SECRET_KEY in WEAK_JWT_SECRETS:
@@ -103,6 +132,7 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_API_KEY is required")
         if self.DEBUG:
             raise ValueError("DEBUG must remain false outside development/testing")
+        _ = self.amazon_settings
         return self
 
 

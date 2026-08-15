@@ -13,6 +13,14 @@ _JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 _TOKEN_KV_RE = re.compile(
     r"(?i)\b(access_token|refresh_token|client_secret|api_key)\s*[:=]\s*\S+"
 )
+_AMZ_ACCESS_TOKEN_HEADER_RE = re.compile(
+    r"(?i)x-amz-access-token\s*[:=]\s*\S+"
+)
+_AMAZON_LWA_ATZA_RE = re.compile(r"Atza\|[^\s\"'&]+")
+_AMAZON_LWA_ATZR_RE = re.compile(r"Atzr\|[^\s\"'&]+")
+_JSON_TOKEN_RE = re.compile(
+    r'(?i)"(access_token|refresh_token|client_secret)"\s*:\s*"[^"]*"'
+)
 _URL_CREDENTIALS_RE = re.compile(r"://[^:@/\s]+:[^@/\s]+@")
 
 
@@ -41,4 +49,14 @@ def redact_sensitive_text(text: str) -> str:
     redacted = _API_KEY_RE.sub("sk-[REDACTED]", redacted)
     redacted = _JWT_RE.sub("jwt:[REDACTED]", redacted)
     redacted = _TOKEN_KV_RE.sub(r"\1=[REDACTED]", redacted)
+    redacted = _AMZ_ACCESS_TOKEN_HEADER_RE.sub("x-amz-access-token=[REDACTED]", redacted)
+    redacted = _AMAZON_LWA_ATZA_RE.sub("Atza|[REDACTED]", redacted)
+    redacted = _AMAZON_LWA_ATZR_RE.sub("Atzr|[REDACTED]", redacted)
     return _URL_CREDENTIALS_RE.sub("://[REDACTED]:[REDACTED]@", redacted)
+
+
+def redact_amazon_detail(text: str, *, max_len: int = 500) -> str:
+    """Redact Amazon/LWA/SP-API sensitive fragments, then clip the redacted text."""
+    redacted = redact_sensitive_text(text)
+    redacted = _JSON_TOKEN_RE.sub(r'"\1":"[REDACTED]"', redacted)
+    return redacted[:max_len]
