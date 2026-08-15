@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -110,13 +111,40 @@ def test_manual_llm_scripts_do_not_execute_on_import():
     for script_name in (
         "check_openai_connection.py",
         "check_openrouter_connection.py",
+        "check_amazon_sp_api_sandbox.py",
     ):
         script_path = scripts_dir / script_name
         spec = importlib.util.spec_from_file_location(script_name, script_path)
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         assert callable(getattr(module, "test", None) or getattr(module, "main", None))
+
+
+def test_gitignore_ignores_amazon_sandbox_env_file():
+    gitignore = (Path(__file__).resolve().parents[2] / ".gitignore").read_text(encoding="utf-8")
+    assert "/backend/.env.amazon.sandbox" in gitignore
+
+
+def test_amazon_sandbox_script_has_no_production_endpoint_fallback():
+    script_path = (
+        Path(__file__).resolve().parents[1] / "scripts" / "check_amazon_sp_api_sandbox.py"
+    )
+    source = script_path.read_text(encoding="utf-8")
+    assert "AmazonEndpointMode.PRODUCTION" not in source
+    assert 'endpoint_mode="production"' not in source
+    assert "SANDBOX_NA_HOST" in source
+
+
+def test_amazon_sandbox_script_source_has_no_real_credentials():
+    script_path = (
+        Path(__file__).resolve().parents[1] / "scripts" / "check_amazon_sp_api_sandbox.py"
+    )
+    source = script_path.read_text(encoding="utf-8")
+    assert "AKIA" not in source
+    assert "Atza|" not in source
+    assert "Atzr|" not in source
 
 
 def test_dockerignore_excludes_env_but_keeps_example():
