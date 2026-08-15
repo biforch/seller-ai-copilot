@@ -16,6 +16,14 @@ AMAZON_SP_API_TRANSPORT_ERROR = "AMAZON_SP_API_TRANSPORT_ERROR"
 AMAZON_RESPONSE_INVALID = "AMAZON_RESPONSE_INVALID"
 AMAZON_RESPONSE_TOO_LARGE = "AMAZON_RESPONSE_TOO_LARGE"
 AMAZON_TOKEN_DECRYPTION_FAILED = "AMAZON_TOKEN_DECRYPTION_FAILED"
+AMAZON_ACCOUNT_NOT_FOUND = "AMAZON_ACCOUNT_NOT_FOUND"
+AMAZON_ACCOUNT_ALREADY_EXISTS = "AMAZON_ACCOUNT_ALREADY_EXISTS"
+AMAZON_ACCOUNT_DISABLED = "AMAZON_ACCOUNT_DISABLED"
+AMAZON_SYNC_IN_PROGRESS = "AMAZON_SYNC_IN_PROGRESS"
+AMAZON_SYNC_LEASE_LOST = "AMAZON_SYNC_LEASE_LOST"
+AMAZON_SYNC_LEASE_EXPIRED = "AMAZON_SYNC_LEASE_EXPIRED"
+AMAZON_SYNC_FINALIZE_FAILED = "AMAZON_SYNC_FINALIZE_FAILED"
+AMAZON_SAFE_DETAIL_INVALID = "AMAZON_SAFE_DETAIL_INVALID"
 
 ERROR_BODY_MAX_LEN = 500
 
@@ -70,6 +78,62 @@ def amazon_token_decryption_failed_error() -> AmazonError:
     return AmazonError(
         "Amazon refresh token could not be decrypted",
         error_code=AMAZON_TOKEN_DECRYPTION_FAILED,
+    )
+
+
+def amazon_account_not_found_error() -> AmazonError:
+    return AmazonError(
+        "Amazon account was not found",
+        error_code=AMAZON_ACCOUNT_NOT_FOUND,
+        status_code=404,
+    )
+
+
+def amazon_account_already_exists_error() -> AmazonError:
+    return AmazonError(
+        "Amazon account already exists for this refresh token",
+        error_code=AMAZON_ACCOUNT_ALREADY_EXISTS,
+        status_code=409,
+    )
+
+
+def amazon_account_disabled_error() -> AmazonError:
+    return AmazonError(
+        "Amazon account is disabled",
+        error_code=AMAZON_ACCOUNT_DISABLED,
+        status_code=403,
+    )
+
+
+def amazon_sync_in_progress_error() -> AmazonError:
+    return AmazonError(
+        "Amazon account sync is already in progress",
+        error_code=AMAZON_SYNC_IN_PROGRESS,
+        status_code=409,
+    )
+
+
+def amazon_sync_lease_lost_error() -> AmazonError:
+    return AmazonError(
+        "Amazon sync lease was lost",
+        error_code=AMAZON_SYNC_LEASE_LOST,
+        status_code=409,
+    )
+
+
+def amazon_sync_finalize_failed_error() -> AmazonError:
+    return AmazonError(
+        "Amazon sync finalize failed",
+        error_code=AMAZON_SYNC_FINALIZE_FAILED,
+        status_code=500,
+    )
+
+
+def amazon_safe_detail_invalid_error() -> AmazonError:
+    return AmazonError(
+        "Amazon sync safe detail is invalid",
+        error_code=AMAZON_SAFE_DETAIL_INVALID,
+        status_code=400,
     )
 
 

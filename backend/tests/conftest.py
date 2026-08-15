@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-pytest_plugins = ("pytest_asyncio",)
+pytest_plugins = ("pytest_asyncio", "tests.fixtures.amazon_a32")
 
 os.environ["ENVIRONMENT"] = "testing"
 os.environ["DATABASE_URL"] = os.environ.get(
