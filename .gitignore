@@ -47,6 +47,9 @@ backend/*.egg-info/
 /rc1-release-readiness-*.md
 /rc1-release-readiness-*.patch
 /rc1-release-readiness-*.txt
+/rc1.1-container-*.md
+/rc1.1-container-*.patch
+/rc1.1-container-*.txt
 p1.*-review.patch
 p1.*-review.md
 p1.*-pytest.txt
