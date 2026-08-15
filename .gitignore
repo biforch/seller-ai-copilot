@@ -60,6 +60,9 @@ backend/*.egg-info/
 /a1-sp-api-foundation-*.md
 /a1-sp-api-foundation-*.patch
 /a1-sp-api-foundation-*.txt
+/a2-sp-api-sandbox-*.md
+/a2-sp-api-sandbox-*.patch
+/a2-sp-api-sandbox-*.txt
 p1.*-review.patch
 p1.*-review.md
 p1.*-pytest.txt
