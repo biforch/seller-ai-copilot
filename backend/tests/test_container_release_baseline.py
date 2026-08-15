@@ -181,6 +181,31 @@ def test_frontend_production_dockerfile_standalone_runner() -> None:
     assert ".next/static" in content
 
 
+def _normalized_dockerfile_text(path: Path) -> str:
+    return re.sub(r"\s+", " ", _read(path))
+
+
+def test_frontend_production_dockerfile_uses_alpine_user_creation() -> None:
+    content = _normalized_dockerfile_text(FRONTEND_DOCKERFILE_PROD)
+    lowered = content.lower()
+
+    assert "addgroup -s -g 1001 nodejs" in lowered
+    assert "adduser -s" in lowered
+    assert "-u 1001" in lowered
+    assert "-g nodejs" in lowered
+    assert " nextjs" in lowered or " nextjs " in lowered
+    assert "user nextjs" in lowered
+    assert "user root" not in lowered
+
+    forbidden_fragments = (
+        "adduser --system --uid 1001 --gid",
+        "adduser --gid",
+        "npm run dev",
+    )
+    for fragment in forbidden_fragments:
+        assert fragment.lower() not in lowered, f"unexpected fragment: {fragment!r}"
+
+
 def test_rc_compose_has_no_bind_mounts_or_backend_env_file() -> None:
     content = _read(RC_COMPOSE)
     assert "env_file:" not in content
