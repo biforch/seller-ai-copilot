@@ -19,6 +19,7 @@ backend/*.egg-info/
 
 # ---- General ----
 .env
+.env.rc
 .DS_Store
 *.log
 .idea/

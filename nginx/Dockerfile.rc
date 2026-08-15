@@ -1,0 +1,6 @@
+FROM nginx:1.27-alpine
+
+COPY nginx.rc.conf /etc/nginx/conf.d/default.conf
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://127.0.0.1/health || exit 1
