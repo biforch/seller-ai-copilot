@@ -50,6 +50,12 @@ backend/*.egg-info/
 /rc1.1-container-*.md
 /rc1.1-container-*.patch
 /rc1.1-container-*.txt
+/rc1.2-docker-validation-*.md
+/rc1.2-docker-validation-*.patch
+/rc1.2-docker-validation-*.txt
+/rc1.2.1-docker-fix-*.md
+/rc1.2.1-docker-fix-*.patch
+/rc1.2.1-docker-fix-*.txt
 p1.*-review.patch
 p1.*-review.md
 p1.*-pytest.txt
