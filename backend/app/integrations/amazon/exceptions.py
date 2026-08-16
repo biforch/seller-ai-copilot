@@ -24,6 +24,7 @@ AMAZON_SYNC_LEASE_LOST = "AMAZON_SYNC_LEASE_LOST"
 AMAZON_SYNC_LEASE_EXPIRED = "AMAZON_SYNC_LEASE_EXPIRED"
 AMAZON_SYNC_FINALIZE_FAILED = "AMAZON_SYNC_FINALIZE_FAILED"
 AMAZON_SAFE_DETAIL_INVALID = "AMAZON_SAFE_DETAIL_INVALID"
+AMAZON_SELLING_PARTNER_ID_REQUIRED = "AMAZON_SELLING_PARTNER_ID_REQUIRED"
 
 ERROR_BODY_MAX_LEN = 500
 
@@ -134,6 +135,13 @@ def amazon_safe_detail_invalid_error() -> AmazonError:
         "Amazon sync safe detail is invalid",
         error_code=AMAZON_SAFE_DETAIL_INVALID,
         status_code=400,
+    )
+
+
+def amazon_selling_partner_id_required_error() -> AmazonError:
+    return AmazonError(
+        "Amazon selling partner id is required",
+        error_code=AMAZON_SELLING_PARTNER_ID_REQUIRED,
     )
 
 

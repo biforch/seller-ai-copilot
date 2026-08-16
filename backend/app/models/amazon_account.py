@@ -52,6 +52,9 @@ class AmazonAccount(Base):
     refresh_token_ciphertext: Mapped[bytes] = mapped_column(LargeBinary(), nullable=False)
     refresh_token_key_version: Mapped[int] = mapped_column(SmallInteger(), nullable=False)
     refresh_token_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # OAuth redirect provides selling_partner_id; nullable for pre-OAuth accounts.
+    # Official OpenAPI in repo does not declare maxLength — 32 is conservative.
+    selling_partner_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     sync_lease_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     sync_lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -80,6 +83,12 @@ class AmazonAccount(Base):
     )
     sync_logs = relationship(
         "AmazonSyncLog",
+        back_populates="amazon_account",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    amazon_listings = relationship(
+        "AmazonListing",
         back_populates="amazon_account",
         cascade="all, delete-orphan",
         passive_deletes=True,

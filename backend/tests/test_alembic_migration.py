@@ -22,6 +22,7 @@ EXPECTED_TABLES = {
     "amazon_accounts",
     "amazon_marketplace_participations",
     "amazon_sync_logs",
+    "amazon_listings",
     "alembic_version",
 }
 
@@ -153,7 +154,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "558e1071cb88"
+        assert current == "1194054de91f"
 
     amazon_unique = {
         tuple(constraint["column_names"])
@@ -188,6 +189,52 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert _fk_ondelete(inspector, "amazon_accounts", "user_id") == "CASCADE"
     assert _fk_ondelete(inspector, "amazon_marketplace_participations", "amazon_account_id") == "CASCADE"
     assert _fk_ondelete(inspector, "amazon_sync_logs", "amazon_account_id") == "CASCADE"
+
+    account_columns = {column["name"] for column in inspector.get_columns("amazon_accounts")}
+    assert "selling_partner_id" in account_columns
+    selling_partner_col = next(
+        c for c in inspector.get_columns("amazon_accounts") if c["name"] == "selling_partner_id"
+    )
+    assert selling_partner_col["nullable"] is True
+
+    listing_columns = {column["name"] for column in inspector.get_columns("amazon_listings")}
+    assert {
+        "amazon_account_id",
+        "marketplace_id",
+        "seller_sku",
+        "asin",
+        "product_id",
+        "status_codes",
+        "product_type",
+        "upstream_created_at",
+        "upstream_last_updated_at",
+        "is_active",
+        "last_seen_sync_id",
+        "first_seen_at",
+        "last_seen_at",
+    }.issubset(listing_columns)
+
+    listing_unique = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("amazon_listings")
+    }
+    assert ("amazon_account_id", "marketplace_id", "seller_sku") in listing_unique
+    assert ("asin",) not in listing_unique
+    assert ("marketplace_id", "asin") not in listing_unique
+
+    listing_checks = {c["name"] for c in inspector.get_check_constraints("amazon_listings")}
+    assert "ck_amazon_listings_status_codes_array" in listing_checks
+    assert "ck_amazon_listings_marketplace_id_not_blank" in listing_checks
+    assert "ck_amazon_listings_seller_sku_not_blank" in listing_checks
+
+    listing_indexes = {idx["name"] for idx in inspector.get_indexes("amazon_listings")}
+    assert "ix_amazon_listings_account_marketplace_updated" in listing_indexes
+    assert "ix_amazon_listings_product_id" in listing_indexes
+    assert "ix_amazon_listings_account_marketplace_last_seen_sync" in listing_indexes
+    assert "ix_amazon_listings_asin" in listing_indexes
+
+    assert _fk_ondelete(inspector, "amazon_listings", "amazon_account_id") == "CASCADE"
+    assert _fk_ondelete(inspector, "amazon_listings", "product_id") == "SETNULL"
 
     listing_version_indexes = {idx["name"] for idx in inspector.get_indexes("listing_versions")}
     assert "ix_listing_versions_product_id_created_at" in listing_version_indexes
@@ -260,6 +307,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert "amazon_accounts" not in amazon_down_tables
     assert "amazon_marketplace_participations" not in amazon_down_tables
     assert "amazon_sync_logs" not in amazon_down_tables
+    assert "amazon_listings" not in amazon_down_tables
 
     command.downgrade(cfg, "b2c3d4e5f6a7")
     inspector_mid = inspect(engine)
@@ -320,6 +368,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
         "amazon_accounts",
         "amazon_marketplace_participations",
         "amazon_sync_logs",
+        "amazon_listings",
     ]:
         model_columns = {column.name for column in Base.metadata.tables[table_name].columns}
         db_columns = {column["name"] for column in inspector_reup.get_columns(table_name)}

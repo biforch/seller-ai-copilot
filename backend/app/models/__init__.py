@@ -1,5 +1,6 @@
 from app.database.session import Base
 from app.models.amazon_account import AmazonAccount
+from app.models.amazon_listing import AmazonListing
 from app.models.amazon_marketplace_participation import AmazonMarketplaceParticipation
 from app.models.amazon_sync_log import AmazonSyncLog
 from app.models.generation import Generation
@@ -13,6 +14,7 @@ from app.models.user import User
 
 __all__ = [
     "AmazonAccount",
+    "AmazonListing",
     "AmazonMarketplaceParticipation",
     "AmazonSyncLog",
     "User",

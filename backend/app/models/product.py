@@ -124,3 +124,9 @@ class Product(Base):
         uselist=False,
         post_update=True,
     )
+
+    amazon_listings = relationship(
+        "AmazonListing",
+        back_populates="product",
+        passive_deletes=True,
+    )
