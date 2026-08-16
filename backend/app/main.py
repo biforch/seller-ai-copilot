@@ -8,6 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import (
+    amazon_oauth,
     auth,
     generate,
     listing,
@@ -19,6 +20,7 @@ from app.core.config import settings
 from app.core.exceptions import (
     AppException,
     _error_response,
+    amazon_exception_handler,
     app_exception_handler,
     http_exception_handler,
     unhandled_exception_handler,
@@ -26,6 +28,7 @@ from app.core.exceptions import (
 )
 from app.core.rate_limit import limiter
 from app.core.response import success_response
+from app.integrations.amazon.exceptions import AmazonError
 
 logging.basicConfig(
     level=logging.INFO
@@ -84,6 +87,12 @@ app.add_exception_handler(
 app.add_exception_handler(
     AppException,
     app_exception_handler,  # type: ignore[arg-type]
+)
+
+
+app.add_exception_handler(
+    AmazonError,
+    amazon_exception_handler,  # type: ignore[arg-type]
 )
 
 
@@ -171,6 +180,13 @@ app.include_router(
     project.router,
     prefix="/api/v1/projects",
     tags=["Projects"],
+)
+
+
+app.include_router(
+    amazon_oauth.router,
+    prefix="/api/v1/amazon",
+    tags=["Amazon OAuth"],
 )
 
 
