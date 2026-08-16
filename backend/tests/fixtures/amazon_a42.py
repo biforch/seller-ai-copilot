@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -15,6 +16,7 @@ from app.integrations.amazon.lwa import CachingRefreshTokenProvider, LwaTokenCli
 from app.integrations.amazon.token_cache import InMemoryTokenCache
 from app.integrations.amazon.token_encryption import TokenEncryptionService
 from app.models.amazon_account import AmazonAccount, AmazonAccountStatus
+from app.models.amazon_listing import AmazonListing
 from app.models.amazon_marketplace_participation import AmazonMarketplaceParticipation
 from app.services.amazon_product_sync_service import AmazonProductSyncService
 from tests.fixtures.amazon_a32 import (
@@ -43,6 +45,61 @@ OTHER_FAKE_A42_REFRESH_TOKEN = OTHER_FAKE_A32_REFRESH_TOKEN
 DEFAULT_MARKETPLACE_ID = FAKE_MARKETPLACE_ID
 DEFAULT_SELLER_ID = FAKE_SELLER_ID
 SENSITIVE_MARKERS = (FAKE_A42_REFRESH_TOKEN, FAKE_PAGE_TOKEN, CANARY)
+
+
+class FixedClock:
+    """Timezone-aware controllable clock for lease fencing tests."""
+
+    def __init__(self, start: datetime | None = None) -> None:
+        self._now = start or datetime.now(UTC)
+
+    def advance(self, delta: timedelta) -> None:
+        self._now += delta
+
+    def __call__(self) -> datetime:
+        return self._now
+
+
+def seed_active_listing(
+    session_factory,
+    *,
+    account_id: uuid.UUID,
+    seller_sku: str = "SKU-EXISTING",
+    marketplace_id: str = DEFAULT_MARKETPLACE_ID,
+    asin: str = "B000000001",
+    product_id: uuid.UUID | None = None,
+    is_active: bool = True,
+    last_seen_sync_id: uuid.UUID | None = None,
+) -> uuid.UUID:
+    sync_id = last_seen_sync_id or uuid.uuid4()
+    now = datetime.now(UTC)
+    db = session_factory()
+    try:
+        listing = AmazonListing(
+            amazon_account_id=account_id,
+            marketplace_id=marketplace_id,
+            seller_sku=seller_sku,
+            asin=asin,
+            product_id=product_id,
+            is_active=is_active,
+            last_seen_sync_id=sync_id,
+            first_seen_at=now,
+            last_seen_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(listing)
+        db.commit()
+        db.refresh(listing)
+        return listing.id
+    finally:
+        db.close()
+
+
+def server_error_handler(request: httpx.Request) -> httpx.Response:
+    if "mock.lwa.local" in str(request.url):
+        return lwa_success_handler(refresh_token=FAKE_A42_REFRESH_TOKEN)(request)
+    return httpx.Response(500, json={"errors": []}, headers={"x-amzn-requestid": "req-500"})
 
 
 def wire_listings_page(*items: dict[str, Any], next_token: str | None = None) -> dict[str, Any]:
