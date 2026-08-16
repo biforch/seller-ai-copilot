@@ -52,6 +52,7 @@ export interface AmazonListing {
 
 export interface AmazonLinkProduct {
   id: string;
+  project_id: string;
   name: string;
   category: string | null;
   platform: string;

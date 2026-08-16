@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
   CheckCircle2,
@@ -12,6 +13,7 @@ import {
   RefreshCw,
   RotateCcw,
   Store,
+  WandSparkles,
 } from 'lucide-react';
 
 import {
@@ -52,6 +54,7 @@ function statusStyle(status: AmazonAccount['status']) {
 }
 
 export default function AmazonConnectionsPage() {
+  const router = useRouter();
   const [accounts, setAccounts] = useState<AmazonAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [marketplaces, setMarketplaces] = useState<AmazonMarketplace[]>([]);
@@ -242,6 +245,14 @@ export default function AmazonConnectionsPage() {
     } finally {
       setAction(null);
     }
+  };
+
+  const openOptimizationWorkspace = (product: AmazonLinkProduct) => {
+    const params = new URLSearchParams({
+      product_id: product.id,
+      project_id: product.project_id,
+    });
+    router.push(`/generate?${params.toString()}`);
   };
 
   return (
@@ -454,6 +465,20 @@ export default function AmazonConnectionsPage() {
                                   </select>
                                   {action === `link:${listing.id}` && (
                                     <Loader2 className="h-4 w-4 shrink-0 animate-spin text-orange-500" />
+                                  )}
+                                  {products.find((product) => product.id === listing.product_id) && (
+                                    <button
+                                      type="button"
+                                      aria-label={`Optimize ${listing.seller_sku} in AI workspace`}
+                                      title="Optimize in AI workspace"
+                                      onClick={() => {
+                                        const product = products.find((item) => item.id === listing.product_id);
+                                        if (product) openOptimizationWorkspace(product);
+                                      }}
+                                      className="rounded-lg border border-purple-200 bg-purple-50 p-2 text-purple-700 hover:bg-purple-100"
+                                    >
+                                      <WandSparkles className="h-4 w-4" />
+                                    </button>
                                   )}
                                 </div>
                               </td>

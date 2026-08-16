@@ -5,6 +5,8 @@ import { useState, useEffect } from 'react';
 
 import { useRouter, useSearchParams } from 'next/navigation';
 
+import { apiClient } from '@/app/api/client';
+
 
 import { AnalyzerResultView } from '@/components/features/AnalyzerResult';
 
@@ -22,7 +24,8 @@ import { buildReviewPath } from '@/lib/listing-proposals';
 
 import type {
   AnalyzeFormData,
-  GenerateFormData
+  GenerateFormData,
+  ProductDetail,
 } from '@/types';
 
 
@@ -63,6 +66,15 @@ export function GeneratePageClient(){
     searchParams.get(
       'project_id'
     );
+
+  const productId =
+    searchParams.get(
+      'product_id'
+    );
+
+  const [productLoadError, setProductLoadError] = useState<string | null>(null);
+  const [productLoading, setProductLoading] = useState(Boolean(productId));
+  const [loadedProductId, setLoadedProductId] = useState<string | null>(null);
 
 
 
@@ -127,6 +139,8 @@ export function GeneratePageClient(){
 
   useEffect(()=>{
 
+    if (productId) return;
+
 
     setFormData(prev=>({
 
@@ -148,7 +162,57 @@ export function GeneratePageClient(){
     }));
 
 
-  },[projectId]);
+  },[productId, projectId]);
+
+  useEffect(()=>{
+    if (!productId) {
+      setProductLoading(false);
+      setLoadedProductId(null);
+      return;
+    }
+    const controller = new AbortController();
+    setProductLoadError(null);
+    setProductLoading(true);
+    setLoadedProductId(null);
+    setFormData({
+      name: '',
+      category: '',
+      market: 'USA',
+      platform: 'Amazon',
+    });
+
+    void apiClient.get<ProductDetail>(`/products/${encodeURIComponent(productId)}`, {
+      signal: controller.signal,
+    }).then((product) => {
+      if (controller.signal.aborted) return;
+      setFormData({
+        project_id: product.project?.id ?? undefined,
+        product_id: product.id,
+        name: product.name,
+        category: product.category ?? 'General',
+        market: product.market,
+        platform: product.platform,
+        target_customer: product.target_customer ?? undefined,
+        advantages: product.advantages ?? undefined,
+      });
+      setLoadedProductId(product.id);
+      setProductLoading(false);
+      if (product.project?.id) {
+        const canonicalParams = new URLSearchParams({
+          product_id: product.id,
+          project_id: product.project.id,
+        });
+        router.replace(`/generate?${canonicalParams.toString()}`);
+      }
+    }).catch(() => {
+      if (!controller.signal.aborted) {
+        setProductLoadError('The linked product could not be loaded. Return to Amazon and choose another product.');
+        setProductLoading(false);
+      }
+    });
+
+    return () => controller.abort();
+  }, [productId, router]);
 
 
 
@@ -182,6 +246,10 @@ export function GeneratePageClient(){
 
   const handleGenerate =
     async()=>{
+
+      if (productId && (productLoading || productLoadError || loadedProductId !== productId)) {
+        return;
+      }
 
 
       await generateListing(
@@ -244,6 +312,24 @@ export function GeneratePageClient(){
 
         </h1>
 
+        {productId && loadedProductId === productId && !productLoading && !productLoadError && (
+          <p className="mt-2 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-700">
+            SellerAI product loaded from your Amazon listing link. Generated content will remain a review proposal and will not be published to Amazon.
+          </p>
+        )}
+
+        {productLoading && (
+          <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            Loading your linked SellerAI product…
+          </p>
+        )}
+
+        {productLoadError && (
+          <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {productLoadError}
+          </p>
+        )}
+
 
 
         <div className="mt-3 max-w-sm">
@@ -254,11 +340,17 @@ export function GeneratePageClient(){
 
           <select
 
-            value={projectId || ''}
+            value={formData.project_id || ''}
 
             onChange={(e)=>{
 
               const value = e.target.value;
+
+              setFormData((current) => ({
+                ...current,
+                project_id: value || undefined,
+                product_id: undefined,
+              }));
 
               router.replace(
                 value
@@ -493,6 +585,8 @@ export function GeneratePageClient(){
 
           <ProductForm
 
+            key={formData.product_id ?? 'new-product'}
+
 
             data={formData}
 
@@ -503,7 +597,11 @@ export function GeneratePageClient(){
             onSubmit={handleGenerate}
 
 
-            isLoading={isLoading}
+            isLoading={
+              isLoading ||
+              productLoading ||
+              Boolean(productId && (productLoadError || loadedProductId !== productId))
+            }
 
 
           />
