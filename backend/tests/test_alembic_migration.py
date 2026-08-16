@@ -155,7 +155,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "d7e8f9a0b1c2"
+        assert current == "e8f9a0b1c2d3"
 
     amazon_unique = {
         tuple(constraint["column_names"])
@@ -163,6 +163,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     }
     assert ("account_key",) in amazon_unique
     assert ("user_id", "refresh_token_fingerprint") in amazon_unique
+    assert ("selling_partner_id",) in amazon_unique
     assert ("user_id", "region", "endpoint_mode") not in amazon_unique
 
     account_checks = {c["name"] for c in inspector.get_check_constraints("amazon_accounts")}
@@ -170,6 +171,10 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert "ck_amazon_accounts_region" in account_checks
     assert "ck_amazon_accounts_endpoint_mode" in account_checks
     assert "ck_amazon_accounts_status" in account_checks
+    assert "ck_amazon_accounts_selling_partner_id_format" in account_checks
+
+    account_indexes = {idx["name"] for idx in inspector.get_indexes("amazon_accounts")}
+    assert "ix_amazon_accounts_selling_partner_id" not in account_indexes
 
     amp_columns = {
         column["name"] for column in inspector.get_columns("amazon_marketplace_participations")
@@ -336,6 +341,22 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert project_index["column_names"] == ["user_id", "updated_at", "created_at", "id"]
     assert "ix_products_project_id_created_at_id" in product_indexes
     assert "ix_generations_product_id" in generation_indexes
+
+    command.downgrade(cfg, "d7e8f9a0b1c2")
+    inspector_seller_down = inspect(engine)
+    seller_down_unique = {
+        tuple(constraint["column_names"])
+        for constraint in inspector_seller_down.get_unique_constraints("amazon_accounts")
+    }
+    assert ("selling_partner_id",) not in seller_down_unique
+    seller_down_checks = {
+        c["name"] for c in inspector_seller_down.get_check_constraints("amazon_accounts")
+    }
+    assert "ck_amazon_accounts_selling_partner_id_format" not in seller_down_checks
+    seller_down_indexes = {
+        idx["name"] for idx in inspector_seller_down.get_indexes("amazon_accounts")
+    }
+    assert "ix_amazon_accounts_selling_partner_id" in seller_down_indexes
 
     command.downgrade(cfg, "1194054de91f")
     inspector_oauth_down = inspect(engine)

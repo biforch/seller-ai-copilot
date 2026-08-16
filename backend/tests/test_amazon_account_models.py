@@ -4,7 +4,7 @@ import secrets
 import uuid
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.amazon_account import AmazonAccount, AmazonAccountStatus, new_account_key
@@ -25,6 +25,8 @@ def _make_account(
     *,
     fingerprint: str | None = None,
     account_key: str | None = None,
+    selling_partner_id: str | None = None,
+    status: str = AmazonAccountStatus.ACTIVE,
 ) -> AmazonAccount:
     ciphertext, default_fingerprint = _encrypt_stub()
     return AmazonAccount(
@@ -32,10 +34,11 @@ def _make_account(
         account_key=account_key or new_account_key(),
         region="na",
         endpoint_mode="sandbox",
-        status=AmazonAccountStatus.ACTIVE,
+        status=status,
         refresh_token_ciphertext=ciphertext,
         refresh_token_key_version=1,
         refresh_token_fingerprint=fingerprint or default_fingerprint,
+        selling_partner_id=selling_partner_id,
     )
 
 
@@ -103,6 +106,87 @@ def test_amazon_account_repr_excludes_sensitive_fields(db_session: Session, user
     assert account.refresh_token_fingerprint not in rendered
     assert account.account_key not in rendered
     assert FAKE_PLAINTEXT_MARKER not in rendered
+    account.selling_partner_id = "SellerIdentity123"
+    assert account.selling_partner_id not in rendered
+
+
+def test_multiple_null_selling_partner_ids_allowed(db_session: Session, user_factory) -> None:
+    user = user_factory("amazon-seller-null-a@example.com")
+    db_session.add(_make_account(user.id, selling_partner_id=None))
+    db_session.add(_make_account(user.id, selling_partner_id=None))
+    db_session.commit()
+
+
+def test_valid_selling_partner_id_allowed(db_session: Session, user_factory) -> None:
+    user = user_factory("amazon-seller-valid@example.com")
+    db_session.add(_make_account(user.id, selling_partner_id="A1B2C3D4E5"))
+    db_session.commit()
+
+
+@pytest.mark.parametrize(
+    "invalid_selling_partner_id",
+    [
+        "",
+        "   ",
+        "seller-with-dash",
+        "seller.with.dot",
+        "seller/id",
+        "seller\x00id",
+        "a" * 33,
+    ],
+)
+def test_invalid_selling_partner_id_rejected(
+    db_session: Session,
+    user_factory,
+    invalid_selling_partner_id: str,
+) -> None:
+    user = user_factory(f"amazon-seller-invalid-{abs(hash(invalid_selling_partner_id))}@example.com")
+    db_session.add(_make_account(user.id, selling_partner_id=invalid_selling_partner_id))
+    with pytest.raises((IntegrityError, DataError, ValueError)):
+        db_session.flush()
+
+
+def test_same_user_duplicate_selling_partner_id_rejected(db_session: Session, user_factory) -> None:
+    user = user_factory("amazon-seller-dup-same-user@example.com")
+    db_session.add(_make_account(user.id, selling_partner_id="SameSeller123"))
+    db_session.flush()
+    with pytest.raises(IntegrityError):
+        db_session.add(_make_account(user.id, selling_partner_id="SameSeller123"))
+        db_session.flush()
+
+
+def test_different_users_duplicate_selling_partner_id_rejected(
+    db_session: Session,
+    user_factory,
+) -> None:
+    user_a = user_factory("amazon-seller-dup-user-a@example.com")
+    user_b = user_factory("amazon-seller-dup-user-b@example.com")
+    db_session.add(_make_account(user_a.id, selling_partner_id="SharedSeller123"))
+    db_session.flush()
+    with pytest.raises(IntegrityError):
+        db_session.add(_make_account(user_b.id, selling_partner_id="SharedSeller123"))
+        db_session.flush()
+
+
+def test_disabled_account_retains_seller_identity(
+    db_session: Session,
+    user_factory,
+) -> None:
+    owner = user_factory("amazon-seller-disabled-owner@example.com")
+    challenger = user_factory("amazon-seller-disabled-challenger@example.com")
+    db_session.add(
+        _make_account(
+            owner.id,
+            selling_partner_id="DisabledSeller1",
+            status=AmazonAccountStatus.DISABLED,
+        )
+    )
+    db_session.flush()
+    with pytest.raises(IntegrityError):
+        db_session.add(
+            _make_account(challenger.id, selling_partner_id="DisabledSeller1")
+        )
+        db_session.flush()
 
 
 def test_marketplace_sync_eligible_property(db_session: Session, user_factory) -> None:

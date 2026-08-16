@@ -24,7 +24,7 @@ def _encrypt_stub() -> tuple[bytes, str]:
 def _make_account(
     user_id: uuid.UUID,
     *,
-    selling_partner_id: str | None = FAKE_SELLING_PARTNER_ID,
+    selling_partner_id: str | None = None,
 ) -> AmazonAccount:
     ciphertext, fingerprint = _encrypt_stub()
     return AmazonAccount(

@@ -27,6 +27,9 @@ class AmazonAccountStatus:
     ALL = frozenset({ACTIVE, REAUTHORIZATION_REQUIRED, DISABLED, ERROR})
 
 
+SELLING_PARTNER_ID_UNIQUE_CONSTRAINT = "uq_amazon_accounts_selling_partner_id"
+
+
 def new_account_key() -> str:
     return str(uuid.uuid4())
 
@@ -54,7 +57,7 @@ class AmazonAccount(Base):
     refresh_token_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     # OAuth redirect provides selling_partner_id; nullable for pre-OAuth accounts.
     # Official OpenAPI in repo does not declare maxLength — 32 is conservative.
-    selling_partner_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    selling_partner_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     sync_lease_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     sync_lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -112,10 +115,18 @@ class AmazonAccount(Base):
             "refresh_token_key_version <= 65535",
             name="ck_amazon_accounts_key_version_max",
         ),
+        CheckConstraint(
+            "selling_partner_id IS NULL OR selling_partner_id ~ '^[A-Za-z0-9]{1,32}$'",
+            name="ck_amazon_accounts_selling_partner_id_format",
+        ),
         UniqueConstraint(
             "user_id",
             "refresh_token_fingerprint",
             name="uq_amazon_accounts_user_fingerprint",
+        ),
+        UniqueConstraint(
+            "selling_partner_id",
+            name=SELLING_PARTNER_ID_UNIQUE_CONSTRAINT,
         ),
         Index("ix_amazon_accounts_user_id_updated_at", "user_id", "updated_at"),
     )

@@ -712,7 +712,7 @@ async def test_preflight_non_active_account_status(
     assert exc_info.value.error_code == AMAZON_ACCOUNT_NOT_ACTIVE
 
 
-@pytest.mark.parametrize("selling_partner_id", [None, "", "   "])
+@pytest.mark.parametrize("selling_partner_id", [None])
 @pytest.mark.asyncio
 async def test_preflight_missing_selling_partner_id(
     a32_session_factory,

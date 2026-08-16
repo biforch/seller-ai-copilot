@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -45,6 +46,10 @@ OTHER_FAKE_A42_REFRESH_TOKEN = OTHER_FAKE_A32_REFRESH_TOKEN
 DEFAULT_MARKETPLACE_ID = FAKE_MARKETPLACE_ID
 DEFAULT_SELLER_ID = FAKE_SELLER_ID
 SENSITIVE_MARKERS = (FAKE_A42_REFRESH_TOKEN, FAKE_PAGE_TOKEN, CANARY)
+
+
+def _unique_seller_id() -> str:
+    return secrets.token_hex(16)
 
 
 class FixedClock:
@@ -208,7 +213,7 @@ def create_sync_ready_account(
     token_encryption_service: TokenEncryptionService,
     *,
     token: str = FAKE_A42_REFRESH_TOKEN,
-    selling_partner_id: str = DEFAULT_SELLER_ID,
+    selling_partner_id: str | None = None,
     marketplace_id: str = DEFAULT_MARKETPLACE_ID,
     participating: bool = True,
     suspended_listings: bool = False,
@@ -225,7 +230,7 @@ def create_sync_ready_account(
     try:
         account = db.get(AmazonAccount, summary.id)
         assert account is not None
-        account.selling_partner_id = selling_partner_id
+        account.selling_partner_id = selling_partner_id or _unique_seller_id()
         account.status = AmazonAccountStatus.ACTIVE
         db.add(account)
         db.add(
