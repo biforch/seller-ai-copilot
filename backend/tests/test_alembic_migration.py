@@ -24,6 +24,7 @@ EXPECTED_TABLES = {
     "amazon_sync_logs",
     "amazon_listings",
     "amazon_oauth_states",
+    "amazon_catalog_snapshots",
     "alembic_version",
 }
 
@@ -155,7 +156,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "e8f9a0b1c2d3"
+        assert current == "f9a0b1c2d3e4"
 
     amazon_unique = {
         tuple(constraint["column_names"])
@@ -241,6 +242,49 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     assert _fk_ondelete(inspector, "amazon_listings", "amazon_account_id") == "CASCADE"
     assert _fk_ondelete(inspector, "amazon_listings", "product_id") == "SETNULL"
+
+    catalog_columns = {
+        column["name"] for column in inspector.get_columns("amazon_catalog_snapshots")
+    }
+    assert {
+        "amazon_listing_id",
+        "content_hash",
+        "asin",
+        "marketplace_id",
+        "item_name",
+        "brand",
+        "manufacturer",
+        "product_type",
+        "source_request_id",
+        "fetched_at",
+        "expires_at",
+    }.issubset(catalog_columns)
+    catalog_unique = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("amazon_catalog_snapshots")
+    }
+    assert ("amazon_listing_id", "content_hash") in catalog_unique
+    catalog_checks = {
+        check["name"]
+        for check in inspector.get_check_constraints("amazon_catalog_snapshots")
+    }
+    assert "ck_amazon_catalog_snapshots_content_hash_format" in catalog_checks
+    assert "ck_amazon_catalog_snapshots_asin_format" in catalog_checks
+    assert "ck_amazon_catalog_snapshots_marketplace_not_blank" in catalog_checks
+    assert "ck_amazon_catalog_snapshots_expires_after_fetch" in catalog_checks
+    catalog_indexes = {
+        index["name"] for index in inspector.get_indexes("amazon_catalog_snapshots")
+    }
+    assert "ix_amazon_catalog_snapshots_listing_fetched" in catalog_indexes
+    assert "ix_amazon_catalog_snapshots_expires_at" in catalog_indexes
+    assert (
+        _fk_ondelete(
+            inspector,
+            "amazon_catalog_snapshots",
+            "amazon_listing_id",
+        )
+        == "CASCADE"
+    )
 
     oauth_state_columns = {column["name"] for column in inspector.get_columns("amazon_oauth_states")}
     assert {
@@ -342,6 +386,10 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert "ix_products_project_id_created_at_id" in product_indexes
     assert "ix_generations_product_id" in generation_indexes
 
+    command.downgrade(cfg, "e8f9a0b1c2d3")
+    inspector_catalog_down = inspect(engine)
+    assert "amazon_catalog_snapshots" not in set(inspector_catalog_down.get_table_names())
+
     command.downgrade(cfg, "d7e8f9a0b1c2")
     inspector_seller_down = inspect(engine)
     seller_down_unique = {
@@ -433,6 +481,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
         "amazon_sync_logs",
         "amazon_listings",
         "amazon_oauth_states",
+        "amazon_catalog_snapshots",
     ]:
         model_columns = {column.name for column in Base.metadata.tables[table_name].columns}
         db_columns = {column["name"] for column in inspector_reup.get_columns(table_name)}

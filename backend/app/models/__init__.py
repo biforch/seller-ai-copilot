@@ -1,5 +1,6 @@
 from app.database.session import Base
 from app.models.amazon_account import AmazonAccount
+from app.models.amazon_catalog_snapshot import AmazonCatalogSnapshot
 from app.models.amazon_listing import AmazonListing
 from app.models.amazon_marketplace_participation import AmazonMarketplaceParticipation
 from app.models.amazon_oauth_state import AmazonOAuthState
@@ -15,6 +16,7 @@ from app.models.user import User
 
 __all__ = [
     "AmazonAccount",
+    "AmazonCatalogSnapshot",
     "AmazonListing",
     "AmazonMarketplaceParticipation",
     "AmazonOAuthState",

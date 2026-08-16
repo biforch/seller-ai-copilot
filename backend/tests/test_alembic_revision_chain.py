@@ -69,12 +69,25 @@ def test_amazon_seller_identity_migration_revision_does_not_import_app_modules()
     assert "import app." not in source
 
 
+def test_amazon_catalog_snapshot_migration_revision_does_not_import_app_modules():
+    backend_root = Path(__file__).resolve().parents[1]
+    revision_path = (
+        backend_root
+        / "alembic"
+        / "versions"
+        / "f9a0b1c2d3e4_amazon_catalog_snapshots.py"
+    )
+    source = revision_path.read_text(encoding="utf-8")
+    assert "from app." not in source
+    assert "import app." not in source
+
+
 def test_alembic_revision_chain_is_valid():
     backend_root = Path(__file__).resolve().parents[1]
     cfg = Config(str(backend_root / "alembic.ini"))
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    assert heads == ["e8f9a0b1c2d3"]
+    assert heads == ["f9a0b1c2d3e4"]
 
     revisions = {rev.revision: rev for rev in script.walk_revisions()}
     assert "34b6d855017a" in revisions
@@ -85,3 +98,4 @@ def test_alembic_revision_chain_is_valid():
     assert revisions["1194054de91f"].down_revision == "558e1071cb88"
     assert revisions["d7e8f9a0b1c2"].down_revision == "1194054de91f"
     assert revisions["e8f9a0b1c2d3"].down_revision == "d7e8f9a0b1c2"
+    assert revisions["f9a0b1c2d3e4"].down_revision == "e8f9a0b1c2d3"

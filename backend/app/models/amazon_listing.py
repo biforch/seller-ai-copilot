@@ -79,6 +79,11 @@ class AmazonListing(Base):
 
     amazon_account = relationship("AmazonAccount", back_populates="amazon_listings")
     product = relationship("Product", back_populates="amazon_listings")
+    catalog_snapshots = relationship(
+        "AmazonCatalogSnapshot",
+        back_populates="amazon_listing",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         UniqueConstraint(
