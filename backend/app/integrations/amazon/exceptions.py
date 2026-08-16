@@ -25,6 +25,12 @@ AMAZON_SYNC_LEASE_EXPIRED = "AMAZON_SYNC_LEASE_EXPIRED"
 AMAZON_SYNC_FINALIZE_FAILED = "AMAZON_SYNC_FINALIZE_FAILED"
 AMAZON_SAFE_DETAIL_INVALID = "AMAZON_SAFE_DETAIL_INVALID"
 AMAZON_SELLING_PARTNER_ID_REQUIRED = "AMAZON_SELLING_PARTNER_ID_REQUIRED"
+AMAZON_ACCOUNT_NOT_ACTIVE = "AMAZON_ACCOUNT_NOT_ACTIVE"
+AMAZON_MARKETPLACE_NOT_FOUND = "AMAZON_MARKETPLACE_NOT_FOUND"
+AMAZON_MARKETPLACE_INACTIVE = "AMAZON_MARKETPLACE_INACTIVE"
+AMAZON_MARKETPLACE_NOT_ELIGIBLE = "AMAZON_MARKETPLACE_NOT_ELIGIBLE"
+AMAZON_SYNC_PAGINATION_LIMIT = "AMAZON_SYNC_PAGINATION_LIMIT"
+AMAZON_SYNC_PAGINATION_LOOP = "AMAZON_SYNC_PAGINATION_LOOP"
 
 ERROR_BODY_MAX_LEN = 500
 
@@ -142,6 +148,54 @@ def amazon_selling_partner_id_required_error() -> AmazonError:
     return AmazonError(
         "Amazon selling partner id is required",
         error_code=AMAZON_SELLING_PARTNER_ID_REQUIRED,
+    )
+
+
+def amazon_account_not_active_error() -> AmazonError:
+    return AmazonError(
+        "Amazon account is not active for sync",
+        error_code=AMAZON_ACCOUNT_NOT_ACTIVE,
+        status_code=403,
+    )
+
+
+def amazon_marketplace_not_found_error() -> AmazonError:
+    return AmazonError(
+        "Amazon marketplace participation was not found",
+        error_code=AMAZON_MARKETPLACE_NOT_FOUND,
+        status_code=404,
+    )
+
+
+def amazon_marketplace_inactive_error() -> AmazonError:
+    return AmazonError(
+        "Amazon marketplace participation is inactive",
+        error_code=AMAZON_MARKETPLACE_INACTIVE,
+        status_code=409,
+    )
+
+
+def amazon_marketplace_not_eligible_error() -> AmazonError:
+    return AmazonError(
+        "Amazon marketplace participation is not eligible for sync",
+        error_code=AMAZON_MARKETPLACE_NOT_ELIGIBLE,
+        status_code=409,
+    )
+
+
+def amazon_sync_pagination_limit_error() -> AmazonError:
+    return AmazonError(
+        "Amazon sync pagination limit exceeded",
+        error_code=AMAZON_SYNC_PAGINATION_LIMIT,
+        status_code=422,
+    )
+
+
+def amazon_sync_pagination_loop_error() -> AmazonError:
+    return AmazonError(
+        "Amazon sync pagination loop detected",
+        error_code=AMAZON_SYNC_PAGINATION_LOOP,
+        status_code=502,
     )
 
 

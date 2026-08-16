@@ -11,6 +11,7 @@ from app.integrations.amazon.exceptions import (
     AmazonError,
 )
 from app.services.amazon_sync_log_service import (
+    MAX_SYNC_ITEM_COUNT,
     SAFE_DETAIL_MAX_BYTES,
     AmazonSyncLogService,
     sanitize_request_id,
@@ -152,4 +153,43 @@ def test_validate_safe_detail_rejects_513_bytes() -> None:
     )
     with pytest.raises(AmazonError) as exc_info:
         validate_safe_detail({"participation_count": "x" * filler_len})
+    assert exc_info.value.error_code == AMAZON_SAFE_DETAIL_INVALID
+
+
+@pytest.mark.parametrize("pages_seen", [0, 1, 42, MAX_SYNC_ITEM_COUNT])
+def test_validate_safe_detail_accepts_pages_seen(pages_seen: int) -> None:
+    detail = validate_safe_detail({"pages_seen": pages_seen})
+    assert detail == {"pages_seen": pages_seen}
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [
+        pytest.param(True, id="bool"),
+        pytest.param(-1, id="negative"),
+        pytest.param(MAX_SYNC_ITEM_COUNT + 1, id="over_max"),
+        pytest.param("3", id="string"),
+    ],
+)
+def test_validate_safe_detail_rejects_invalid_pages_seen(invalid_value: object) -> None:
+    with pytest.raises(AmazonError) as exc_info:
+        validate_safe_detail({"pages_seen": invalid_value})  # type: ignore[dict-item]
+    assert exc_info.value.error_code == AMAZON_SAFE_DETAIL_INVALID
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "page_token",
+        "next_token",
+        "payload",
+        "headers",
+        "seller_id",
+        "seller_sku",
+        "marketplace_id",
+    ],
+)
+def test_validate_safe_detail_rejects_product_sync_forbidden_keys(key: str) -> None:
+    with pytest.raises(AmazonError) as exc_info:
+        validate_safe_detail({key: 1})
     assert exc_info.value.error_code == AMAZON_SAFE_DETAIL_INVALID

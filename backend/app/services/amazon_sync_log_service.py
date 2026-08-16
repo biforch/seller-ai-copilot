@@ -26,6 +26,7 @@ ALLOWED_SAFE_DETAIL_KEYS = frozenset(
         "active_count",
         "deactivated_count",
         "reactivated_count",
+        "pages_seen",
     }
 )
 
@@ -73,7 +74,9 @@ def validate_safe_detail(detail: dict[str, Any] | None) -> dict[str, Any] | None
             raise amazon_safe_detail_invalid_error()
         if _FORBIDDEN_KEY_PATTERN.search(key):
             raise amazon_safe_detail_invalid_error()
-        if type(value) is bool:
+        if key == "pages_seen":
+            normalized[key] = _validate_item_count(value, field_name=key)
+        elif type(value) is bool:
             normalized[key] = value
         elif type(value) is int:
             if value < 0 or value > MAX_SYNC_ITEM_COUNT:
