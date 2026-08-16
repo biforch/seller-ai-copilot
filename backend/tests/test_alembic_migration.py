@@ -23,6 +23,7 @@ EXPECTED_TABLES = {
     "amazon_marketplace_participations",
     "amazon_sync_logs",
     "amazon_listings",
+    "amazon_oauth_states",
     "alembic_version",
 }
 
@@ -154,7 +155,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "1194054de91f"
+        assert current == "d7e8f9a0b1c2"
 
     amazon_unique = {
         tuple(constraint["column_names"])
@@ -236,6 +237,41 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert _fk_ondelete(inspector, "amazon_listings", "amazon_account_id") == "CASCADE"
     assert _fk_ondelete(inspector, "amazon_listings", "product_id") == "SETNULL"
 
+    oauth_state_columns = {column["name"] for column in inspector.get_columns("amazon_oauth_states")}
+    assert {
+        "id",
+        "state_token_hash",
+        "user_id",
+        "marketplace_code",
+        "region",
+        "intent",
+        "target_account_id",
+        "status",
+        "expires_at",
+        "consumed_at",
+        "created_at",
+    }.issubset(oauth_state_columns)
+
+    oauth_state_checks = {c["name"] for c in inspector.get_check_constraints("amazon_oauth_states")}
+    assert "ck_amazon_oauth_states_state_token_hash_format" in oauth_state_checks
+    assert "ck_amazon_oauth_states_intent_target_account" in oauth_state_checks
+    assert "ck_amazon_oauth_states_status_consumed_at" in oauth_state_checks
+    assert "ck_amazon_oauth_states_expires_after_created" in oauth_state_checks
+
+    oauth_state_indexes = {idx["name"] for idx in inspector.get_indexes("amazon_oauth_states")}
+    assert "ix_amazon_oauth_states_status_expires_at" in oauth_state_indexes
+    assert "ix_amazon_oauth_states_user_id_created_at" in oauth_state_indexes
+    assert "ix_amazon_oauth_states_target_account_id" in oauth_state_indexes
+
+    oauth_state_unique = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("amazon_oauth_states")
+    }
+    assert ("state_token_hash",) in oauth_state_unique
+
+    assert _fk_ondelete(inspector, "amazon_oauth_states", "user_id") == "CASCADE"
+    assert _fk_ondelete(inspector, "amazon_oauth_states", "target_account_id") == "CASCADE"
+
     listing_version_indexes = {idx["name"] for idx in inspector.get_indexes("listing_versions")}
     assert "ix_listing_versions_product_id_created_at" in listing_version_indexes
     listing_unique = {
@@ -300,6 +336,12 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert project_index["column_names"] == ["user_id", "updated_at", "created_at", "id"]
     assert "ix_products_project_id_created_at_id" in product_indexes
     assert "ix_generations_product_id" in generation_indexes
+
+    command.downgrade(cfg, "1194054de91f")
+    inspector_oauth_down = inspect(engine)
+    oauth_down_tables = set(inspector_oauth_down.get_table_names())
+    assert "amazon_oauth_states" not in oauth_down_tables
+    assert "amazon_listings" in oauth_down_tables
 
     command.downgrade(cfg, "c3d4e5f6a7b8")
     inspector_amazon_down = inspect(engine)
@@ -369,6 +411,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
         "amazon_marketplace_participations",
         "amazon_sync_logs",
         "amazon_listings",
+        "amazon_oauth_states",
     ]:
         model_columns = {column.name for column in Base.metadata.tables[table_name].columns}
         db_columns = {column["name"] for column in inspector_reup.get_columns(table_name)}

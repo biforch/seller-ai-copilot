@@ -9,6 +9,7 @@ import pytest
 from app.integrations.amazon.exceptions import (
     AMAZON_CONFIG_INVALID,
     AMAZON_OAUTH_MARKETPLACE_INVALID,
+    AMAZON_OAUTH_STATE_INVALID,
     AmazonError,
 )
 from app.integrations.amazon.oauth_urls import (
@@ -136,7 +137,7 @@ def test_invalid_state_values_are_rejected(state: str) -> None:
             state=state,
             consent_version=None,
         )
-    assert exc_info.value.error_code == AMAZON_CONFIG_INVALID
+    assert exc_info.value.error_code == AMAZON_OAUTH_STATE_INVALID
 
 
 def test_application_id_control_characters_are_rejected() -> None:

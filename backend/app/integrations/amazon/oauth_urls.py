@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from app.integrations.amazon.exceptions import (
     amazon_config_invalid_error,
     amazon_oauth_marketplace_invalid_error,
+    amazon_oauth_state_invalid_error,
 )
 
 SpApiRegionLiteral = Literal["na", "eu", "fe"]
@@ -65,13 +66,32 @@ def _reject_control_characters(value: str, *, field_name: str) -> None:
         raise amazon_config_invalid_error(f"Amazon OAuth {field_name} contains invalid characters")
 
 
-def _normalize_marketplace_code(marketplace_code: object) -> str:
+def normalize_oauth_marketplace_code(marketplace_code: object) -> str:
     if not isinstance(marketplace_code, str):
         raise amazon_oauth_marketplace_invalid_error()
     normalized = marketplace_code.strip().upper()
     if not normalized or normalized not in ALLOWED_OAUTH_MARKETPLACE_CODES:
         raise amazon_oauth_marketplace_invalid_error()
     return normalized
+
+
+def validate_oauth_state_token(value: object) -> str:
+    if not isinstance(value, str):
+        raise amazon_oauth_state_invalid_error()
+    if not value:
+        raise amazon_oauth_state_invalid_error()
+    if any(character.isspace() for character in value):
+        raise amazon_oauth_state_invalid_error()
+    if len(value) < STATE_MIN_LEN or len(value) > STATE_MAX_LEN:
+        raise amazon_oauth_state_invalid_error()
+    _reject_control_characters(value, field_name="state")
+    if not _URLSAFE_TOKEN_RE.fullmatch(value):
+        raise amazon_oauth_state_invalid_error()
+    return value
+
+
+def _normalize_marketplace_code(marketplace_code: object) -> str:
+    return normalize_oauth_marketplace_code(marketplace_code)
 
 
 def _validate_application_id(application_id: object) -> str:
@@ -87,16 +107,7 @@ def _validate_application_id(application_id: object) -> str:
 
 
 def _validate_state(state: object) -> str:
-    if not isinstance(state, str):
-        raise amazon_config_invalid_error("Amazon OAuth state is invalid")
-    if not state:
-        raise amazon_config_invalid_error("Amazon OAuth state is required")
-    if len(state) < STATE_MIN_LEN or len(state) > STATE_MAX_LEN:
-        raise amazon_config_invalid_error("Amazon OAuth state length is invalid")
-    _reject_control_characters(state, field_name="state")
-    if not _URLSAFE_TOKEN_RE.fullmatch(state):
-        raise amazon_config_invalid_error("Amazon OAuth state format is invalid")
-    return state
+    return validate_oauth_state_token(state)
 
 
 def _validate_consent_version(consent_version: str | None) -> str | None:
