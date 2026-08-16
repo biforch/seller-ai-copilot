@@ -8,6 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import (
+    amazon_accounts,
     amazon_oauth,
     auth,
     generate,
@@ -187,6 +188,13 @@ app.include_router(
     amazon_oauth.router,
     prefix="/api/v1/amazon",
     tags=["Amazon OAuth"],
+)
+
+
+app.include_router(
+    amazon_accounts.router,
+    prefix="/api/v1/amazon",
+    tags=["Amazon Accounts"],
 )
 
 

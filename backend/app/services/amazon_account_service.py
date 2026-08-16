@@ -6,7 +6,6 @@ import logging
 import re
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy.exc import IntegrityError
@@ -34,6 +33,13 @@ from app.models.amazon_account import (
 )
 from app.models.amazon_sync_log import AmazonSyncLog, AmazonSyncStatus
 from app.models.user import User
+from app.services.amazon_account_read_service import (
+    AmazonAccountReadService,
+    AmazonAccountSummary,
+)
+from app.services.amazon_account_read_service import (
+    to_account_summary as _to_summary,
+)
 from app.services.amazon_sync_log_service import AmazonSyncLogService
 
 logger = logging.getLogger(__name__)
@@ -46,31 +52,6 @@ MAX_OAUTH_REFRESH_TOKEN_LENGTH = 8192
 _SELLER_ID_PATTERN = re.compile(r"^[A-Za-z0-9]{1,32}$")
 
 Clock = Callable[[], datetime]
-
-
-@dataclass(frozen=True)
-class AmazonAccountSummary:
-    id: uuid.UUID
-    user_id: uuid.UUID
-    region: str
-    endpoint_mode: str
-    status: str
-    last_verified_at: datetime | None
-    created_at: datetime
-    updated_at: datetime
-
-
-def _to_summary(account: AmazonAccount) -> AmazonAccountSummary:
-    return AmazonAccountSummary(
-        id=account.id,
-        user_id=account.user_id,
-        region=account.region,
-        endpoint_mode=account.endpoint_mode,
-        status=account.status,
-        last_verified_at=account.last_verified_at,
-        created_at=account.created_at,
-        updated_at=account.updated_at,
-    )
 
 
 def _is_fingerprint_unique_violation(exc: IntegrityError) -> bool:
@@ -128,7 +109,7 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class AmazonAccountService:
+class AmazonAccountService(AmazonAccountReadService):
     def __init__(
         self,
         db: Session,
@@ -136,7 +117,7 @@ class AmazonAccountService:
         *,
         clock: Clock | None = None,
     ) -> None:
-        self._db = db
+        super().__init__(db)
         self._encryption = encryption_service
         self._clock = clock or _utc_now
 
@@ -395,50 +376,16 @@ class AmazonAccountService:
         self._db.add(account)
         return self._commit_oauth_account(account, operation="oauth_reauthorize")
 
-    def get_account_for_user(
-        self,
-        *,
-        user_id: uuid.UUID,
-        account_id: uuid.UUID,
-    ) -> AmazonAccountSummary:
-        account = (
-            self._db.query(AmazonAccount)
-            .filter(
-                AmazonAccount.id == account_id,
-                AmazonAccount.user_id == user_id,
-            )
-            .one_or_none()
-        )
-        if account is None:
-            raise amazon_account_not_found_error()
-        return _to_summary(account)
-
     def get_account_model_for_user(
         self,
         *,
         user_id: uuid.UUID,
         account_id: uuid.UUID,
     ) -> AmazonAccount:
-        account = (
-            self._db.query(AmazonAccount)
-            .filter(
-                AmazonAccount.id == account_id,
-                AmazonAccount.user_id == user_id,
-            )
-            .one_or_none()
-        )
+        account = self._get_account_row_for_user(user_id=user_id, account_id=account_id)
         if account is None:
             raise amazon_account_not_found_error()
         return account
-
-    def list_accounts_for_user(self, *, user_id: uuid.UUID) -> list[AmazonAccountSummary]:
-        accounts = (
-            self._db.query(AmazonAccount)
-            .filter(AmazonAccount.user_id == user_id)
-            .order_by(AmazonAccount.updated_at.desc(), AmazonAccount.id.desc())
-            .all()
-        )
-        return [_to_summary(account) for account in accounts]
 
     def disable_account(
         self,
