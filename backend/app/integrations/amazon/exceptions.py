@@ -31,6 +31,19 @@ AMAZON_MARKETPLACE_INACTIVE = "AMAZON_MARKETPLACE_INACTIVE"
 AMAZON_MARKETPLACE_NOT_ELIGIBLE = "AMAZON_MARKETPLACE_NOT_ELIGIBLE"
 AMAZON_SYNC_PAGINATION_LIMIT = "AMAZON_SYNC_PAGINATION_LIMIT"
 AMAZON_SYNC_PAGINATION_LOOP = "AMAZON_SYNC_PAGINATION_LOOP"
+AMAZON_OAUTH_DISABLED = "AMAZON_OAUTH_DISABLED"
+AMAZON_OAUTH_STATE_INVALID = "AMAZON_OAUTH_STATE_INVALID"
+AMAZON_OAUTH_STATE_EXPIRED = "AMAZON_OAUTH_STATE_EXPIRED"
+AMAZON_OAUTH_STATE_REPLAY = "AMAZON_OAUTH_STATE_REPLAY"
+AMAZON_OAUTH_REDIRECT_INVALID = "AMAZON_OAUTH_REDIRECT_INVALID"
+AMAZON_OAUTH_MARKETPLACE_INVALID = "AMAZON_OAUTH_MARKETPLACE_INVALID"
+AMAZON_OAUTH_SELLER_INVALID = "AMAZON_OAUTH_SELLER_INVALID"
+AMAZON_OAUTH_SELLER_MISMATCH = "AMAZON_OAUTH_SELLER_MISMATCH"
+AMAZON_OAUTH_SELLER_ALREADY_LINKED = "AMAZON_OAUTH_SELLER_ALREADY_LINKED"
+AMAZON_OAUTH_TOKEN_EXCHANGE_FAILED = "AMAZON_OAUTH_TOKEN_EXCHANGE_FAILED"
+AMAZON_OAUTH_USER_NOT_FOUND = "AMAZON_OAUTH_USER_NOT_FOUND"
+AMAZON_OAUTH_ACCOUNT_PERSIST_FAILED = "AMAZON_OAUTH_ACCOUNT_PERSIST_FAILED"
+AMAZON_OAUTH_INTENT_INVALID = "AMAZON_OAUTH_INTENT_INVALID"
 
 ERROR_BODY_MAX_LEN = 500
 
@@ -196,6 +209,110 @@ def amazon_sync_pagination_loop_error() -> AmazonError:
         "Amazon sync pagination loop detected",
         error_code=AMAZON_SYNC_PAGINATION_LOOP,
         status_code=502,
+    )
+
+
+def amazon_oauth_disabled_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth integration is disabled",
+        error_code=AMAZON_OAUTH_DISABLED,
+        status_code=503,
+    )
+
+
+def amazon_oauth_state_invalid_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth state is invalid",
+        error_code=AMAZON_OAUTH_STATE_INVALID,
+        status_code=400,
+    )
+
+
+def amazon_oauth_state_expired_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth state has expired",
+        error_code=AMAZON_OAUTH_STATE_EXPIRED,
+        status_code=400,
+    )
+
+
+def amazon_oauth_state_replay_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth state was already used",
+        error_code=AMAZON_OAUTH_STATE_REPLAY,
+        status_code=409,
+    )
+
+
+def amazon_oauth_redirect_invalid_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth redirect URI is invalid",
+        error_code=AMAZON_OAUTH_REDIRECT_INVALID,
+        status_code=400,
+    )
+
+
+def amazon_oauth_marketplace_invalid_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth marketplace is invalid",
+        error_code=AMAZON_OAUTH_MARKETPLACE_INVALID,
+        status_code=400,
+    )
+
+
+def amazon_oauth_seller_invalid_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth seller identifier is invalid",
+        error_code=AMAZON_OAUTH_SELLER_INVALID,
+        status_code=400,
+    )
+
+
+def amazon_oauth_seller_mismatch_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth seller does not match the account",
+        error_code=AMAZON_OAUTH_SELLER_MISMATCH,
+        status_code=409,
+    )
+
+
+def amazon_oauth_seller_already_linked_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth seller is already linked",
+        error_code=AMAZON_OAUTH_SELLER_ALREADY_LINKED,
+        status_code=409,
+    )
+
+
+def amazon_oauth_token_exchange_failed_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth token exchange failed",
+        error_code=AMAZON_OAUTH_TOKEN_EXCHANGE_FAILED,
+        status_code=502,
+    )
+
+
+def amazon_oauth_user_not_found_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth user was not found",
+        error_code=AMAZON_OAUTH_USER_NOT_FOUND,
+        status_code=401,
+    )
+
+
+def amazon_oauth_account_persist_failed_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth account persistence failed",
+        error_code=AMAZON_OAUTH_ACCOUNT_PERSIST_FAILED,
+        status_code=500,
+    )
+
+
+def amazon_oauth_intent_invalid_error() -> AmazonError:
+    return AmazonError(
+        "Amazon OAuth intent is invalid",
+        error_code=AMAZON_OAUTH_INTENT_INVALID,
+        status_code=400,
     )
 
 

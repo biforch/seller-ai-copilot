@@ -53,7 +53,7 @@ def test_testing_environment_rejects_sandbox_endpoint_mode():
 
 
 def test_production_rejects_non_amazon_lwa_host():
-    with pytest.raises(ValueError, match="api.amazon.com"):
+    with pytest.raises(ValidationError, match="api.amazon.com"):
         Settings(
             _env_file=None,
             ENVIRONMENT="production",

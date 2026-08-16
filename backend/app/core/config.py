@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     AMAZON_TOKEN_KEY_V0: str = ""
     AMAZON_TOKEN_FINGERPRINT_PEPPER: str = ""
 
+    AMAZON_SP_API_APPLICATION_ID: str = ""
+    AMAZON_OAUTH_ENABLED: bool = False
+    AMAZON_OAUTH_REDIRECT_URI: str = ""
+    AMAZON_OAUTH_FRONTEND_SUCCESS_URL: str = ""
+    AMAZON_OAUTH_FRONTEND_ERROR_URL: str = ""
+    AMAZON_OAUTH_CONSENT_VERSION: str = ""
+    AMAZON_OAUTH_STATE_TTL_SECONDS: int = 600
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> str:
@@ -85,6 +93,7 @@ class Settings(BaseSettings):
     def amazon_settings(self) -> AmazonSettings:
         return AmazonSettings(
             enabled=self.AMAZON_SP_API_ENABLED,
+            oauth_enabled=self.AMAZON_OAUTH_ENABLED,
             lwa_client_id=self.AMAZON_LWA_CLIENT_ID,
             lwa_client_secret=self.AMAZON_LWA_CLIENT_SECRET,
             lwa_token_url=self.AMAZON_LWA_TOKEN_URL,
@@ -92,6 +101,12 @@ class Settings(BaseSettings):
             endpoint_mode=AmazonEndpointMode(self.AMAZON_SP_API_ENDPOINT_MODE),
             user_agent=self.AMAZON_SP_API_USER_AGENT,
             environment=self.ENVIRONMENT,
+            application_id=self.AMAZON_SP_API_APPLICATION_ID,
+            oauth_redirect_uri=self.AMAZON_OAUTH_REDIRECT_URI,
+            oauth_frontend_success_url=self.AMAZON_OAUTH_FRONTEND_SUCCESS_URL,
+            oauth_frontend_error_url=self.AMAZON_OAUTH_FRONTEND_ERROR_URL,
+            oauth_consent_version=self.AMAZON_OAUTH_CONSENT_VERSION,
+            oauth_state_ttl_seconds=self.AMAZON_OAUTH_STATE_TTL_SECONDS,
         )
 
     @model_validator(mode="after")
