@@ -50,6 +50,14 @@ export interface AmazonListing {
   updated_at: string;
 }
 
+export interface AmazonLinkProduct {
+  id: string;
+  name: string;
+  category: string | null;
+  platform: string;
+  market: string;
+}
+
 interface AmazonAccountList {
   items: AmazonAccount[];
   total: number;
@@ -79,6 +87,11 @@ export interface AmazonSyncResult {
 
 export const amazonApi = {
   listAccounts: () => apiClient.get<AmazonAccountList>('/amazon/accounts'),
+
+  listLinkableProducts: () =>
+    apiClient.get<PaginatedResponse<AmazonLinkProduct>>('/products', {
+      params: { page: 1, page_size: 100 },
+    }),
 
   startAuthorization: (
     marketplaceCode: string,
@@ -116,5 +129,16 @@ export const amazonApi = {
   syncListings: (accountId: string, marketplaceId: string) =>
     apiClient.post<AmazonSyncResult>(
       `/amazon/accounts/${accountId}/marketplaces/${encodeURIComponent(marketplaceId)}/listings/sync`,
+    ),
+
+  linkListingProduct: (
+    accountId: string,
+    marketplaceId: string,
+    listingId: string,
+    productId: string | null,
+  ) =>
+    apiClient.patch<AmazonListing>(
+      `/amazon/accounts/${accountId}/marketplaces/${encodeURIComponent(marketplaceId)}/listings/${listingId}/product-link`,
+      { product_id: productId },
     ),
 };

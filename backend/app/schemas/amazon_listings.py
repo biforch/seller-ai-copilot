@@ -37,6 +37,12 @@ class AmazonListingListResponse(BaseModel):
     pagination: PaginationMeta
 
 
+class AmazonListingProductLinkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: uuid.UUID | None
+
+
 class AmazonProductSyncResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -50,4 +56,5 @@ class AmazonProductSyncResponse(BaseModel):
 
 
 AmazonListingListApiResponse = ApiResponse[AmazonListingListResponse]
+AmazonListingApiResponse = ApiResponse[AmazonListingPublic]
 AmazonProductSyncApiResponse = ApiResponse[AmazonProductSyncResponse]

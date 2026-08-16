@@ -31,6 +31,8 @@ AMAZON_ACCOUNT_NOT_ACTIVE = "AMAZON_ACCOUNT_NOT_ACTIVE"
 AMAZON_MARKETPLACE_NOT_FOUND = "AMAZON_MARKETPLACE_NOT_FOUND"
 AMAZON_MARKETPLACE_INACTIVE = "AMAZON_MARKETPLACE_INACTIVE"
 AMAZON_MARKETPLACE_NOT_ELIGIBLE = "AMAZON_MARKETPLACE_NOT_ELIGIBLE"
+AMAZON_LISTING_NOT_FOUND = "AMAZON_LISTING_NOT_FOUND"
+AMAZON_PRODUCT_NOT_FOUND = "AMAZON_PRODUCT_NOT_FOUND"
 AMAZON_SYNC_PAGINATION_LIMIT = "AMAZON_SYNC_PAGINATION_LIMIT"
 AMAZON_SYNC_PAGINATION_LOOP = "AMAZON_SYNC_PAGINATION_LOOP"
 AMAZON_OAUTH_DISABLED = "AMAZON_OAUTH_DISABLED"
@@ -80,6 +82,8 @@ KNOWN_AMAZON_ERROR_CODES = frozenset(
         AMAZON_MARKETPLACE_NOT_FOUND,
         AMAZON_MARKETPLACE_INACTIVE,
         AMAZON_MARKETPLACE_NOT_ELIGIBLE,
+        AMAZON_LISTING_NOT_FOUND,
+        AMAZON_PRODUCT_NOT_FOUND,
         AMAZON_SYNC_PAGINATION_LIMIT,
         AMAZON_SYNC_PAGINATION_LOOP,
         AMAZON_OAUTH_DISABLED,
@@ -260,6 +264,22 @@ def amazon_marketplace_not_eligible_error() -> AmazonError:
         "Amazon marketplace participation is not eligible for sync",
         error_code=AMAZON_MARKETPLACE_NOT_ELIGIBLE,
         status_code=409,
+    )
+
+
+def amazon_listing_not_found_error() -> AmazonError:
+    return AmazonError(
+        "Amazon listing was not found",
+        error_code=AMAZON_LISTING_NOT_FOUND,
+        status_code=404,
+    )
+
+
+def amazon_product_not_found_error() -> AmazonError:
+    return AmazonError(
+        "Product was not found",
+        error_code=AMAZON_PRODUCT_NOT_FOUND,
+        status_code=404,
     )
 
 

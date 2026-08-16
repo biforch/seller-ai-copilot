@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.amazon_listings_deps import (
     ProductSyncServiceFactory,
+    get_amazon_listing_link_service,
     get_amazon_listing_read_service,
     get_amazon_product_sync_service_factory,
 )
@@ -21,13 +22,16 @@ from app.core.response import success_response
 from app.core.security import get_current_user
 from app.integrations.amazon.exceptions import AmazonError, sanitize_public_amazon_error_code
 from app.schemas.amazon_listings import (
+    AmazonListingApiResponse,
     AmazonListingListApiResponse,
     AmazonListingListResponse,
+    AmazonListingProductLinkRequest,
     AmazonListingPublic,
     AmazonProductSyncApiResponse,
     AmazonProductSyncResponse,
 )
 from app.schemas.pagination import build_pagination_meta
+from app.services.amazon_listing_link_service import AmazonListingLinkService
 from app.services.amazon_listing_read_service import AmazonListingReadService
 
 router = APIRouter()
@@ -93,6 +97,35 @@ def list_amazon_listings(
         items=items,
         pagination=build_pagination_meta(result.page, result.page_size, result.total),
     )
+    return success_response(data=payload.model_dump(mode="json"))
+
+
+@router.patch(
+    "/accounts/{account_id}/marketplaces/{marketplace_id}/listings/{listing_id}/product-link",
+    response_model=AmazonListingApiResponse,
+)
+def link_amazon_listing_product(
+    account_id: uuid.UUID,
+    marketplace_id: str,
+    listing_id: uuid.UUID,
+    body: AmazonListingProductLinkRequest,
+    response: Response,
+    current_user: dict = Depends(get_current_user),
+    link_service: AmazonListingLinkService = Depends(get_amazon_listing_link_service),
+) -> dict | JSONResponse:
+    response.headers.update(_PRIVATE_CACHE_HEADERS)
+    user_id = uuid.UUID(str(current_user["id"]))
+    try:
+        listing = link_service.link_product_for_user(
+            user_id=user_id,
+            account_id=account_id,
+            marketplace_id=marketplace_id,
+            listing_id=listing_id,
+            product_id=body.product_id,
+        )
+    except AmazonError as exc:
+        return _amazon_error_response(exc)
+    payload = AmazonListingPublic.model_validate(listing, from_attributes=True)
     return success_response(data=payload.model_dump(mode="json"))
 
 

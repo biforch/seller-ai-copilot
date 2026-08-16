@@ -32,6 +32,25 @@ class AmazonListingSummary:
     created_at: datetime
     updated_at: datetime
 
+    @classmethod
+    def from_model(cls, row: AmazonListing) -> AmazonListingSummary:
+        return cls(
+            id=row.id,
+            marketplace_id=row.marketplace_id,
+            seller_sku=row.seller_sku,
+            asin=row.asin,
+            product_id=row.product_id,
+            status_codes=tuple(row.status_codes),
+            product_type=row.product_type,
+            upstream_created_at=row.upstream_created_at,
+            upstream_last_updated_at=row.upstream_last_updated_at,
+            is_active=row.is_active,
+            first_seen_at=row.first_seen_at,
+            last_seen_at=row.last_seen_at,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
 
 @dataclass(frozen=True)
 class AmazonListingPage:
@@ -83,22 +102,7 @@ class AmazonListingReadService(AmazonAccountReadService):
         )
         return AmazonListingPage(
             items=tuple(
-                AmazonListingSummary(
-                    id=row.id,
-                    marketplace_id=row.marketplace_id,
-                    seller_sku=row.seller_sku,
-                    asin=row.asin,
-                    product_id=row.product_id,
-                    status_codes=tuple(row.status_codes),
-                    product_type=row.product_type,
-                    upstream_created_at=row.upstream_created_at,
-                    upstream_last_updated_at=row.upstream_last_updated_at,
-                    is_active=row.is_active,
-                    first_seen_at=row.first_seen_at,
-                    last_seen_at=row.last_seen_at,
-                    created_at=row.created_at,
-                    updated_at=row.updated_at,
-                )
+                AmazonListingSummary.from_model(row)
                 for row in rows
             ),
             page=page,

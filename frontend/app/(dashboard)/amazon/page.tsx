@@ -18,6 +18,7 @@ import {
   amazonApi,
   type AmazonAccount,
   type AmazonListing,
+  type AmazonLinkProduct,
   type AmazonMarketplace,
 } from '@/app/api/amazon';
 import { ApiClientError } from '@/lib/api-client-error';
@@ -56,6 +57,7 @@ export default function AmazonConnectionsPage() {
   const [marketplaces, setMarketplaces] = useState<AmazonMarketplace[]>([]);
   const [selectedMarketplaceId, setSelectedMarketplaceId] = useState<string | null>(null);
   const [listings, setListings] = useState<AmazonListing[]>([]);
+  const [products, setProducts] = useState<AmazonLinkProduct[]>([]);
   const [marketplaceCode, setMarketplaceCode] = useState('US');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -91,6 +93,15 @@ export default function AmazonConnectionsPage() {
       setError(errorMessage(requestError));
     } finally {
       setLoadingAccounts(false);
+    }
+  }, []);
+
+  const loadProducts = useCallback(async () => {
+    try {
+      const result = await amazonApi.listLinkableProducts();
+      setProducts(result.items);
+    } catch (requestError) {
+      setError(errorMessage(requestError));
     }
   }, []);
 
@@ -139,7 +150,8 @@ export default function AmazonConnectionsPage() {
 
   useEffect(() => {
     void loadAccounts();
-  }, [loadAccounts]);
+    void loadProducts();
+  }, [loadAccounts, loadProducts]);
 
   useEffect(() => {
     if (!selectedAccountId) {
@@ -203,6 +215,28 @@ export default function AmazonConnectionsPage() {
       const result = await amazonApi.syncListings(selectedAccountId, selectedMarketplaceId);
       setNotice(`Listing sync complete: ${result.items_written} written, ${result.items_deactivated} deactivated.`);
       await loadListings(selectedAccountId, selectedMarketplaceId, 1);
+    } catch (requestError) {
+      setError(errorMessage(requestError));
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const linkProduct = async (listingId: string, productId: string | null) => {
+    if (!selectedAccountId || !selectedMarketplaceId) return;
+    setAction(`link:${listingId}`);
+    setError(null);
+    try {
+      const updated = await amazonApi.linkListingProduct(
+        selectedAccountId,
+        selectedMarketplaceId,
+        listingId,
+        productId,
+      );
+      setListings((current) =>
+        current.map((listing) => (listing.id === updated.id ? updated : listing)),
+      );
+      setNotice(productId ? 'Listing linked to a SellerAI product.' : 'Listing unlinked.');
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
@@ -392,13 +426,37 @@ export default function AmazonConnectionsPage() {
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-slate-200 text-sm">
                         <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                          <tr><th className="px-5 py-3">SKU</th><th className="px-5 py-3">ASIN</th><th className="px-5 py-3">Product type</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Last seen</th></tr>
+                          <tr><th className="px-5 py-3">SKU</th><th className="px-5 py-3">ASIN</th><th className="px-5 py-3">SellerAI product</th><th className="px-5 py-3">Product type</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Last seen</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {listings.map((listing) => (
                             <tr key={listing.id} className="hover:bg-slate-50/70">
                               <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-900">{listing.seller_sku}</td>
                               <td className="whitespace-nowrap px-5 py-4 text-slate-600">{listing.asin ?? '—'}</td>
+                              <td className="min-w-56 px-5 py-4">
+                                <div className="flex items-center gap-2">
+                                  <select
+                                    aria-label={`SellerAI product for ${listing.seller_sku}`}
+                                    value={listing.product_id ?? ''}
+                                    disabled={action !== null}
+                                    onChange={(event) =>
+                                      void linkProduct(listing.id, event.target.value || null)
+                                    }
+                                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 focus:border-orange-400 focus:ring-orange-400 disabled:opacity-50"
+                                  >
+                                    <option value="">Unlinked</option>
+                                    {listing.product_id && !products.some((product) => product.id === listing.product_id) && (
+                                      <option value={listing.product_id}>Linked product</option>
+                                    )}
+                                    {products.map((product) => (
+                                      <option key={product.id} value={product.id}>{product.name}</option>
+                                    ))}
+                                  </select>
+                                  {action === `link:${listing.id}` && (
+                                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-orange-500" />
+                                  )}
+                                </div>
+                              </td>
                               <td className="whitespace-nowrap px-5 py-4 text-slate-600">{listing.product_type ?? '—'}</td>
                               <td className="px-5 py-4"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${listing.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{listing.is_active ? listing.status_codes.join(', ') || 'Active' : 'Inactive'}</span></td>
                               <td className="whitespace-nowrap px-5 py-4 text-slate-500">{formatDate(listing.last_seen_at)}</td>

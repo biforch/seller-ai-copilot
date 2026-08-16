@@ -15,6 +15,7 @@ from app.integrations.amazon.listings_items import ListingsItemsClient
 from app.integrations.amazon.lwa import CachingRefreshTokenProvider, LwaTokenClient
 from app.integrations.amazon.token_encryption_loader import build_token_encryption_service
 from app.integrations.amazon.transport import HttpxTransport
+from app.services.amazon_listing_link_service import AmazonListingLinkService
 from app.services.amazon_listing_read_service import AmazonListingReadService
 from app.services.amazon_product_sync_service import AmazonProductSyncService
 
@@ -25,6 +26,12 @@ def get_amazon_listing_read_service(
     db: Session = Depends(get_db),
 ) -> AmazonListingReadService:
     return AmazonListingReadService(db)
+
+
+def get_amazon_listing_link_service(
+    db: Session = Depends(get_db),
+) -> AmazonListingLinkService:
+    return AmazonListingLinkService(db)
 
 
 def build_amazon_product_sync_service(
