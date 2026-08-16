@@ -7,7 +7,8 @@ import { useRouter } from 'next/navigation';
 import {
   Plus,
   FolderKanban,
-  History
+  History,
+  ShoppingBag
 } from 'lucide-react';
 
 
@@ -82,7 +83,7 @@ Manage your AI selling projects and listings
 
 
 
-<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
 
 
 
@@ -119,6 +120,26 @@ Manage selling projects
 </div>
 
 
+</button>
+
+<button
+onClick={()=>router.push('/amazon')}
+className="
+bg-orange-500
+text-white
+p-6
+rounded-xl
+hover:bg-orange-600
+flex
+items-center
+gap-4
+"
+>
+<ShoppingBag/>
+<div>
+<h3 className="font-semibold">Amazon</h3>
+<p className="text-sm">Connect and sync listings</p>
+</div>
 </button>
 
 

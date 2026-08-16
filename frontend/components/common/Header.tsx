@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { LogOut, Sparkles } from 'lucide-react';
+import { LogOut, ShoppingBag, Sparkles } from 'lucide-react';
 
 import { APP_NAME } from '@/lib/constants';
 import type { User } from '@/types';
@@ -31,6 +31,13 @@ export function Header({ user, onLogout, showAuth = false }: HeaderProps) {
         <div className="flex items-center gap-4">
           {user ? (
             <>
+              <button
+                onClick={() => router.push('/amazon')}
+                className="hidden items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-orange-50 hover:text-orange-700 sm:flex"
+              >
+                <ShoppingBag className="h-4 w-4" />
+                Amazon
+              </button>
               <span className="text-sm text-gray-600 hidden sm:inline">{user.email}</span>
               <button
                 onClick={onLogout}
