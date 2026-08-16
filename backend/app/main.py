@@ -9,6 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import (
     amazon_accounts,
+    amazon_listings,
     amazon_marketplaces,
     amazon_oauth,
     auth,
@@ -202,6 +203,12 @@ app.include_router(
     amazon_marketplaces.router,
     prefix="/api/v1/amazon",
     tags=["Amazon Marketplaces"],
+)
+
+app.include_router(
+    amazon_listings.router,
+    prefix="/api/v1/amazon",
+    tags=["Amazon Listings"],
 )
 
 
