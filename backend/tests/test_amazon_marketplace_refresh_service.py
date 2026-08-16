@@ -7,10 +7,12 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.integrations.amazon.exceptions import (
+    AMAZON_CONFIG_INVALID,
     AMAZON_RESPONSE_INVALID,
     AMAZON_SP_API_RATE_LIMITED,
     AMAZON_SYNC_FINALIZE_FAILED,
     AmazonError,
+    amazon_config_invalid_error,
 )
 from app.models.amazon_account import AmazonAccount, AmazonAccountStatus
 from app.models.amazon_marketplace_participation import AmazonMarketplaceParticipation
@@ -352,6 +354,125 @@ async def test_finalize_failure_returns_stable_error(
                 account_id=summary.id,
             )
     assert exc_info.value.error_code == AMAZON_SYNC_FINALIZE_FAILED
+
+
+@pytest.mark.asyncio
+async def test_credential_load_amazon_error_finalizes_and_reraises(
+    a32_session_factory,
+    token_encryption_service,
+) -> None:
+    user, summary = create_committed_account(
+        a32_session_factory,
+        token_encryption_service,
+        token=FAKE_A32_REFRESH_TOKEN,
+    )
+    service = _make_refresh_service(
+        token_encryption_service,
+        a32_session_factory,
+        _success_handler,
+    )
+    with patch.object(
+        service,
+        "_load_encrypted_token",
+        side_effect=amazon_config_invalid_error("CANARY_CREDENTIAL_DETAIL"),
+    ):
+        with pytest.raises(AmazonError) as exc_info:
+            await service.refresh_marketplace_participations(
+                user_id=user.id,
+                account_id=summary.id,
+            )
+    assert exc_info.value.error_code == AMAZON_CONFIG_INVALID
+
+    verify = a32_session_factory()
+    try:
+        account = verify.get(AmazonAccount, summary.id)
+        assert account is not None
+        assert account.sync_lease_id is None
+        log = (
+            verify.query(AmazonSyncLog)
+            .filter_by(amazon_account_id=summary.id)
+            .one()
+        )
+        assert log.status == AmazonSyncStatus.FAILED
+        assert log.error_code == AMAZON_CONFIG_INVALID
+    finally:
+        verify.close()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_sellers_factory_failure_finalizes_without_leaking(
+    a32_session_factory,
+    token_encryption_service,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    user, summary = create_committed_account(
+        a32_session_factory,
+        token_encryption_service,
+        token=FAKE_A32_REFRESH_TOKEN,
+    )
+
+    def failing_factory(_plaintext_refresh_token: str):
+        raise RuntimeError("CANARY_FACTORY_SECRET")
+
+    service = AmazonMarketplaceRefreshService(
+        session_factory=a32_session_factory,
+        encryption_service=token_encryption_service,
+        sellers_client_factory=failing_factory,
+        min_lease_seconds=1,
+    )
+    with caplog.at_level("WARNING"):
+        with pytest.raises(AmazonError) as exc_info:
+            await service.refresh_marketplace_participations(
+                user_id=user.id,
+                account_id=summary.id,
+            )
+    assert exc_info.value.error_code == AMAZON_SYNC_FINALIZE_FAILED
+    assert "CANARY_FACTORY_SECRET" not in caplog.text
+    assert "CANARY_FACTORY_SECRET" not in str(exc_info.value)
+
+    verify = a32_session_factory()
+    try:
+        account = verify.get(AmazonAccount, summary.id)
+        assert account is not None
+        assert account.sync_lease_id is None
+        log = (
+            verify.query(AmazonSyncLog)
+            .filter_by(amazon_account_id=summary.id)
+            .one()
+        )
+        assert log.status == AmazonSyncStatus.FAILED
+        assert log.error_code == AMAZON_SYNC_FINALIZE_FAILED
+    finally:
+        verify.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_external_fetch_propagates(
+    a32_session_factory,
+    token_encryption_service,
+) -> None:
+    import asyncio
+
+    user, summary = create_committed_account(
+        a32_session_factory,
+        token_encryption_service,
+        token=FAKE_A32_REFRESH_TOKEN,
+    )
+    service = _make_refresh_service(
+        token_encryption_service,
+        a32_session_factory,
+        _success_handler,
+    )
+
+    async def cancelled_fetch(*args, **kwargs):
+        raise asyncio.CancelledError
+
+    service._fetch_participations = cancelled_fetch  # type: ignore[method-assign]
+    with pytest.raises(asyncio.CancelledError):
+        await service.refresh_marketplace_participations(
+            user_id=user.id,
+            account_id=summary.id,
+        )
 
 
 @pytest.mark.asyncio

@@ -96,28 +96,17 @@ class AmazonMarketplaceRefreshService:
             lease_duration=duration,
         )
 
-        encrypted = self._load_encrypted_token(user_id=user_id, account_id=account_id)
-        participations: tuple[SellerMarketplaceParticipation, ...]
+        stage = "credential_load"
         request_id: str | None = None
         try:
+            encrypted = self._load_encrypted_token(user_id=user_id, account_id=account_id)
+            stage = "external_fetch"
             participations, request_id = await self._fetch_participations(
                 encrypted=encrypted,
                 user_id=user_id,
                 account_id=account_id,
             )
-        except AmazonError as exc:
-            if exc.error_code == AMAZON_SYNC_LEASE_LOST:
-                raise
-            if not self._attempt_failure_finalize(
-                lease_ctx=lease_ctx,
-                error_code=exc.error_code,
-                request_id=exc.request_id,
-                account_status=self._account_status_for_error(exc),
-            ):
-                raise amazon_sync_finalize_failed_error() from None
-            raise
-
-        try:
+            stage = "finalize_success"
             return self._finalize_success(
                 lease_ctx=lease_ctx,
                 participations=participations,
@@ -126,20 +115,27 @@ class AmazonMarketplaceRefreshService:
         except AmazonError as exc:
             if exc.error_code == AMAZON_SYNC_LEASE_LOST:
                 raise
+            self._attempt_failure_finalize(
+                lease_ctx=lease_ctx,
+                error_code=exc.error_code,
+                request_id=exc.request_id,
+                account_status=self._account_status_for_error(exc),
+            )
             raise
         except Exception:
-            logger.exception(
-                "Marketplace refresh finalize failed account_id=%s sync_log_id=%s",
+            logger.warning(
+                "Marketplace refresh failed operation=marketplace_refresh "
+                "category=%s account_id=%s sync_log_id=%s",
+                stage,
                 account_id,
                 lease_ctx.sync_log_id,
             )
-            if not self._attempt_failure_finalize(
+            self._attempt_failure_finalize(
                 lease_ctx=lease_ctx,
                 error_code=AMAZON_SYNC_FINALIZE_FAILED,
                 request_id=request_id,
                 account_status=AmazonAccountStatus.ERROR,
-            ):
-                raise amazon_sync_finalize_failed_error() from None
+            )
             raise amazon_sync_finalize_failed_error() from None
 
     def _acquire_lease(
