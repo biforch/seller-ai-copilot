@@ -33,6 +33,10 @@ AMAZON_MARKETPLACE_INACTIVE = "AMAZON_MARKETPLACE_INACTIVE"
 AMAZON_MARKETPLACE_NOT_ELIGIBLE = "AMAZON_MARKETPLACE_NOT_ELIGIBLE"
 AMAZON_LISTING_NOT_FOUND = "AMAZON_LISTING_NOT_FOUND"
 AMAZON_PRODUCT_NOT_FOUND = "AMAZON_PRODUCT_NOT_FOUND"
+AMAZON_CATALOG_ASIN_REQUIRED = "AMAZON_CATALOG_ASIN_REQUIRED"
+AMAZON_CATALOG_IDENTITY_CHANGED = "AMAZON_CATALOG_IDENTITY_CHANGED"
+AMAZON_CATALOG_PERSIST_FAILED = "AMAZON_CATALOG_PERSIST_FAILED"
+AMAZON_CATALOG_FETCH_FAILED = "AMAZON_CATALOG_FETCH_FAILED"
 AMAZON_SYNC_PAGINATION_LIMIT = "AMAZON_SYNC_PAGINATION_LIMIT"
 AMAZON_SYNC_PAGINATION_LOOP = "AMAZON_SYNC_PAGINATION_LOOP"
 AMAZON_OAUTH_DISABLED = "AMAZON_OAUTH_DISABLED"
@@ -84,6 +88,10 @@ KNOWN_AMAZON_ERROR_CODES = frozenset(
         AMAZON_MARKETPLACE_NOT_ELIGIBLE,
         AMAZON_LISTING_NOT_FOUND,
         AMAZON_PRODUCT_NOT_FOUND,
+        AMAZON_CATALOG_ASIN_REQUIRED,
+        AMAZON_CATALOG_IDENTITY_CHANGED,
+        AMAZON_CATALOG_PERSIST_FAILED,
+        AMAZON_CATALOG_FETCH_FAILED,
         AMAZON_SYNC_PAGINATION_LIMIT,
         AMAZON_SYNC_PAGINATION_LOOP,
         AMAZON_OAUTH_DISABLED,
@@ -280,6 +288,38 @@ def amazon_product_not_found_error() -> AmazonError:
         "Product was not found",
         error_code=AMAZON_PRODUCT_NOT_FOUND,
         status_code=404,
+    )
+
+
+def amazon_catalog_asin_required_error() -> AmazonError:
+    return AmazonError(
+        "Amazon listing ASIN is required for catalog enrichment",
+        error_code=AMAZON_CATALOG_ASIN_REQUIRED,
+        status_code=422,
+    )
+
+
+def amazon_catalog_identity_changed_error() -> AmazonError:
+    return AmazonError(
+        "Amazon listing identity changed during catalog enrichment",
+        error_code=AMAZON_CATALOG_IDENTITY_CHANGED,
+        status_code=409,
+    )
+
+
+def amazon_catalog_persist_failed_error() -> AmazonError:
+    return AmazonError(
+        "Amazon catalog enrichment could not be saved",
+        error_code=AMAZON_CATALOG_PERSIST_FAILED,
+        status_code=500,
+    )
+
+
+def amazon_catalog_fetch_failed_error() -> AmazonError:
+    return AmazonError(
+        "Amazon catalog enrichment request failed",
+        error_code=AMAZON_CATALOG_FETCH_FAILED,
+        status_code=502,
     )
 
 
