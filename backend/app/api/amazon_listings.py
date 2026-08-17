@@ -6,6 +6,11 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 
+from app.api.amazon_catalog_deps import (
+    CatalogEnrichmentServiceFactory,
+    get_amazon_catalog_enrichment_service_factory,
+    get_amazon_catalog_read_service,
+)
 from app.api.amazon_listings_deps import (
     ProductSyncServiceFactory,
     get_amazon_listing_link_service,
@@ -21,6 +26,10 @@ from app.core.rate_limit import limiter
 from app.core.response import success_response
 from app.core.security import get_current_user
 from app.integrations.amazon.exceptions import AmazonError, sanitize_public_amazon_error_code
+from app.schemas.amazon_catalog import (
+    AmazonCatalogSnapshotApiResponse,
+    AmazonCatalogSnapshotPublic,
+)
 from app.schemas.amazon_listings import (
     AmazonListingApiResponse,
     AmazonListingListApiResponse,
@@ -31,6 +40,11 @@ from app.schemas.amazon_listings import (
     AmazonProductSyncResponse,
 )
 from app.schemas.pagination import build_pagination_meta
+from app.services.amazon_catalog_enrichment_service import CatalogEnrichmentResult
+from app.services.amazon_catalog_read_service import (
+    AmazonCatalogReadService,
+    AmazonCatalogSnapshotSummary,
+)
 from app.services.amazon_listing_link_service import AmazonListingLinkService
 from app.services.amazon_listing_read_service import AmazonListingReadService
 
@@ -45,6 +59,36 @@ def _product_sync_rate_limit_key(request: Request) -> str:
         return hashlib.sha256(authorization.encode("utf-8")).hexdigest()
     client_host = request.client.host if request.client is not None else "unknown"
     return f"anonymous:{client_host}"
+
+
+def _catalog_public(
+    snapshot: AmazonCatalogSnapshotSummary | CatalogEnrichmentResult,
+    *,
+    cache_hit: bool | None,
+) -> AmazonCatalogSnapshotPublic:
+    snapshot_id = (
+        snapshot.snapshot_id
+        if isinstance(snapshot, CatalogEnrichmentResult)
+        else snapshot.id
+    )
+    return AmazonCatalogSnapshotPublic(
+        id=snapshot_id,
+        listing_id=snapshot.listing_id,
+        asin=snapshot.asin,
+        marketplace_id=snapshot.marketplace_id,
+        item_name=snapshot.item_name,
+        brand=snapshot.brand,
+        manufacturer=snapshot.manufacturer,
+        color=snapshot.color,
+        size=snapshot.size,
+        style=snapshot.style,
+        model_number=snapshot.model_number,
+        part_number=snapshot.part_number,
+        product_type=snapshot.product_type,
+        fetched_at=snapshot.fetched_at,
+        expires_at=snapshot.expires_at,
+        cache_hit=cache_hit,
+    )
 
 
 def _amazon_error_response(exc: AmazonError) -> JSONResponse:
@@ -168,4 +212,73 @@ async def sync_amazon_listings(
         items_deactivated=result.items_deactivated,
         pages_seen=result.pages_seen,
     )
+    return success_response(data=payload.model_dump(mode="json"))
+
+
+@router.get(
+    "/accounts/{account_id}/marketplaces/{marketplace_id}/listings/{listing_id}/catalog",
+    response_model=AmazonCatalogSnapshotApiResponse,
+)
+def get_amazon_listing_catalog(
+    account_id: uuid.UUID,
+    marketplace_id: str,
+    listing_id: uuid.UUID,
+    response: Response,
+    current_user: dict = Depends(get_current_user),
+    catalog_service: AmazonCatalogReadService = Depends(get_amazon_catalog_read_service),
+) -> dict | JSONResponse:
+    response.headers.update(_PRIVATE_CACHE_HEADERS)
+    user_id = uuid.UUID(str(current_user["id"]))
+    try:
+        snapshot = catalog_service.get_latest_for_user(
+            user_id=user_id,
+            account_id=account_id,
+            marketplace_id=marketplace_id,
+            listing_id=listing_id,
+        )
+    except AmazonError as exc:
+        return _amazon_error_response(exc)
+    payload = None if snapshot is None else _catalog_public(snapshot, cache_hit=None)
+    return success_response(
+        data=None if payload is None else payload.model_dump(mode="json")
+    )
+
+
+@router.post(
+    "/accounts/{account_id}/marketplaces/{marketplace_id}/listings/{listing_id}/catalog/refresh",
+    response_model=AmazonCatalogSnapshotApiResponse,
+)
+@limiter.limit("10/minute", key_func=_product_sync_rate_limit_key)
+async def refresh_amazon_listing_catalog(
+    request: Request,
+    account_id: uuid.UUID,
+    marketplace_id: str,
+    listing_id: uuid.UUID,
+    response: Response,
+    force_refresh: bool = Query(False),
+    current_user: dict = Depends(get_current_user),
+    account_runtime_resolver: AccountRuntimeResolver = Depends(
+        get_amazon_account_runtime_resolver
+    ),
+    enrichment_service_factory: CatalogEnrichmentServiceFactory = Depends(
+        get_amazon_catalog_enrichment_service_factory
+    ),
+) -> dict | JSONResponse:
+    response.headers.update(_PRIVATE_CACHE_HEADERS)
+    user_id = uuid.UUID(str(current_user["id"]))
+    try:
+        account = account_runtime_resolver(user_id, account_id)
+        enrichment_service = enrichment_service_factory(
+            account.region, account.endpoint_mode
+        )
+        result = await enrichment_service.enrich_listing(
+            user_id=user_id,
+            account_id=account_id,
+            listing_id=listing_id,
+            marketplace_id=marketplace_id,
+            force_refresh=force_refresh,
+        )
+    except AmazonError as exc:
+        return _amazon_error_response(exc)
+    payload = _catalog_public(result, cache_hit=result.cache_hit)
     return success_response(data=payload.model_dump(mode="json"))

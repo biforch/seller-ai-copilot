@@ -51,6 +51,11 @@ class CatalogEnrichmentResult:
     item_name: str | None
     brand: str | None
     manufacturer: str | None
+    color: str | None
+    size: str | None
+    style: str | None
+    model_number: str | None
+    part_number: str | None
     product_type: str | None
     fetched_at: datetime
     expires_at: datetime
@@ -93,12 +98,14 @@ class AmazonCatalogEnrichmentService:
         user_id: uuid.UUID,
         account_id: uuid.UUID,
         listing_id: uuid.UUID,
+        marketplace_id: str | None = None,
         force_refresh: bool = False,
     ) -> CatalogEnrichmentResult:
         cached, context = self._preflight(
             user_id=user_id,
             account_id=account_id,
             listing_id=listing_id,
+            expected_marketplace_id=marketplace_id,
             allow_cache=not force_refresh,
         )
         if cached is not None:
@@ -125,6 +132,7 @@ class AmazonCatalogEnrichmentService:
         user_id: uuid.UUID,
         account_id: uuid.UUID,
         listing_id: uuid.UUID,
+        expected_marketplace_id: str | None,
         allow_cache: bool,
     ) -> tuple[CatalogEnrichmentResult | None, _EncryptedCatalogContext | None]:
         now = self._clock()
@@ -148,6 +156,11 @@ class AmazonCatalogEnrichmentService:
                 .one_or_none()
             )
             if listing is None:
+                raise amazon_listing_not_found_error()
+            if (
+                expected_marketplace_id is not None
+                and listing.marketplace_id != expected_marketplace_id
+            ):
                 raise amazon_listing_not_found_error()
             asin = (listing.asin or "").strip()
             if not asin:
@@ -359,6 +372,11 @@ class AmazonCatalogEnrichmentService:
             item_name=snapshot.item_name,
             brand=snapshot.brand,
             manufacturer=snapshot.manufacturer,
+            color=snapshot.color,
+            size=snapshot.size,
+            style=snapshot.style,
+            model_number=snapshot.model_number,
+            part_number=snapshot.part_number,
             product_type=snapshot.product_type,
             fetched_at=snapshot.fetched_at,
             expires_at=snapshot.expires_at,

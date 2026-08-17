@@ -601,3 +601,25 @@ def test_concurrent_same_content_is_single_row(
         )
     finally:
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_enrich_rejects_decorative_marketplace_path_without_http(
+    a32_session_factory, token_encryption_service, catalog_bundle_factory
+) -> None:
+    bundle = catalog_bundle_factory()
+    calls: list[dict] = []
+    service = _service(
+        session_factory=a32_session_factory,
+        encryption=token_encryption_service,
+        calls=calls,
+    )
+    with pytest.raises(AmazonError) as exc_info:
+        await service.enrich_listing(
+            user_id=bundle.user_id,
+            account_id=bundle.account_id,
+            listing_id=bundle.listing_id,
+            marketplace_id="A-DIFFERENT-MARKETPLACE",
+        )
+    assert exc_info.value.error_code == AMAZON_LISTING_NOT_FOUND
+    assert calls == []
