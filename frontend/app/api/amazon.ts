@@ -50,6 +50,25 @@ export interface AmazonListing {
   updated_at: string;
 }
 
+export interface AmazonCatalogSnapshot {
+  id: string;
+  listing_id: string;
+  asin: string;
+  marketplace_id: string;
+  item_name: string | null;
+  brand: string | null;
+  manufacturer: string | null;
+  color: string | null;
+  size: string | null;
+  style: string | null;
+  model_number: string | null;
+  part_number: string | null;
+  product_type: string | null;
+  fetched_at: string;
+  expires_at: string;
+  cache_hit: boolean | null;
+}
+
 export interface AmazonLinkProduct {
   id: string;
   project_id: string;
@@ -141,5 +160,15 @@ export const amazonApi = {
     apiClient.patch<AmazonListing>(
       `/amazon/accounts/${accountId}/marketplaces/${encodeURIComponent(marketplaceId)}/listings/${listingId}/product-link`,
       { product_id: productId },
+    ),
+
+  refreshListingCatalog: (
+    accountId: string,
+    marketplaceId: string,
+    listingId: string,
+    forceRefresh = false,
+  ) =>
+    apiClient.post<AmazonCatalogSnapshot>(
+      `/amazon/accounts/${accountId}/marketplaces/${encodeURIComponent(marketplaceId)}/listings/${listingId}/catalog/refresh?force_refresh=${forceRefresh ? 'true' : 'false'}`,
     ),
 };

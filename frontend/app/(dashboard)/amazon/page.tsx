@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Link2,
   Loader2,
+  PackageSearch,
   RefreshCw,
   RotateCcw,
   Store,
@@ -19,6 +20,7 @@ import {
 import {
   amazonApi,
   type AmazonAccount,
+  type AmazonCatalogSnapshot,
   type AmazonListing,
   type AmazonLinkProduct,
   type AmazonMarketplace,
@@ -61,6 +63,7 @@ export default function AmazonConnectionsPage() {
   const [selectedMarketplaceId, setSelectedMarketplaceId] = useState<string | null>(null);
   const [listings, setListings] = useState<AmazonListing[]>([]);
   const [products, setProducts] = useState<AmazonLinkProduct[]>([]);
+  const [catalogByListing, setCatalogByListing] = useState<Record<string, AmazonCatalogSnapshot>>({});
   const [marketplaceCode, setMarketplaceCode] = useState('US');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -163,14 +166,17 @@ export default function AmazonConnectionsPage() {
     }
     setSelectedMarketplaceId(null);
     setListings([]);
+    setCatalogByListing({});
     void loadMarketplaces(selectedAccountId);
   }, [loadMarketplaces, selectedAccountId]);
 
   useEffect(() => {
     if (!selectedAccountId || !selectedMarketplaceId) {
       setListings([]);
+      setCatalogByListing({});
       return;
     }
+    setCatalogByListing({});
     void loadListings(selectedAccountId, selectedMarketplaceId, 1);
   }, [includeInactive, loadListings, selectedAccountId, selectedMarketplaceId]);
 
@@ -240,6 +246,25 @@ export default function AmazonConnectionsPage() {
         current.map((listing) => (listing.id === updated.id ? updated : listing)),
       );
       setNotice(productId ? 'Listing linked to a SellerAI product.' : 'Listing unlinked.');
+    } catch (requestError) {
+      setError(errorMessage(requestError));
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const refreshCatalog = async (listing: AmazonListing) => {
+    if (!selectedAccountId || !selectedMarketplaceId || !listing.asin) return;
+    setAction(`catalog:${listing.id}`);
+    setError(null);
+    try {
+      const snapshot = await amazonApi.refreshListingCatalog(
+        selectedAccountId,
+        selectedMarketplaceId,
+        listing.id,
+      );
+      setCatalogByListing((current) => ({ ...current, [listing.id]: snapshot }));
+      setNotice(snapshot.cache_hit ? 'Catalog summary loaded from cache.' : 'Catalog summary refreshed.');
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
@@ -440,10 +465,42 @@ export default function AmazonConnectionsPage() {
                           <tr><th className="px-5 py-3">SKU</th><th className="px-5 py-3">ASIN</th><th className="px-5 py-3">SellerAI product</th><th className="px-5 py-3">Product type</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Last seen</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {listings.map((listing) => (
+                          {listings.map((listing) => {
+                            const catalog = catalogByListing[listing.id];
+                            return (
                             <tr key={listing.id} className="hover:bg-slate-50/70">
                               <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-900">{listing.seller_sku}</td>
-                              <td className="whitespace-nowrap px-5 py-4 text-slate-600">{listing.asin ?? '—'}</td>
+                              <td className="min-w-64 px-5 py-4 text-slate-600">
+                                <div className="flex items-start gap-2">
+                                  <div>
+                                    <p className="whitespace-nowrap font-medium">{listing.asin ?? '—'}</p>
+                                    {catalog && (
+                                      <div className="mt-1 max-w-72 text-xs text-slate-500">
+                                        <p className="line-clamp-2 text-slate-700">{catalog.item_name ?? 'Catalog title unavailable'}</p>
+                                        {(catalog.brand || catalog.manufacturer) && (
+                                          <p className="mt-0.5">{catalog.brand ?? catalog.manufacturer}</p>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                  {listing.asin && (
+                                    <button
+                                      type="button"
+                                      aria-label={`Load catalog summary for ${listing.seller_sku}`}
+                                      title="Load catalog summary"
+                                      disabled={action !== null}
+                                      onClick={() => void refreshCatalog(listing)}
+                                      className="rounded-lg border border-blue-200 bg-blue-50 p-1.5 text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                                    >
+                                      {action === `catalog:${listing.id}` ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <PackageSearch className="h-4 w-4" />
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
                               <td className="min-w-56 px-5 py-4">
                                 <div className="flex items-center gap-2">
                                   <select
@@ -486,7 +543,7 @@ export default function AmazonConnectionsPage() {
                               <td className="px-5 py-4"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${listing.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{listing.is_active ? listing.status_codes.join(', ') || 'Active' : 'Inactive'}</span></td>
                               <td className="whitespace-nowrap px-5 py-4 text-slate-500">{formatDate(listing.last_seen_at)}</td>
                             </tr>
-                          ))}
+                          )})}
                         </tbody>
                       </table>
                     </div>
@@ -510,7 +567,7 @@ export default function AmazonConnectionsPage() {
 
       <div className="flex items-center gap-2 text-xs text-slate-500">
         <ExternalLink className="h-3.5 w-3.5" />
-        SellerAI reads listing identities only. Publishing changes to Amazon is not enabled.
+        SellerAI reads listing identities and bounded catalog summaries. Publishing changes to Amazon is not enabled.
       </div>
     </div>
   );
