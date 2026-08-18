@@ -74,18 +74,30 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "24"
+          node-version: "24.19.0"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Validate frontend Node/npm toolchain
+        working-directory: frontend
+        run: node scripts/validate-node-toolchain.mjs
       - name: Validate frontend lockfile registry
         working-directory: frontend
-        run: npm run validate:lockfile-registry
+        run: node scripts/validate-lockfile-registry.mjs
       - name: Frontend lockfile registry tests
         working-directory: frontend
-        run: npm run test:lockfile-registry
+        run: node --test scripts/validate-lockfile-registry.test.mjs
+      - name: Frontend toolchain validator tests
+        working-directory: frontend
+        run: node --test scripts/validate-node-toolchain.test.mjs
+      - name: Frontend installed-tree validator tests
+        working-directory: frontend
+        run: node --test scripts/validate-installed-dependency-tree.test.mjs
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+      - name: Validate installed dependency tree
+        working-directory: frontend
+        run: node scripts/validate-installed-dependency-tree.mjs
       - name: Frontend unit tests
         working-directory: frontend
         run: npm test -- --run

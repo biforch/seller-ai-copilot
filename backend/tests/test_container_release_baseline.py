@@ -41,6 +41,9 @@ QUALITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "quality.yml"
 FRONTEND_NPMRC = REPO_ROOT / "frontend" / ".npmrc"
 FRONTEND_PACKAGE_LOCK = REPO_ROOT / "frontend" / "package-lock.json"
 ALLOWED_NPM_REGISTRY_HOST = "registry.npmjs.org"
+NODE_24_ALPINE_DIGEST = (
+    "node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43"
+)
 RC_COMPOSE_PROJECT = "sellerai_rc"
 
 
@@ -383,23 +386,35 @@ def test_quality_workflow_runs_container_image_pin_validator_before_docker_build
 
 def test_quality_workflow_uses_supported_node_runtime() -> None:
     content = _read(QUALITY_WORKFLOW)
-    assert 'node-version: "24"' in content
+    node_version_lines = [
+        line.strip()
+        for line in content.splitlines()
+        if line.strip().startswith("node-version:")
+    ]
+    assert node_version_lines == ['node-version: "24.19.0"']
     assert 'node-version: "20"' not in content
 
 
-def test_frontend_runtime_contract_requires_node_24() -> None:
+def test_frontend_runtime_contract_requires_pinned_node_npm_toolchain() -> None:
     nvmrc = _read(REPO_ROOT / "frontend" / ".nvmrc").strip()
     package_json = _read(REPO_ROOT / "frontend" / "package.json")
     npmrc = _read(REPO_ROOT / "frontend" / ".npmrc")
     lockfile = json.loads(_read(FRONTEND_PACKAGE_LOCK))
 
-    assert nvmrc == "24"
-    assert '"node": ">=24 <25"' in package_json
+    assert nvmrc == "24.19.0"
+    assert '"node": ">=24.19.0 <25"' in package_json
+    assert '"npm": ">=11.17.0 <12"' in package_json
+    assert '"packageManager": "npm@11.17.0"' in package_json
     assert "node scripts/check-node-engine.mjs" in package_json
-    assert lockfile["packages"][""]["engines"] == {"node": ">=24 <25"}
+    assert "validate-node-toolchain.mjs" in package_json
+    assert "validate-installed-dependency-tree.mjs" in package_json
+    assert lockfile["packages"][""]["engines"] == {
+        "node": ">=24.19.0 <25",
+        "npm": ">=11.17.0 <12",
+    }
     assert "engine-strict=true" in npmrc
-    assert "node:24-alpine@sha256:" in _read(FRONTEND_DOCKERFILE_PROD)
-    assert "node:24-alpine@sha256:" in _read(REPO_ROOT / "frontend" / "Dockerfile")
+    assert NODE_24_ALPINE_DIGEST in _read(FRONTEND_DOCKERFILE_PROD)
+    assert NODE_24_ALPINE_DIGEST in _read(REPO_ROOT / "frontend" / "Dockerfile")
 
 
 def test_nginx_runtime_uses_current_stable_branch() -> None:
@@ -436,14 +451,32 @@ def test_quality_workflow_runs_frontend_unit_tests_before_build() -> None:
     containers_start = content.index("  containers:")
     frontend_block = content[frontend_start:containers_start]
 
-    validate_index = frontend_block.index("run: npm run validate:lockfile-registry")
-    validator_test_index = frontend_block.index("run: npm run test:lockfile-registry")
+    toolchain_index = frontend_block.index("node scripts/validate-node-toolchain.mjs")
+    validate_index = frontend_block.index("node scripts/validate-lockfile-registry.mjs")
+    validator_test_index = frontend_block.index("node --test scripts/validate-lockfile-registry.test.mjs")
+    toolchain_test_index = frontend_block.index("node --test scripts/validate-node-toolchain.test.mjs")
+    installed_tree_test_index = frontend_block.index(
+        "node --test scripts/validate-installed-dependency-tree.test.mjs"
+    )
     npm_ci_index = frontend_block.index("run: npm ci")
+    installed_tree_index = frontend_block.index("node scripts/validate-installed-dependency-tree.mjs")
     test_index = frontend_block.index("run: npm test -- --run")
     tsc_index = frontend_block.index("run: npx tsc --noEmit")
     build_index = frontend_block.index("run: npm run build")
 
-    assert validate_index < validator_test_index < npm_ci_index < test_index < tsc_index < build_index
+    assert (
+        toolchain_index
+        < validate_index
+        < validator_test_index
+        < toolchain_test_index
+        < installed_tree_test_index
+        < npm_ci_index
+        < installed_tree_index
+        < test_index
+        < tsc_index
+        < build_index
+    )
+    assert "npm install -g npm" not in frontend_block
     assert "continue-on-error" not in frontend_block
     assert "|| true" not in frontend_block
     assert "vitest watch" not in frontend_block
@@ -508,16 +541,54 @@ def test_frontend_lockfile_resolved_sources_use_official_registry_only() -> None
     assert checked == 651
 
 
-def test_frontend_dockerfile_runs_lockfile_registry_validator_before_npm_ci() -> None:
+def test_frontend_dockerfile_runs_toolchain_and_installed_tree_validators_around_npm_ci() -> None:
     content = _read(FRONTEND_DOCKERFILE_PROD)
     assert "COPY package.json package-lock.json .npmrc ./" in content
+    assert "COPY scripts/validate-node-toolchain.mjs ./scripts/validate-node-toolchain.mjs" in content
     assert "COPY scripts/validate-lockfile-registry.mjs ./scripts/validate-lockfile-registry.mjs" in content
+    assert (
+        "COPY scripts/validate-installed-dependency-tree.mjs "
+        "./scripts/validate-installed-dependency-tree.mjs"
+    ) in content
+    assert "node scripts/validate-node-toolchain.mjs" in content
     assert "node scripts/validate-lockfile-registry.mjs" in content
-    validator_index = content.index("node scripts/validate-lockfile-registry.mjs")
+    assert "node scripts/validate-installed-dependency-tree.mjs" in content
+    toolchain_index = content.index("node scripts/validate-node-toolchain.mjs")
+    lockfile_index = content.index("node scripts/validate-lockfile-registry.mjs")
     npm_ci_index = content.index("npm ci")
-    assert validator_index < npm_ci_index
+    installed_tree_index = content.index("node scripts/validate-installed-dependency-tree.mjs")
+    assert toolchain_index < lockfile_index < npm_ci_index < installed_tree_index
+    assert "validate-installed-dependency-tree.test.mjs" not in content
+    assert "npm install -g npm" not in content
     assert "continue-on-error" not in content
     assert "|| true" not in content
+
+
+def test_frontend_dev_dockerfile_runs_toolchain_and_installed_tree_validators_around_npm_ci() -> None:
+    content = _read(REPO_ROOT / "frontend" / "Dockerfile")
+    assert NODE_24_ALPINE_DIGEST in content
+    assert "COPY package.json package-lock.json .npmrc ./" in content
+    assert "node scripts/validate-node-toolchain.mjs" in content
+    assert "node scripts/validate-lockfile-registry.mjs" in content
+    assert "node scripts/validate-installed-dependency-tree.mjs" in content
+    assert "npm ci" in content
+    assert "npm install" not in content
+    toolchain_index = content.index("node scripts/validate-node-toolchain.mjs")
+    lockfile_index = content.index("node scripts/validate-lockfile-registry.mjs")
+    npm_ci_index = content.index("npm ci")
+    installed_tree_index = content.index("node scripts/validate-installed-dependency-tree.mjs")
+    assert toolchain_index < lockfile_index < npm_ci_index < installed_tree_index
+    assert "validate-installed-dependency-tree.test.mjs" not in content
+
+
+def test_frontend_production_dockerfile_runner_excludes_governance_artifacts() -> None:
+    content = _read(FRONTEND_DOCKERFILE_PROD)
+    runner_start = content.index("AS runner")
+    runner_block = content[runner_start:]
+    assert "validate-node-toolchain.mjs" not in runner_block
+    assert "validate-installed-dependency-tree.mjs" not in runner_block
+    assert "package-lock.json" not in runner_block
+    assert ".npmrc" not in runner_block
 
 
 def test_quality_workflow_validates_and_builds_release_containers() -> None:

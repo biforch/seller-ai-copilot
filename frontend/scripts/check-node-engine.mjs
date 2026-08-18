@@ -1,6 +1,9 @@
-const major = Number(process.versions.node.split(".")[0], 10);
+// Secondary install guard: npm lifecycle preinstall runs after npm begins reify.
+// Primary toolchain gate is the explicit validator before npm ci in CI/Docker.
+import { validateToolchain, formatFailure } from './validate-node-toolchain.mjs';
 
-if (major !== 24) {
-  console.error("error: Node.js 24.x is required (see .nvmrc and package.json engines)");
+const result = validateToolchain();
+if (!result.ok) {
+  console.error(formatFailure(result));
   process.exit(1);
 }

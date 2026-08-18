@@ -3,8 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.19.0 <25",
+    "npm": ">=11.17.0 <12"
   },
+  "packageManager": "npm@11.17.0",
   "scripts": {
     "preinstall": "node scripts/check-node-engine.mjs",
     "dev": "next dev",
@@ -12,6 +14,10 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest",
+    "validate:toolchain": "node scripts/validate-node-toolchain.mjs",
+    "test:toolchain": "node --test scripts/validate-node-toolchain.test.mjs",
+    "validate:installed-tree": "node scripts/validate-installed-dependency-tree.mjs",
+    "test:installed-tree": "node --test scripts/validate-installed-dependency-tree.test.mjs",
     "validate:lockfile-registry": "node scripts/validate-lockfile-registry.mjs",
     "test:lockfile-registry": "node --test scripts/validate-lockfile-registry.test.mjs"
   },
