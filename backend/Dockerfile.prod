@@ -35,7 +35,7 @@ COPY scripts ./scripts
 RUN python3.11 -m pip uninstall -y jaraco.context wheel \
     && python3.11 -m pip uninstall -y pip \
     && ENVIRONMENT=testing AMAZON_SP_API_ENDPOINT_MODE=mock \
-        DATABASE_URL=postgresql://sellerai:sellerai123@localhost:5432/sellerai_test \
+        DATABASE_URL=postgresql://localhost:5432/sellerai_test \
         OPENAI_API_KEY=runtime-smoke-not-used \
         python3.11 scripts/validate_backend_runtime_environment.py
 

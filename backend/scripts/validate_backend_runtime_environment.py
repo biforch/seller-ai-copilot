@@ -141,7 +141,7 @@ def _default_prepare_import_environment() -> None:
     os.environ.setdefault("AMAZON_SP_API_ENDPOINT_MODE", "mock")
     os.environ.setdefault(
         "DATABASE_URL",
-        "postgresql://sellerai:sellerai123@localhost:5432/sellerai_test",
+        "postgresql://localhost:5432/sellerai_test",
     )
     os.environ.setdefault("OPENAI_API_KEY", "runtime-smoke-not-used")
 
