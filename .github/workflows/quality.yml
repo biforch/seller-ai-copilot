@@ -79,6 +79,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+      - name: Frontend unit tests
+        working-directory: frontend
+        run: npm test -- --run
       - name: TypeScript check
         working-directory: frontend
         run: npx tsc --noEmit

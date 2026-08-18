@@ -108,9 +108,10 @@ export interface AmazonSyncResult {
 export const amazonApi = {
   listAccounts: () => apiClient.get<AmazonAccountList>('/amazon/accounts'),
 
-  listLinkableProducts: () =>
+  listLinkableProducts: (signal?: AbortSignal) =>
     apiClient.get<PaginatedResponse<AmazonLinkProduct>>('/products', {
       params: { page: 1, page_size: 100 },
+      signal,
     }),
 
   startAuthorization: (
@@ -124,8 +125,10 @@ export const amazonApi = {
       target_account_id: targetAccountId ?? null,
     }),
 
-  listMarketplaces: (accountId: string) =>
-    apiClient.get<AmazonMarketplaceList>(`/amazon/accounts/${accountId}/marketplaces`),
+  listMarketplaces: (accountId: string, signal?: AbortSignal) =>
+    apiClient.get<AmazonMarketplaceList>(`/amazon/accounts/${accountId}/marketplaces`, {
+      signal,
+    }),
 
   refreshMarketplaces: (accountId: string) =>
     apiClient.post<AmazonSyncResult>(`/amazon/accounts/${accountId}/marketplaces/refresh`),
@@ -134,6 +137,7 @@ export const amazonApi = {
     accountId: string,
     marketplaceId: string,
     options: { page: number; pageSize: number; includeInactive: boolean },
+    signal?: AbortSignal,
   ) =>
     apiClient.get<PaginatedResponse<AmazonListing>>(
       `/amazon/accounts/${accountId}/marketplaces/${encodeURIComponent(marketplaceId)}/listings`,
@@ -143,6 +147,7 @@ export const amazonApi = {
           page_size: options.pageSize,
           include_inactive: options.includeInactive ? 'true' : 'false',
         },
+        signal,
       },
     ),
 

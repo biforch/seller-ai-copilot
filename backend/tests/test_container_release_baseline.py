@@ -375,6 +375,23 @@ def test_quality_workflow_runs_backend_and_frontend_release_gates() -> None:
     assert "actions/setup-node@v" not in content
 
 
+def test_quality_workflow_runs_frontend_unit_tests_before_build() -> None:
+    content = _read(QUALITY_WORKFLOW)
+    frontend_start = content.index("  frontend:")
+    containers_start = content.index("  containers:")
+    frontend_block = content[frontend_start:containers_start]
+
+    npm_ci_index = frontend_block.index("run: npm ci")
+    test_index = frontend_block.index("run: npm test -- --run")
+    tsc_index = frontend_block.index("run: npx tsc --noEmit")
+    build_index = frontend_block.index("run: npm run build")
+
+    assert npm_ci_index < test_index < tsc_index < build_index
+    assert "continue-on-error" not in frontend_block
+    assert "|| true" not in frontend_block
+    assert "vitest watch" not in frontend_block
+
+
 def test_quality_workflow_validates_and_builds_release_containers() -> None:
     content = _read(QUALITY_WORKFLOW)
     assert "containers:" in content
