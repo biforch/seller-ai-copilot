@@ -1,8 +1,8 @@
 # SellerAI Copilot Development Plan
 
 **Plan version:** 2026-08-18
-**Code baseline:** `248687f` (`main`, S2 Amazon workspace request fencing)
-**Current verdict:** Core Amazon MVP feature-complete locally; release readiness is blocked by remaining security fixes (S3+) and unexecuted container/RC validation.
+**Code baseline:** `8b3f77d` (`main`, S3a official npm registry enforcement)
+**Current verdict:** Core Amazon MVP feature-complete locally; release readiness is blocked by remaining supply-chain hardening (S3b+) and unexecuted container/RC validation.
 **Source of truth:** Current code, Alembic migrations, automated tests, and this plan. Earlier A3/A4 design reviews remain historical references and are not active delivery plans.
 
 ## 1. Product objective
@@ -83,8 +83,8 @@ Publishing content back to Amazon is **not** part of the current MVP. Human revi
 4. **Mutable container bases**
    Python, Node, nginx, and PostgreSQL images use mutable tags rather than approved digests.
 
-5. **Unapproved npm registry dependency**
-   The lockfile contains `registry.npmmirror.com` URLs, making frontend and image builds dependent on an unapproved third-party registry.
+5. **Unapproved npm registry dependency** — **Resolved in `8b3f77d` (S3a).**
+   The frontend lockfile now resolves all tarballs from `registry.npmjs.org`; `.npmrc`, CI, Docker, and static validators fail closed before `npm ci` when disallowed sources appear.
 
 ### Product usability debt
 
@@ -137,23 +137,52 @@ Exit gate:
 ### S3 — Dependency and image supply-chain hardening
 
 **Priority:** Required before staging
-**Status:** Pending
+**Status:** In Progress
 **Scope:** lockfile, production Dockerfiles, Compose/CI image references, release tests.
+
+#### S3a — Official npm registry
+
+**Status:** Complete (`8b3f77d`)
 
 Deliverables:
 
-- Regenerate the npm lockfile against the approved official registry.
-- Add a static gate rejecting non-approved registry hosts.
-- Pin Python, Node, nginx, and PostgreSQL production/CI images to reviewed `tag@sha256:digest` references.
-- Keep human-readable tags beside digests for maintainability.
-- Add an explicit, reviewable update process for dependency/image digest changes.
-- Add SBOM generation and a vulnerability scan after deterministic image builds; define severity and exception policy before making the scan blocking.
+- Point frontend installs at `https://registry.npmjs.org/` via `.npmrc`.
+- Normalize lockfile tarball sources to the official registry without changing dependency graph metadata.
+- Add a static lockfile registry validator and node:test coverage.
+- Run the validator in CI and production Docker deps stages before `npm ci`.
 
 Exit gate:
 
-- Clean-machine `npm ci` and all production image builds succeed.
-- No unapproved registry URL remains in tracked lockfiles or build configuration.
+- No `registry.npmmirror.com` URL remains in the tracked lockfile.
+- Clean-cache `npm ci` succeeds from the official registry.
+- Validator rejects spoofed hosts, non-HTTPS sources, ports, query strings, fragments, and userinfo.
+
+#### S3b — Runtime lifecycle and image digest pinning
+
+**Status:** Next
+
+Deliverables:
+
+- Pin Python, Node, nginx, and PostgreSQL production/CI images to reviewed `tag@sha256:digest` references.
+- Keep human-readable tags beside digests for maintainability.
+- Add an explicit, reviewable update process for dependency/image digest changes.
+
+Exit gate:
+
 - Rebuilding the same commit resolves the same base image digests.
+
+#### S3c — SBOM and vulnerability policy
+
+**Status:** Pending
+
+Deliverables:
+
+- Add SBOM generation and a vulnerability scan after deterministic image builds.
+- Define severity and exception policy before making the scan blocking.
+
+Exit gate:
+
+- Clean-machine `npm ci` and all production image builds succeed with pinned digests and documented scan policy.
 
 ### S4 — Browser authentication hardening
 
@@ -179,7 +208,7 @@ Exit gate:
 
 ### R1 — Remote quality gate and deterministic build
 
-**Entry:** S1–S3 complete.
+**Entry:** S3a–S3c complete.
 **Deliverables:**
 
 - Review the 53 local commits as a bounded branch/PR sequence.
@@ -275,8 +304,8 @@ For changes involving models or migrations, additionally require upgrade → dow
 
 ## 8. Decision checkpoints
 
-The next implementation task is **S3 dependency and image supply-chain hardening**.
+The next implementation task is **S3b runtime lifecycle and image digest pinning**.
 
-After S3, reassess whether any finding changes the S4 design. After R2, decide whether controlled Amazon acceptance is authorized. After R3, decide whether the next product investment is product search, account lifecycle, or measured scale/operations work.
+After S3b, proceed to S3c SBOM and vulnerability policy, then reassess whether any finding changes the S4 design. After R2, decide whether controlled Amazon acceptance is authorized. After R3, decide whether the next product investment is product search, account lifecycle, or measured scale/operations work.
 
 Automatic Amazon publishing remains outside the plan until the read/sync/proposal workflow has production evidence, an explicit publishing threat model, rollback/reconciliation semantics, and separate user authorization.
