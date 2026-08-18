@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import sys
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -120,6 +122,20 @@ def test_import_probe_exception_fail_closed() -> None:
             prepare_import_environment=lambda: None,
             required_modules=(),
         )
+
+
+def test_default_prepare_import_environment_adds_app_root_to_sys_path() -> None:
+    from scripts.validate_backend_runtime_environment import _default_prepare_import_environment
+
+    app_root = str(Path(__file__).resolve().parents[1])
+    original_path = sys.path.copy()
+    filtered_path = [entry for entry in original_path if entry != app_root]
+    sys.path[:] = filtered_path
+    try:
+        _default_prepare_import_environment()
+        assert sys.path[0] == app_root
+    finally:
+        sys.path[:] = original_path
 
 
 def test_main_success_message(monkeypatch: pytest.MonkeyPatch) -> None:

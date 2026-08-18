@@ -684,6 +684,7 @@ def test_backend_production_dockerfile_removes_build_tooling_from_runtime() -> N
     assert "python3.11 -m pip uninstall -y pip" in runner_block
     assert "setuptools" not in runner_block.split("pip uninstall", 1)[1].split("validate_backend_runtime_environment", 1)[0]
     assert "scripts/validate_backend_runtime_environment.py" in runner_block
+    assert "PYTHONPATH=/app" in runner_block
     assert "USER app" in runner_block
     assert runner_block.index("pip uninstall") < runner_block.index("USER app")
     assert "rm -rf /usr/local/lib/python" not in runner_block

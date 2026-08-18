@@ -8,6 +8,7 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from importlib.metadata import distributions
+from pathlib import Path
 from types import ModuleType
 
 SUCCESS_MESSAGE = "backend runtime environment validation passed"
@@ -133,6 +134,9 @@ def validate_backend_runtime_environment(
 
 
 def _default_prepare_import_environment() -> None:
+    app_root = str(Path(__file__).resolve().parent.parent)
+    if app_root not in sys.path:
+        sys.path.insert(0, app_root)
     os.environ.setdefault("ENVIRONMENT", "testing")
     os.environ.setdefault("AMAZON_SP_API_ENDPOINT_MODE", "mock")
     os.environ.setdefault(
