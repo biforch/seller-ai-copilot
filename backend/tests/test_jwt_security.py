@@ -41,6 +41,20 @@ def _swap_header_alg(token: str, new_alg: str) -> str:
     return f"{new_header_b64}.{payload_b64}.{signature}"
 
 
+def _tamper_signature_bitflip(token: str) -> str:
+    header_b64, payload_b64, signature_b64 = token.split(".")
+    signature_bytes = bytearray(_b64url_decode(signature_b64))
+    if not signature_bytes:
+        raise AssertionError("JWT signature segment must not be empty")
+    signature_bytes[0] ^= 0x01
+    tampered_signature_b64 = _b64url(bytes(signature_bytes))
+    tampered = f"{header_b64}.{payload_b64}.{tampered_signature_b64}"
+    assert tampered != token
+    assert _b64url_decode(tampered_signature_b64) != _b64url_decode(signature_b64)
+    assert tampered.split(".")[:2] == [header_b64, payload_b64]
+    return tampered
+
+
 def test_create_and_decode_access_token_round_trip() -> None:
     token = create_access_token({"sub": "user-1", "email": "user@example.com"})
     payload = decode_token(token)
@@ -67,7 +81,7 @@ def test_malformed_token_is_rejected() -> None:
 
 def test_invalid_signature_is_rejected() -> None:
     token = create_access_token({"sub": "user-1"})
-    tampered = f"{token[:-1]}x"
+    tampered = _tamper_signature_bitflip(token)
     with pytest.raises(HTTPException) as exc_info:
         decode_token(tampered)
     assert exc_info.value.status_code == 401
