@@ -143,6 +143,8 @@ jobs:
             --security-opt no-new-privileges \
             -e ENVIRONMENT=testing \
             -e AMAZON_SP_API_ENDPOINT_MODE=mock \
+            -e DATABASE_URL=postgresql://sellerai:sellerai123@localhost:5432/sellerai_test \
+            -e OPENAI_API_KEY=runtime-smoke-not-used \
             "sellerai-backend-ci:${IMAGE_TAG}" \
             python scripts/validate_backend_runtime_environment.py
       - name: Build production frontend image

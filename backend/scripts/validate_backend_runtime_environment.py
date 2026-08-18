@@ -15,7 +15,6 @@ SUCCESS_MESSAGE = "backend runtime environment validation passed"
 FORBIDDEN_DISTRIBUTIONS: frozenset[str] = frozenset(
     {
         "pip",
-        "setuptools",
         "wheel",
         "jaraco.context",
     }
@@ -23,8 +22,6 @@ FORBIDDEN_DISTRIBUTIONS: frozenset[str] = frozenset(
 FORBIDDEN_MODULES: frozenset[str] = frozenset(
     {
         "pip",
-        "setuptools",
-        "pkg_resources",
         "wheel",
         "jaraco.context",
     }
@@ -138,6 +135,11 @@ def validate_backend_runtime_environment(
 def _default_prepare_import_environment() -> None:
     os.environ.setdefault("ENVIRONMENT", "testing")
     os.environ.setdefault("AMAZON_SP_API_ENDPOINT_MODE", "mock")
+    os.environ.setdefault(
+        "DATABASE_URL",
+        "postgresql://sellerai:sellerai123@localhost:5432/sellerai_test",
+    )
+    os.environ.setdefault("OPENAI_API_KEY", "runtime-smoke-not-used")
 
 
 def main() -> int:

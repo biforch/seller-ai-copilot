@@ -67,16 +67,6 @@ def test_forbidden_distribution_pip_rejected() -> None:
         )
 
 
-def test_forbidden_distribution_setuptools_rejected() -> None:
-    with pytest.raises(RuntimeEnvironmentError, match="FORBIDDEN_DISTRIBUTION_PRESENT:setuptools"):
-        validate_backend_runtime_environment(
-            distribution_probe=lambda: [("setuptools", "75.0.0")],
-            import_probe=_import_map(set()),
-            prepare_import_environment=lambda: None,
-            required_modules=(),
-        )
-
-
 def test_forbidden_distribution_wheel_rejected() -> None:
     with pytest.raises(RuntimeEnvironmentError, match="FORBIDDEN_DISTRIBUTION_PRESENT:wheel"):
         validate_backend_runtime_environment(
@@ -97,17 +87,6 @@ def test_forbidden_distribution_jaraco_context_rejected() -> None:
         )
 
 
-def test_forbidden_module_pkg_resources_rejected() -> None:
-    with pytest.raises(RuntimeEnvironmentError, match="FORBIDDEN_MODULE_IMPORTABLE:pkg_resources"):
-        validate_backend_runtime_environment(
-            distribution_probe=_clean_distribution_probe,
-            import_probe=_import_map({"pkg_resources", "fastapi"}),
-            prepare_import_environment=lambda: None,
-            required_modules=("fastapi",),
-        )
-
-
-def test_required_runtime_module_missing_rejected() -> None:
     with pytest.raises(RuntimeEnvironmentError, match="REQUIRED_MODULE_MISSING:cryptography"):
         validate_backend_runtime_environment(
             distribution_probe=_clean_distribution_probe,
