@@ -63,6 +63,7 @@ SCANNER_FORBIDDEN_CREDENTIAL_ENV = re.compile(
 TRIVY_STEP_NAME = "Generate Trivy vulnerability reports"
 CLEANUP_STEP_NAME = "Cleanup supply-chain scan workspace"
 RUNTIME_SMOKE_STEP_NAME = "Validate backend production runtime environment"
+FRONTEND_RUNTIME_SMOKE_STEP_NAME = "Validate frontend production runtime environment"
 
 ALLOWED_SCANNER_IMAGES = frozenset(
     {
@@ -498,6 +499,86 @@ def _validate_runtime_smoke_step(path: Path, content: str) -> list[Finding]:
     return findings
 
 
+def _validate_frontend_runtime_smoke_step(path: Path, content: str) -> list[Finding]:
+    findings: list[Finding] = []
+    marker = f"- name: {FRONTEND_RUNTIME_SMOKE_STEP_NAME}"
+    if marker not in content:
+        findings.append(Finding(path, 0, "containers job must define frontend runtime smoke step"))
+        return findings
+
+    block = _extract_step_run_block(content, FRONTEND_RUNTIME_SMOKE_STEP_NAME)
+    if block is None:
+        findings.append(Finding(path, 0, "frontend runtime smoke step must define a run block"))
+        return findings
+
+    required_tokens = (
+        "docker run --rm",
+        "--network none",
+        "--read-only",
+        "--tmpfs /tmp:rw,noexec,nosuid,nodev",
+        "--cap-drop ALL",
+        "--security-opt no-new-privileges",
+        "sellerai-frontend-ci:${IMAGE_TAG}",
+        "node scripts/validate-frontend-runtime.mjs",
+        "node scripts/validate-frontend-runtime.mjs --smoke",
+    )
+    for token in required_tokens:
+        if token not in block:
+            findings.append(
+                Finding(path, 0, f"frontend runtime smoke step missing required contract token: {token}")
+            )
+
+    forbidden = (
+        "sudo",
+        "chmod 777",
+        "|| true",
+        "continue-on-error",
+        "--privileged",
+        "--env-file",
+        "/var/run/docker.sock",
+        "GITHUB_WORKSPACE",
+        "github.workspace",
+        "$HOME",
+    )
+    for token in forbidden:
+        if token in block:
+            findings.append(Finding(path, 0, f"frontend runtime smoke step must not use {token}"))
+
+    build_marker = "- name: Build production frontend image"
+    save_marker = "- name: Save production images for offline scan"
+    if build_marker not in content or save_marker not in content:
+        findings.append(
+            Finding(path, 0, "frontend runtime smoke step requires frontend build and image save anchors")
+        )
+    else:
+        build_index = content.index(build_marker)
+        smoke_index = content.index(marker)
+        save_index = content.index(save_marker)
+        if not (build_index < smoke_index < save_index):
+            findings.append(
+                Finding(
+                    path,
+                    0,
+                    "frontend runtime smoke step must run after frontend build and before image save",
+                )
+            )
+
+    backend_smoke_marker = f"- name: {RUNTIME_SMOKE_STEP_NAME}"
+    if backend_smoke_marker in content:
+        backend_smoke_index = content.index(backend_smoke_marker)
+        frontend_smoke_index = content.index(marker)
+        if not (backend_smoke_index < frontend_smoke_index):
+            findings.append(
+                Finding(
+                    path,
+                    0,
+                    "frontend runtime smoke step must run after backend runtime smoke step",
+                )
+            )
+
+    return findings
+
+
 def _validate_cleanup_step(path: Path, content: str) -> list[Finding]:
     findings: list[Finding] = []
     marker = f"- name: {CLEANUP_STEP_NAME}"
@@ -712,6 +793,7 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
             )
         findings.extend(_validate_trivy_scan_step(path, content))
         findings.extend(_validate_runtime_smoke_step(path, content))
+        findings.extend(_validate_frontend_runtime_smoke_step(path, content))
         findings.extend(_validate_cleanup_step(path, content))
 
     return findings, external_refs, 0, scanner_refs

@@ -42,6 +42,15 @@ RUN addgroup -S -g 1001 nodejs \
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY scripts/validate-frontend-runtime.mjs ./scripts/validate-frontend-runtime.mjs
+
+RUN test "$(npm root -g)" = "/usr/local/lib/node_modules" \
+    && test -d /usr/local/lib/node_modules/npm \
+    && corepack disable \
+    && npm uninstall -g npm \
+    && rm -rf /usr/local/lib/node_modules/corepack \
+    && rm -f /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/pnpm /usr/local/bin/pnpx \
+    && node scripts/validate-frontend-runtime.mjs
 
 USER nextjs
 
