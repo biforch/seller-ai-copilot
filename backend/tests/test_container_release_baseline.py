@@ -403,6 +403,26 @@ def test_nginx_rc_proxy_preserves_api_prefix() -> None:
     assert "proxy_pass http://rc_backend/api/" not in nginx_conf
 
 
+def test_nginx_rc_oauth_callback_access_log_isolated() -> None:
+    nginx_conf = _read(REPO_ROOT / "nginx/nginx.rc.conf")
+    callback_block_start = nginx_conf.index("location = /api/v1/amazon/oauth/callback")
+    api_block_start = nginx_conf.index("location /api/ {")
+    assert callback_block_start < api_block_start
+
+    callback_block = nginx_conf[callback_block_start:api_block_start]
+    assert "access_log off;" in callback_block
+    assert "proxy_pass http://rc_backend;" in callback_block
+    assert "proxy_set_header Host $host;" in callback_block
+    assert "proxy_set_header X-Real-IP $remote_addr;" in callback_block
+    assert "proxy_set_header X-Forwarded-For $remote_addr;" in callback_block
+    assert "proxy_set_header X-Forwarded-Proto $scheme;" in callback_block
+    assert "$request_uri" not in callback_block
+    assert "$args" not in callback_block
+    assert "access_log" not in callback_block.replace("access_log off;", "")
+    assert "state-canary-secret" not in nginx_conf
+    assert "spapi_oauth_code" not in nginx_conf
+
+
 def test_runbook_documents_403_and_container_pg_dump() -> None:
     runbook = _read(RUNBOOK)
     assert "403" in runbook

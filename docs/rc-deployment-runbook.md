@@ -175,6 +175,30 @@ docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml logs m
 
 Redact passwords and JWT before sharing logs.
 
+### OAuth callback log isolation
+
+Amazon OAuth callback uses `GET /api/v1/amazon/oauth/callback` with sensitive query
+parameters (`state`, `spapi_oauth_code`, `selling_partner_id`, `error`,
+`error_description`). These values must never appear in access logs.
+
+RC nginx (`nginx/nginx.rc.conf`) defines an exact-match callback location with
+`access_log off;` before the generic `/api/` proxy block. The request is still
+proxied to `rc_backend` with the original query string; only the nginx access log
+line is suppressed.
+
+The backend installs a Uvicorn `uvicorn.access` filter at startup
+(`app/core/access_log_safety.py`) that drops access-log records for the exact
+callback path. This protects non-RC deployments that run Uvicorn directly or
+behind another ingress without the RC nginx rule.
+
+Any external CDN, load balancer, or ingress in front of RC or production must
+also be configured **not** to log the callback query string. Do not enable debug
+logging that prints full request URLs for OAuth traffic.
+
+Log acceptance for callback isolation must use fake canary values in tests only.
+Never paste real OAuth codes, refresh tokens, raw state tokens, or seller IDs
+into runbooks, tickets, or CI artifacts.
+
 ## 12. Stop stack
 
 ```bash

@@ -21,6 +21,7 @@ from app.api import (
     project,
     user,
 )
+from app.core.access_log_safety import install_uvicorn_oauth_callback_access_log_filter
 from app.core.config import settings
 from app.core.exceptions import (
     AppException,
@@ -39,6 +40,8 @@ from app.integrations.amazon.exceptions import AmazonError
 logging.basicConfig(
     level=logging.INFO
 )
+
+install_uvicorn_oauth_callback_access_log_filter()
 
 logger = logging.getLogger(__name__)
 
