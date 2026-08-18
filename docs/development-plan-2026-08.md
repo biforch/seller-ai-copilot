@@ -1,8 +1,8 @@
 # SellerAI Copilot Development Plan
 
 **Plan version:** 2026-08-18
-**Code baseline:** `ecbf770` (`main`, S1 OAuth callback log containment)
-**Current verdict:** Core Amazon MVP feature-complete locally; release readiness is blocked by remaining security fixes (S2+) and unexecuted container/RC validation.
+**Code baseline:** `248687f` (`main`, S2 Amazon workspace request fencing)
+**Current verdict:** Core Amazon MVP feature-complete locally; release readiness is blocked by remaining security fixes (S3+) and unexecuted container/RC validation.
 **Source of truth:** Current code, Alembic migrations, automated tests, and this plan. Earlier A3/A4 design reviews remain historical references and are not active delivery plans.
 
 ## 1. Product objective
@@ -72,8 +72,8 @@ Publishing content back to Amazon is **not** part of the current MVP. Human revi
 1. **OAuth callback access-log exposure** — **Resolved in `ecbf770` (S1).**
    `state`, `spapi_oauth_code`, and `selling_partner_id` arrive in a GET query. Default nginx and Uvicorn access logs can retain the complete request target even though application logs are redacted. RC nginx now disables callback access logs; backend installs a Uvicorn access-log filter; runbook documents upstream ingress requirements.
 
-2. **Amazon workspace request race**
-   Marketplace and listing requests can resolve out of order after rapid account/marketplace changes, allowing stale data to overwrite the current screen state.
+2. **Amazon workspace request race** — **Resolved in `248687f` (S2).**
+   Marketplace and listing requests could resolve out of order after rapid account/marketplace changes. The workspace now fences reads with per-resource request gates, synchronously invalidates dependent state on selection changes, and scopes action results to the active account/marketplace.
 
 ### Pre-staging security work
 
@@ -117,6 +117,7 @@ Exit gate:
 ### S2 — Amazon workspace concurrency correctness
 
 **Priority:** Immediate correctness blocker
+**Status:** Complete (`248687f`)
 **Scope:** Amazon workspace request lifecycle and frontend tests.
 
 Deliverables:
@@ -136,6 +137,7 @@ Exit gate:
 ### S3 — Dependency and image supply-chain hardening
 
 **Priority:** Required before staging
+**Status:** Pending
 **Scope:** lockfile, production Dockerfiles, Compose/CI image references, release tests.
 
 Deliverables:
@@ -273,8 +275,8 @@ For changes involving models or migrations, additionally require upgrade → dow
 
 ## 8. Decision checkpoints
 
-The next implementation task is **S2 Amazon workspace concurrency correctness**.
+The next implementation task is **S3 dependency and image supply-chain hardening**.
 
-After S2, reassess whether any finding changes the S3/S4 design. After R2, decide whether controlled Amazon acceptance is authorized. After R3, decide whether the next product investment is product search, account lifecycle, or measured scale/operations work.
+After S3, reassess whether any finding changes the S4 design. After R2, decide whether controlled Amazon acceptance is authorized. After R3, decide whether the next product investment is product search, account lifecycle, or measured scale/operations work.
 
 Automatic Amazon publishing remains outside the plan until the read/sync/proposal workflow has production evidence, an explicit publishing threat model, rollback/reconciliation semantics, and separate user authorization.
