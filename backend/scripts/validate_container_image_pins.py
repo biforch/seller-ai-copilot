@@ -26,8 +26,45 @@ SCAN_TARGETS = (
 )
 
 EXPECTED_SCAN_FILE_COUNT = len(SCAN_TARGETS)
-EXPECTED_EXTERNAL_PINNED_REF_COUNT = 13
+EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 13
 EXPECTED_INTERNAL_BUILD_REF_COUNT = 4
+EXPECTED_SCANNER_PINNED_REF_COUNT = 6
+EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT = 2
+
+ALLOWED_SCANNER_SHELL_VARS = frozenset(
+    {
+        "SYFT_IMAGE",
+        "TRIVY_IMAGE",
+        "RUNNER_TEMP",
+        "IMAGE_TAG",
+        "CACHE_DIR",
+        "SCAN_INPUT",
+        "SCAN_OUTPUT",
+    }
+)
+
+SCANNER_FORBIDDEN_WORKFLOW_PATTERNS = (
+    (re.compile(r"/var/run/docker\.sock"), "workflow must not mount Docker socket into scanner containers"),
+    (re.compile(r"--privileged\b"), "scanner containers must not run privileged"),
+    (re.compile(r"--network\s+host\b"), "scanner containers must not use host network"),
+    (re.compile(r"--net\s+host\b"), "scanner containers must not use host network"),
+    (re.compile(r"--env-file\b"), "scanner containers must not use env-file mounts"),
+    (re.compile(r"GITHUB_WORKSPACE"), "scanner containers must not mount GitHub workspace"),
+    (re.compile(r"github\.workspace"), "scanner containers must not mount GitHub workspace"),
+    (re.compile(r"\$HOME"), "scanner containers must not mount user home directories"),
+)
+SCANNER_FORBIDDEN_CREDENTIAL_ENV = re.compile(
+    r"-e\s+(?:GITHUB_TOKEN|AWS_|AMAZON_|OPENAI_|JWT_|POSTGRES_|DATABASE_|"
+    r"NPM_TOKEN|REGISTRY_|DOCKER_AUTH|client_secret|access_token|refresh_token)",
+    re.IGNORECASE,
+)
+
+ALLOWED_SCANNER_IMAGES = frozenset(
+    {
+        "anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0",
+        "aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969",
+    }
+)
 
 INTERNAL_BUILD_IMAGES = frozenset(
     {
@@ -69,6 +106,7 @@ class InventoryStats:
     scanned_files: int
     external_pinned_refs: int
     internal_build_refs: int
+    scanner_pinned_refs: int
 
 
 @dataclass(frozen=True)
@@ -96,6 +134,15 @@ def _split_registry(image_ref: str) -> tuple[str, str]:
 
 def _validate_external_image(path: Path, line_no: int, ref: str) -> list[Finding]:
     findings: list[Finding] = []
+
+    if ref in ALLOWED_SCANNER_IMAGES:
+        return [
+            Finding(
+                path,
+                line_no,
+                "scanner image must not be used as a runtime base image",
+            )
+        ]
 
     if "$" in ref or "{" in ref or "}" in ref:
         return [
@@ -309,12 +356,138 @@ def service_has_build_nearby(content: str, image_line_no: int) -> bool:
     return False
 
 
-def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[Path, int, str]], int]:
+def _validate_scanner_env_line(path: Path, line_no: int, line: str, var_name: str) -> list[Finding]:
+    findings: list[Finding] = []
+    if "${{" in line:
+        findings.append(
+            Finding(
+                path,
+                line_no,
+                f"{var_name} must not use workflow interpolation",
+            )
+        )
+    if re.search(r"\b(secrets|inputs|vars)\.", line):
+        findings.append(
+            Finding(
+                path,
+                line_no,
+                f"{var_name} must not reference secrets, inputs, or repository variables",
+            )
+        )
+    value_match = re.match(rf"^\s+{var_name}:\s*(?P<ref>\S+)\s*(?:#.*)?$", line)
+    if not value_match:
+        findings.append(Finding(path, line_no, f"{var_name} must define a static pinned scanner reference"))
+        return findings
+    ref = value_match.group("ref")
+    if ref not in ALLOWED_SCANNER_IMAGES:
+        findings.append(
+            Finding(path, line_no, f"{var_name} must use an approved pinned scanner reference")
+        )
+    return findings
+
+
+def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[Path, int, str]], int, int]:
     findings: list[Finding] = []
     external_refs: list[tuple[Path, int, str]] = []
+    scanner_refs = 0
+    scanner_identities = 0
+    syft_env_pin: str | None = None
+    trivy_env_pin: str | None = None
     in_services = False
+    in_containers_job = False
+    in_scanner_step = False
 
     for line_no, line in enumerate(content.splitlines(), start=1):
+        if re.match(r"^  containers:\s*$", line):
+            in_containers_job = True
+            continue
+        if in_containers_job and re.match(r"^  [a-zA-Z].+:\s*$", line) and not line.startswith("    "):
+            in_containers_job = False
+            in_scanner_step = False
+
+        if in_containers_job and re.match(
+            r"^      - name: (Generate CycloneDX SBOMs|Generate Trivy vulnerability reports)\s*$",
+            line,
+        ):
+            in_scanner_step = True
+            continue
+        if in_containers_job and re.match(r"^      - name:", line):
+            in_scanner_step = False
+
+        if in_containers_job and in_scanner_step:
+            for pattern, reason in SCANNER_FORBIDDEN_WORKFLOW_PATTERNS:
+                if pattern.search(line):
+                    findings.append(Finding(path, line_no, reason))
+            if SCANNER_FORBIDDEN_CREDENTIAL_ENV.search(line):
+                findings.append(
+                    Finding(path, line_no, "scanner containers must not receive credential env vars")
+                )
+
+        if in_containers_job:
+            if re.match(r"^      SYFT_IMAGE:", line):
+                scanner_identities += 1
+                syft_env_match = re.match(r"^      SYFT_IMAGE:\s*(?P<ref>\S+)", line)
+                if syft_env_match:
+                    syft_env_pin = syft_env_match.group("ref")
+                findings.extend(_validate_scanner_env_line(path, line_no, line, "SYFT_IMAGE"))
+            elif re.match(r"^          SYFT_IMAGE:", line):
+                findings.append(Finding(path, line_no, "step env must not override SYFT_IMAGE"))
+
+            if re.match(r"^      TRIVY_IMAGE:", line):
+                scanner_identities += 1
+                trivy_env_match = re.match(r"^      TRIVY_IMAGE:\s*(?P<ref>\S+)", line)
+                if trivy_env_match:
+                    trivy_env_pin = trivy_env_match.group("ref")
+                findings.extend(_validate_scanner_env_line(path, line_no, line, "TRIVY_IMAGE"))
+            elif re.match(r"^          TRIVY_IMAGE:", line):
+                findings.append(Finding(path, line_no, "step env must not override TRIVY_IMAGE"))
+
+            if in_scanner_step and (
+                "docker run" in line or '"${SYFT_IMAGE}"' in line or '"${TRIVY_IMAGE}"' in line
+            ):
+                for match in re.finditer(r"\$\{([A-Z0-9_]+)\}", line):
+                    var_name = match.group(1)
+                    if var_name not in ALLOWED_SCANNER_SHELL_VARS:
+                        findings.append(
+                            Finding(
+                                path,
+                                line_no,
+                                "scanner execution must not use unapproved shell variable substitution",
+                            )
+                        )
+
+            if in_scanner_step and ('"${SYFT_IMAGE}"' in line or '"${TRIVY_IMAGE}"' in line):
+                if '"${SYFT_IMAGE}"' in line:
+                    scanner_refs += 1
+                if '"${TRIVY_IMAGE}"' in line:
+                    scanner_refs += 1
+
+        for scanner_image in ALLOWED_SCANNER_IMAGES:
+            if scanner_image in line and not in_containers_job:
+                findings.append(
+                    Finding(
+                        path,
+                        line_no,
+                        "scanner image is only allowed in the containers job scan steps",
+                    )
+                )
+
+        for match in re.finditer(r"(?:docker\.io/)?(anchore/syft|aquasec/trivy):[^\s\"']+", line):
+            candidate = match.group(0).removeprefix("docker.io/")
+            if candidate not in ALLOWED_SCANNER_IMAGES:
+                findings.append(
+                    Finding(path, line_no, "unapproved scanner image reference in workflow")
+                )
+            elif in_containers_job and '"${SYFT_IMAGE}"' not in line and '"${TRIVY_IMAGE}"' not in line:
+                if not re.match(r"^\s+(SYFT_IMAGE|TRIVY_IMAGE):", line):
+                    findings.append(
+                        Finding(
+                            path,
+                            line_no,
+                            "scanner image digest must be referenced via SYFT_IMAGE or TRIVY_IMAGE env vars",
+                        )
+                    )
+
         if re.match(r"^    services:\s*$", line):
             in_services = True
             continue
@@ -325,37 +498,62 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
         if not in_services:
             continue
 
-        match = re.match(r"^        image:\s*(?P<ref>\S+)", line)
-        if not match:
+        image_match = re.match(r"^        image:\s*(?P<ref>\S+)", line)
+        if not image_match:
             continue
 
-        ref = match.group("ref")
+        ref = image_match.group("ref")
         if "${{" in ref:
             findings.append(
                 Finding(path, line_no, "service image digest must be static and not use workflow interpolation")
             )
             continue
+        if ref in ALLOWED_SCANNER_IMAGES:
+            findings.append(Finding(path, line_no, "scanner image must not be used as a service container"))
+            continue
         findings.extend(_validate_external_image(path, line_no, ref))
         external_refs.append((path, line_no, ref))
 
-    return findings, external_refs, 0
+    if "containers:" in content:
+        if syft_env_pin is None:
+            findings.append(Finding(path, 0, "containers job must define SYFT_IMAGE with a pinned scanner reference"))
+        if trivy_env_pin is None:
+            findings.append(Finding(path, 0, "containers job must define TRIVY_IMAGE with a pinned scanner reference"))
+        if syft_env_pin is not None and trivy_env_pin is not None and syft_env_pin == trivy_env_pin:
+            findings.append(Finding(path, 0, "SYFT_IMAGE and TRIVY_IMAGE must reference distinct scanner identities"))
+        if scanner_identities != EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT:
+            findings.append(
+                Finding(
+                    path,
+                    0,
+                    (
+                        "expected "
+                        f"{EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT} scanner approved identities, "
+                        f"found {scanner_identities}"
+                    ),
+                )
+            )
+
+    return findings, external_refs, 0, scanner_refs
 
 
-def _scan_file(path: Path) -> tuple[list[Finding], list[tuple[Path, int, str]], int]:
+def _scan_file(path: Path) -> tuple[list[Finding], list[tuple[Path, int, str]], int, int]:
     if not path.is_file():
-        return [Finding(path, 0, "scan target is missing")], [], 0
+        return [Finding(path, 0, "scan target is missing")], [], 0, 0
 
     content = path.read_text(encoding="utf-8")
     name = path.name.lower()
 
     if name.startswith("dockerfile"):
-        return _scan_dockerfile(path, content)
+        findings, refs, internal = _scan_dockerfile(path, content)
+        return findings, refs, internal, 0
     if name.startswith("docker-compose") and name.endswith((".yml", ".yaml")):
-        return _scan_compose(path, content)
+        findings, refs, internal = _scan_compose(path, content)
+        return findings, refs, internal, 0
     if path.suffix in {".yml", ".yaml"} and "workflows" in path.parts:
         return _scan_workflow(path, content)
 
-    return [Finding(path, 0, "unsupported scan target type")], [], 0
+    return [Finding(path, 0, "unsupported scan target type")], [], 0, 0
 
 
 def _check_consistent_digests(findings: list[Finding], refs: list[tuple[Path, int, str]]) -> None:
@@ -422,13 +620,16 @@ def validate_container_image_pins() -> tuple[list[Finding], InventoryStats]:
     external_refs: list[tuple[Path, int, str]] = []
     internal_build_refs = 0
 
+    scanner_pinned_refs = 0
+
     for target in SCAN_TARGETS:
-        file_findings, file_external_refs, file_internal_refs = _scan_file(target)
+        file_findings, file_external_refs, file_internal_refs, file_scanner_refs = _scan_file(target)
         findings.extend(file_findings)
         if target.is_file():
             scanned_files += 1
             external_refs.extend(file_external_refs)
             internal_build_refs += file_internal_refs
+            scanner_pinned_refs += file_scanner_refs
 
     _check_consistent_digests(findings, external_refs)
     _check_policy_doc_consistency(findings, external_refs)
@@ -443,14 +644,14 @@ def validate_container_image_pins() -> tuple[list[Finding], InventoryStats]:
         )
 
     external_count = len(external_refs)
-    if external_count != EXPECTED_EXTERNAL_PINNED_REF_COUNT:
+    if external_count != EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT:
         findings.append(
             Finding(
                 REPO_ROOT,
                 0,
                 (
                     "expected "
-                    f"{EXPECTED_EXTERNAL_PINNED_REF_COUNT} external pinned references, "
+                    f"{EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT} runtime external pinned references, "
                     f"found {external_count}"
                 ),
             )
@@ -469,10 +670,24 @@ def validate_container_image_pins() -> tuple[list[Finding], InventoryStats]:
             )
         )
 
+    if scanner_pinned_refs != EXPECTED_SCANNER_PINNED_REF_COUNT:
+        findings.append(
+            Finding(
+                REPO_ROOT,
+                0,
+                (
+                    "expected "
+                    f"{EXPECTED_SCANNER_PINNED_REF_COUNT} scanner pinned references, "
+                    f"found {scanner_pinned_refs}"
+                ),
+            )
+        )
+
     stats = InventoryStats(
         scanned_files=scanned_files,
         external_pinned_refs=external_count,
         internal_build_refs=internal_build_refs,
+        scanner_pinned_refs=scanner_pinned_refs,
     )
     return findings, stats
 
@@ -491,7 +706,8 @@ def main() -> int:
     print(
         f"{SUCCESS_MESSAGE} "
         f"({stats.scanned_files} files scanned, "
-        f"{stats.external_pinned_refs} external pinned references, "
+        f"{stats.external_pinned_refs} runtime external pinned references, "
+        f"{stats.scanner_pinned_refs} scanner pinned references, "
         f"{stats.internal_build_refs} internal build references)"
     )
     return 0

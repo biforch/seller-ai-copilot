@@ -99,7 +99,13 @@ jobs:
   containers:
     needs: [backend, frontend]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
+    env:
+      SYFT_IMAGE: anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0
+      TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Validate pinned container base images
@@ -122,3 +128,102 @@ jobs:
         run: >-
           docker build --file nginx/Dockerfile.rc
           --tag sellerai-nginx-ci:${{ github.sha }} nginx
+      - name: Prepare supply-chain scan workspace
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/sellerai-scan/input" "${RUNNER_TEMP}/sellerai-scan/output"
+      - name: Save production images for offline scan
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          SCAN_INPUT="${RUNNER_TEMP}/sellerai-scan/input"
+          docker image save "sellerai-backend-ci:${IMAGE_TAG}" -o "${SCAN_INPUT}/backend.tar"
+          docker image save "sellerai-frontend-ci:${IMAGE_TAG}" -o "${SCAN_INPUT}/frontend.tar"
+          docker image save "sellerai-nginx-ci:${IMAGE_TAG}" -o "${SCAN_INPUT}/nginx.tar"
+      - name: Generate CycloneDX SBOMs
+        run: |
+          set -euo pipefail
+          SCAN_INPUT="${RUNNER_TEMP}/sellerai-scan/input"
+          SCAN_OUTPUT="${RUNNER_TEMP}/sellerai-scan/output"
+          docker run --rm \
+            -e SYFT_CHECK_FOR_APP_UPDATE=false \
+            -v "${SCAN_INPUT}:/input:ro" \
+            -v "${SCAN_OUTPUT}:/output:rw" \
+            "${SYFT_IMAGE}" \
+            file:/input/backend.tar \
+            -o cyclonedx-json=/output/backend.cdx.json
+          docker run --rm \
+            -e SYFT_CHECK_FOR_APP_UPDATE=false \
+            -v "${SCAN_INPUT}:/input:ro" \
+            -v "${SCAN_OUTPUT}:/output:rw" \
+            "${SYFT_IMAGE}" \
+            file:/input/frontend.tar \
+            -o cyclonedx-json=/output/frontend.cdx.json
+          docker run --rm \
+            -e SYFT_CHECK_FOR_APP_UPDATE=false \
+            -v "${SCAN_INPUT}:/input:ro" \
+            -v "${SCAN_OUTPUT}:/output:rw" \
+            "${SYFT_IMAGE}" \
+            file:/input/nginx.tar \
+            -o cyclonedx-json=/output/nginx.cdx.json
+      - name: Validate SBOM artifacts
+        run: python backend/scripts/validate_sbom_artifacts.py "${RUNNER_TEMP}/sellerai-scan/output"
+      - name: Generate Trivy vulnerability reports
+        run: |
+          set -euo pipefail
+          SCAN_INPUT="${RUNNER_TEMP}/sellerai-scan/input"
+          SCAN_OUTPUT="${RUNNER_TEMP}/sellerai-scan/output"
+          CACHE_DIR="${RUNNER_TEMP}/sellerai-scan/trivy-cache"
+          mkdir -p "${CACHE_DIR}"
+          scan_status=0
+          if ! docker run --rm \
+            -v "${SCAN_INPUT}:/input:ro" \
+            -v "${SCAN_OUTPUT}:/output:rw" \
+            -v "${CACHE_DIR}:/root/.cache/trivy:rw" \
+            "${TRIVY_IMAGE}" \
+            image --input /input/backend.tar --format json --output /output/backend.trivy.json --scanners vuln --exit-code 0; then
+            echo "backend: trivy scan command failed" >&2
+            scan_status=1
+          fi
+          if ! docker run --rm \
+            -v "${SCAN_INPUT}:/input:ro" \
+            -v "${SCAN_OUTPUT}:/output:rw" \
+            -v "${CACHE_DIR}:/root/.cache/trivy:rw" \
+            "${TRIVY_IMAGE}" \
+            image --input /input/frontend.tar --format json --output /output/frontend.trivy.json --scanners vuln --exit-code 0; then
+            echo "frontend: trivy scan command failed" >&2
+            scan_status=1
+          fi
+          if ! docker run --rm \
+            -v "${SCAN_INPUT}:/input:ro" \
+            -v "${SCAN_OUTPUT}:/output:rw" \
+            -v "${CACHE_DIR}:/root/.cache/trivy:rw" \
+            "${TRIVY_IMAGE}" \
+            image --input /input/nginx.tar --format json --output /output/nginx.trivy.json --scanners vuln --exit-code 0; then
+            echo "nginx: trivy scan command failed" >&2
+            scan_status=1
+          fi
+          exit "${scan_status}"
+      - name: Evaluate vulnerability policy
+        run: python backend/scripts/evaluate_vulnerability_report.py "${RUNNER_TEMP}/sellerai-scan/output"
+      - name: Upload supply-chain scan artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sellerai-supply-chain-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/sellerai-scan/output/backend.cdx.json
+            ${{ runner.temp }}/sellerai-scan/output/frontend.cdx.json
+            ${{ runner.temp }}/sellerai-scan/output/nginx.cdx.json
+            ${{ runner.temp }}/sellerai-scan/output/backend.trivy.json
+            ${{ runner.temp }}/sellerai-scan/output/frontend.trivy.json
+            ${{ runner.temp }}/sellerai-scan/output/nginx.trivy.json
+            ${{ runner.temp }}/sellerai-scan/output/scan-summary.json
+          retention-days: 14
+          if-no-files-found: error
+      - name: Cleanup supply-chain scan workspace
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNNER_TEMP}/sellerai-scan"

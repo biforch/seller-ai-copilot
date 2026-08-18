@@ -533,6 +533,51 @@ def test_quality_workflow_validates_and_builds_release_containers() -> None:
     assert "secrets." not in content
 
 
+def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
+    content = _read(QUALITY_WORKFLOW)
+
+    pin_index = content.index("- name: Validate pinned container base images")
+    compose_index = content.index("- name: Validate RC Compose configuration")
+    build_backend_index = content.index("- name: Build production backend image")
+    save_index = content.index("- name: Save production images for offline scan")
+    syft_index = content.index("- name: Generate CycloneDX SBOMs")
+    sbom_validate_index = content.index("- name: Validate SBOM artifacts")
+    trivy_index = content.index("- name: Generate Trivy vulnerability reports")
+    policy_index = content.index("- name: Evaluate vulnerability policy")
+    upload_index = content.index("- name: Upload supply-chain scan artifacts")
+
+    assert pin_index < compose_index < build_backend_index < save_index
+    assert save_index < syft_index < sbom_validate_index < trivy_index < policy_index < upload_index
+
+    assert "anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0" in content
+    assert "aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969" in content
+    assert "/var/run/docker.sock" not in content.split("containers:", 1)[1]
+    assert "continue-on-error" not in content.split("containers:", 1)[1]
+    assert "|| true" not in content.split("containers:", 1)[1]
+    assert "sellerai-scan/input" in content
+    assert "sellerai-scan/output" in content
+    assert "retention-days: 14" in content
+    assert "if-no-files-found: error" in content
+    assert "name: sellerai-supply-chain-${{ github.sha }}" in content
+
+    upload_block = content.split("- name: Upload supply-chain scan artifacts", 1)[1]
+    assert ".tar" not in upload_block
+    assert "backend.cdx.json" in upload_block
+    assert "frontend.cdx.json" in upload_block
+    assert "nginx.cdx.json" in upload_block
+    assert "backend.trivy.json" in upload_block
+    assert "scan-summary.json" in upload_block
+    assert "timeout-minutes: 45" in content
+    assert "SYFT_CHECK_FOR_APP_UPDATE=false" in content
+    assert "backend: trivy scan command failed" in content
+    assert "frontend: trivy scan command failed" in content
+    assert "nginx: trivy scan command failed" in content
+    assert "Cleanup supply-chain scan workspace" in content
+    assert 'rm -rf "${RUNNER_TEMP}/sellerai-scan"' in content
+    assert "--privileged" not in content.split("containers:", 1)[1]
+    assert "--env-file" not in content.split("Generate Trivy", 1)[1].split("Evaluate vulnerability", 1)[0]
+
+
 def test_api_client_uses_relative_base_without_double_api_prefix() -> None:
     constants = _read(REPO_ROOT / "frontend" / "lib" / "constants.ts")
     client = _read(REPO_ROOT / "frontend" / "app/api/client.ts")

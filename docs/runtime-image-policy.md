@@ -2,7 +2,7 @@
 
 This document records the audited container base images for SellerAI Copilot release, CI, RC, and development paths. It covers **base-image identity pinning** only. Pinning a digest fixes the upstream base image manifest; it does **not** make the final built image bit-for-bit reproducible because Dockerfiles still run mutable steps such as `apt-get update/install`, unpinned pip installs, and npm dependency resolution at build time.
 
-Vulnerability scanning, SBOM generation, and provenance attestation belong to **S3c**, not this policy.
+Vulnerability scanning, SBOM generation, and supply-chain enforcement are documented in **`docs/supply-chain-security-policy.md`** (S3c). This file covers **application runtime base-image identity pinning** only.
 
 **Policy access date:** 2026-08-18
 **Digest resolution date:** 2026-08-18
@@ -141,12 +141,32 @@ The same `repository:tag` must map to the same digest in every tracked file.
 Validator inventory contract (2026-08-18):
 
 - **8** scanned files
-- **13** external pinned references
+- **13** runtime external pinned references (unchanged from S3b)
+- **6** scanner pinned references (3× Syft + 3× Trivy in `containers` job)
 - **4** internal build references
 
 ---
 
-## 5. Update procedure
+## 5. Supply-chain scanner images (S3c, not runtime)
+
+Scanner images are pinned for CI only. They are **not** application runtime bases.
+
+Cross-verified on **2026-08-18**:
+
+| Image reference | Multi-arch digest | Platforms | Release |
+| --- | --- | --- | --- |
+| `anchore/syft:v1.51.0` | `sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0` | linux/amd64, linux/arm64 | https://github.com/anchore/syft/releases/tag/v1.51.0 |
+| `aquasec/trivy:0.74.0` | `sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969` | linux/amd64, linux/arm64 | https://github.com/aquasecurity/trivy/releases/tag/v0.74.0 |
+
+**Upgrade procedure:** See `docs/supply-chain-security-policy.md` section 9.
+
+**Vulnerability DB:** Trivy DB is a scan-time snapshot and is intentionally **not** pinned. Scanner binary/image pins do not imply bit-for-bit reproducible vulnerability results across dates.
+
+**Remote execution:** S3c scan steps are implemented in CI but require a successful remote `containers` job run to prove end-to-end SBOM + vulnerability evaluation on built images. Scanner digest changes require the same review process as runtime pins.
+
+---
+
+## 6. Update procedure
 
 1. Check official lifecycle pages for EOL or support-window changes.
 2. Choose a supported tag (never `:latest`).
@@ -159,7 +179,7 @@ Validator inventory contract (2026-08-18):
 
 ---
 
-## 6. Rollback principles
+## 7. Rollback principles
 
 - Roll back by reverting the git commit that changed pins and policy together.
 - If a pinned digest fails CI builds but the tag moved, re-resolve digest from registry; do not remove the pin.
@@ -168,10 +188,10 @@ Validator inventory contract (2026-08-18):
 
 ---
 
-## 7. Known limitations
+## 8. Known limitations
 
 - **Base-image identity only:** apt, pip, and npm install steps can change between builds even with a fixed base digest.
 - **Tag drift:** Tags such as `24-alpine` can point to new digests upstream; refresh pins deliberately after review.
 - **Redis:** Dev-only; no production lifecycle commitment in this policy.
 - **Internal RC tags:** Local build tags are outside external pin scope but validated against an internal allowlist.
-- **S3c scope:** This policy does not claim images are vulnerability-free or fully reproducible.
+- **S3c scope:** Runtime pinning does not claim images are vulnerability-free. SBOM/scan policy lives in `docs/supply-chain-security-policy.md`. Remote CI scan proof is pending for S3c completion.

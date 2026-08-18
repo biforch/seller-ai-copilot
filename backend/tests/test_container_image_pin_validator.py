@@ -17,9 +17,12 @@ BACKEND_ROOT = REPO_ROOT / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from scripts.validate_container_image_pins import (  # noqa: E402
-    EXPECTED_EXTERNAL_PINNED_REF_COUNT,
+    ALLOWED_SCANNER_IMAGES,
     EXPECTED_INTERNAL_BUILD_REF_COUNT,
+    EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT,
     EXPECTED_SCAN_FILE_COUNT,
+    EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT,
+    EXPECTED_SCANNER_PINNED_REF_COUNT,
     INTERNAL_BUILD_IMAGES,
     POLICY_DOC,
     SCAN_TARGETS,
@@ -30,6 +33,9 @@ from scripts.validate_container_image_pins import (  # noqa: E402
     main,
     validate_container_image_pins,
 )
+
+SYFT_PIN = next(image for image in ALLOWED_SCANNER_IMAGES if image.startswith("anchore/syft"))
+TRIVY_PIN = next(image for image in ALLOWED_SCANNER_IMAGES if image.startswith("aquasec/trivy"))
 
 VALID_NODE = (
     "node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43"
@@ -149,7 +155,7 @@ def test_workflow_service_image_is_scanned() -> None:
         "      postgres:\n"
         f"        image: {VALID_POSTGRES}\n"
     )
-    findings, external, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    findings, external, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
     assert findings == []
     assert len(external) == 1
 
@@ -228,13 +234,14 @@ def test_repository_real_configuration_passes() -> None:
     findings, stats = validate_container_image_pins()
     assert findings == [], findings
     assert stats.scanned_files == EXPECTED_SCAN_FILE_COUNT
-    assert stats.external_pinned_refs == EXPECTED_EXTERNAL_PINNED_REF_COUNT
+    assert stats.external_pinned_refs == EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT
     assert stats.internal_build_refs == EXPECTED_INTERNAL_BUILD_REF_COUNT
+    assert stats.scanner_pinned_refs == EXPECTED_SCANNER_PINNED_REF_COUNT
 
 
 def test_policy_document_digests_match_repository_configuration() -> None:
     findings, stats = validate_container_image_pins()
-    assert stats.external_pinned_refs == EXPECTED_EXTERNAL_PINNED_REF_COUNT
+    assert stats.external_pinned_refs == EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT
     assert not any("policy digest" in finding.reason for finding in findings)
     assert POLICY_DOC.is_file()
 
@@ -284,8 +291,8 @@ def test_missing_expected_scan_file_fails_closed(monkeypatch: pytest.MonkeyPatch
 
 def test_reference_count_drop_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "scripts.validate_container_image_pins.EXPECTED_EXTERNAL_PINNED_REF_COUNT",
-        EXPECTED_EXTERNAL_PINNED_REF_COUNT + 1,
+        "scripts.validate_container_image_pins.EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT",
+        EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT + 1,
     )
     findings, _stats = validate_container_image_pins()
     assert any("external pinned references" in finding.reason for finding in findings)
@@ -310,8 +317,150 @@ def test_validator_script_runs_from_repo_root() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().startswith(SUCCESS_MESSAGE)
-    assert "13 external pinned references" in result.stdout
-    assert "4 internal build references" in result.stdout
+    assert "13 runtime external pinned references" in result.stdout
+    assert "6 scanner pinned references" in result.stdout
+
+
+def test_scanner_allowlist_is_explicit() -> None:
+    assert len(ALLOWED_SCANNER_IMAGES) == 2
+    assert any("anchore/syft:v1.51.0@" in image for image in ALLOWED_SCANNER_IMAGES)
+    assert any("aquasec/trivy:0.74.0@" in image for image in ALLOWED_SCANNER_IMAGES)
+
+
+def _containers_workflow(*run_lines: str) -> str:
+    run_body = "\n".join(f"          {line}" for line in run_lines)
+    return textwrap.dedent(
+        f"""
+        jobs:
+          containers:
+            env:
+              SYFT_IMAGE: {SYFT_PIN}
+              TRIVY_IMAGE: {TRIVY_PIN}
+            steps:
+              - name: Generate CycloneDX SBOMs
+                run: |
+{run_body}
+        """
+    ).strip()
+
+
+def test_scanner_env_must_not_use_workflow_interpolation() -> None:
+    content = textwrap.dedent(
+        f"""
+        jobs:
+          containers:
+            env:
+              SYFT_IMAGE: ${{{{ inputs.syft_image }}}}
+              TRIVY_IMAGE: {TRIVY_PIN}
+            steps:
+              - name: Generate CycloneDX SBOMs
+                run: |
+                  docker run --rm "${{SYFT_IMAGE}}"
+                  docker run --rm "${{SYFT_IMAGE}}"
+                  docker run --rm "${{SYFT_IMAGE}}"
+                  docker run --rm "${{TRIVY_IMAGE}}"
+                  docker run --rm "${{TRIVY_IMAGE}}"
+                  docker run --rm "${{TRIVY_IMAGE}}"
+        """
+    ).strip()
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert any("must not use workflow interpolation" in finding.reason for finding in findings)
+
+
+def test_scanner_env_must_not_use_secrets() -> None:
+    content = textwrap.dedent(
+        f"""
+        jobs:
+          containers:
+            env:
+              SYFT_IMAGE: ${{{{ secrets.SYFT_IMAGE }}}}
+              TRIVY_IMAGE: {TRIVY_PIN}
+        """
+    ).strip()
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert any("must not reference secrets" in finding.reason for finding in findings)
+
+
+def test_scanner_step_env_override_is_rejected() -> None:
+    content = textwrap.dedent(
+        f"""
+        jobs:
+          containers:
+            env:
+              SYFT_IMAGE: {SYFT_PIN}
+              TRIVY_IMAGE: {TRIVY_PIN}
+            steps:
+              - name: Generate CycloneDX SBOMs
+                env:
+                  SYFT_IMAGE: {SYFT_PIN}
+                run: |
+                  docker run --rm "${{SYFT_IMAGE}}"
+        """
+    ).strip()
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert any("step env must not override SYFT_IMAGE" in finding.reason for finding in findings)
+
+
+def test_scanner_docker_run_rejects_arbitrary_variable() -> None:
+    content = _containers_workflow('docker run --rm "${OTHER_IMAGE}"')
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert any("unapproved shell variable substitution" in finding.reason for finding in findings)
+
+
+def test_scanner_same_tag_different_digest_is_rejected() -> None:
+    wrong_digest = SYFT_PIN.replace(
+        "678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    )
+    content = textwrap.dedent(
+        f"""
+        jobs:
+          containers:
+            env:
+              SYFT_IMAGE: {wrong_digest}
+              TRIVY_IMAGE: {TRIVY_PIN}
+        """
+    ).strip()
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert any("approved pinned scanner reference" in finding.reason for finding in findings)
+
+
+def test_scanner_wrong_tag_with_valid_digest_pattern_is_rejected() -> None:
+    wrong_tag = "anchore/syft:v9.9.9@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0"
+    content = textwrap.dedent(
+        f"""
+        jobs:
+          containers:
+            env:
+              SYFT_IMAGE: {wrong_tag}
+              TRIVY_IMAGE: {TRIVY_PIN}
+        """
+    ).strip()
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert any("approved pinned scanner reference" in finding.reason for finding in findings)
+
+
+def test_runtime_image_must_not_use_scanner_allowlist() -> None:
+    content = f"FROM {SYFT_PIN}\n"
+    findings, _, _ = _scan_dockerfile(Path("Dockerfile.prod"), content)
+    assert any("must not be used as a runtime base image" in finding.reason for finding in findings)
+
+
+def test_scanner_container_forbidden_mounts_are_rejected() -> None:
+    content = _containers_workflow('docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "${SYFT_IMAGE}"')
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert any("Docker socket" in finding.reason for finding in findings)
+
+
+def test_scanner_approved_identity_count() -> None:
+    assert EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT == 2
+    assert len(ALLOWED_SCANNER_IMAGES) == EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT
+
+
+def test_repository_scanner_identity_count() -> None:
+    findings, stats = validate_container_image_pins()
+    assert findings == []
+    assert stats.scanner_pinned_refs == EXPECTED_SCANNER_PINNED_REF_COUNT
 
 
 def test_valid_nginx_digest_example_matches_policy() -> None:
