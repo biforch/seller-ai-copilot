@@ -130,6 +130,21 @@ jobs:
         run: >-
           docker build --file backend/Dockerfile.prod
           --tag sellerai-backend-ci:${{ github.sha }} backend
+      - name: Validate backend production runtime environment
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            -e ENVIRONMENT=testing \
+            -e AMAZON_SP_API_ENDPOINT_MODE=mock \
+            "sellerai-backend-ci:${IMAGE_TAG}" \
+            python scripts/validate_backend_runtime_environment.py
       - name: Build production frontend image
         run: >-
           docker build --file frontend/Dockerfile.prod

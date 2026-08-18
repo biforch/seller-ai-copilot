@@ -610,6 +610,7 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     pin_index = content.index("- name: Validate pinned container base images")
     compose_index = content.index("- name: Validate RC Compose configuration")
     build_backend_index = content.index("- name: Build production backend image")
+    runtime_smoke_index = content.index("- name: Validate backend production runtime environment")
     save_index = content.index("- name: Save production images for offline scan")
     syft_index = content.index("- name: Generate CycloneDX SBOMs")
     sbom_validate_index = content.index("- name: Validate SBOM artifacts")
@@ -617,7 +618,7 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     policy_index = content.index("- name: Evaluate vulnerability policy")
     upload_index = content.index("- name: Upload supply-chain scan artifacts")
 
-    assert pin_index < compose_index < build_backend_index < save_index
+    assert pin_index < compose_index < build_backend_index < runtime_smoke_index < save_index
     assert save_index < syft_index < sbom_validate_index < trivy_index < policy_index < upload_index
 
     assert "anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0" in content
@@ -660,6 +661,31 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "/root/.cache/trivy" not in content.split("Generate Trivy", 1)[1].split("Evaluate vulnerability", 1)[0]
     assert "--privileged" not in content.split("containers:", 1)[1]
     assert "--env-file" not in content.split("Generate Trivy", 1)[1].split("Evaluate vulnerability", 1)[0]
+
+    runtime_smoke_block = content.split("- name: Validate backend production runtime environment", 1)[1].split("- name:", 1)[0]
+    assert "--network none" in runtime_smoke_block
+    assert "--read-only" in runtime_smoke_block
+    assert "--tmpfs /tmp:rw,noexec,nosuid,nodev" in runtime_smoke_block
+    assert "--cap-drop ALL" in runtime_smoke_block
+    assert "--security-opt no-new-privileges" in runtime_smoke_block
+    assert "python scripts/validate_backend_runtime_environment.py" in runtime_smoke_block
+    assert "|| true" not in runtime_smoke_block
+    assert "continue-on-error" not in runtime_smoke_block
+
+
+def test_backend_production_dockerfile_removes_build_tooling_from_runtime() -> None:
+    content = _read(BACKEND_DOCKERFILE_PROD)
+    builder_block = content.split("AS builder", 1)[1].split("AS runner", 1)[0]
+    runner_block = content.split("AS runner", 1)[1]
+
+    assert "pip install --no-cache-dir --prefix=/install -r requirements.txt" in builder_block
+    assert "python3.11 -m pip check" in builder_block
+    assert "python3.11 -m pip uninstall -y jaraco.context wheel setuptools" in runner_block
+    assert "python3.11 -m pip uninstall -y pip" in runner_block
+    assert "scripts/validate_backend_runtime_environment.py" in runner_block
+    assert "USER app" in runner_block
+    assert runner_block.index("pip uninstall") < runner_block.index("USER app")
+    assert "rm -rf /usr/local/lib/python" not in runner_block
 
 
 def test_api_client_uses_relative_base_without_double_api_prefix() -> None:

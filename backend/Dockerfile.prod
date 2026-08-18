@@ -8,7 +8,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt \
+    && PYTHONPATH=/install/lib/python3.11/site-packages python3.11 -m pip check
 
 FROM python:3.11-slim@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7 AS runner
 
@@ -29,6 +30,11 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
 COPY scripts ./scripts
+
+RUN python3.11 -m pip uninstall -y jaraco.context wheel setuptools \
+    && python3.11 -m pip uninstall -y pip \
+    && ENVIRONMENT=testing AMAZON_SP_API_ENDPOINT_MODE=mock \
+        python3.11 scripts/validate_backend_runtime_environment.py
 
 RUN chown -R app:app /app
 
