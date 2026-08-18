@@ -359,10 +359,62 @@ def test_frontend_build_has_no_remote_google_font_dependency() -> None:
     assert "fonts.googleapis.com" not in layout
 
 
+def test_quality_workflow_runs_container_image_pin_validator_before_docker_builds() -> None:
+    content = _read(QUALITY_WORKFLOW)
+    backend_start = content.index("  backend:")
+    frontend_start = content.index("  frontend:")
+    containers_start = content.index("  containers:")
+    backend_block = content[backend_start:frontend_start]
+    containers_block = content[containers_start:]
+
+    assert "python scripts/validate_container_image_pins.py" in backend_block
+    backend_pin_index = backend_block.index("python scripts/validate_container_image_pins.py")
+    ruff_index = backend_block.index("ruff check app tests scripts")
+    assert backend_pin_index < ruff_index
+
+    assert "python backend/scripts/validate_container_image_pins.py" in containers_block
+    pin_index = containers_block.index("python backend/scripts/validate_container_image_pins.py")
+    compose_index = containers_block.index("docker compose --env-file .env.rc.example")
+    build_index = containers_block.index("docker build --file backend/Dockerfile.prod")
+    assert pin_index < compose_index < build_index
+    assert "continue-on-error" not in containers_block
+    assert "|| true" not in containers_block
+
+
+def test_quality_workflow_uses_supported_node_runtime() -> None:
+    content = _read(QUALITY_WORKFLOW)
+    assert 'node-version: "24"' in content
+    assert 'node-version: "20"' not in content
+
+
+def test_frontend_runtime_contract_requires_node_24() -> None:
+    nvmrc = _read(REPO_ROOT / "frontend" / ".nvmrc").strip()
+    package_json = _read(REPO_ROOT / "frontend" / "package.json")
+    npmrc = _read(REPO_ROOT / "frontend" / ".npmrc")
+    lockfile = json.loads(_read(FRONTEND_PACKAGE_LOCK))
+
+    assert nvmrc == "24"
+    assert '"node": ">=24 <25"' in package_json
+    assert "node scripts/check-node-engine.mjs" in package_json
+    assert lockfile["packages"][""]["engines"] == {"node": ">=24 <25"}
+    assert "engine-strict=true" in npmrc
+    assert "node:24-alpine@sha256:" in _read(FRONTEND_DOCKERFILE_PROD)
+    assert "node:24-alpine@sha256:" in _read(REPO_ROOT / "frontend" / "Dockerfile")
+
+
+def test_nginx_runtime_uses_current_stable_branch() -> None:
+    nginx_digest = (
+        "nginx:1.30-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46"
+    )
+    assert nginx_digest in _read(REPO_ROOT / "nginx" / "Dockerfile.rc")
+    assert nginx_digest in _read(REPO_ROOT / "docker-compose.yml")
+    assert "nginx:1.28-alpine" not in _read(REPO_ROOT / "docs" / "runtime-image-policy.md")
+
+
 def test_quality_workflow_runs_backend_and_frontend_release_gates() -> None:
     content = _read(QUALITY_WORKFLOW)
     assert "permissions:\n  contents: read" in content
-    assert "postgres:16-alpine" in content
+    assert "postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685" in content
     assert "sellerai_migration_test" in content
     assert "ruff check app tests scripts" in content
     assert "mypy app scripts" in content
@@ -423,6 +475,7 @@ def test_frontend_npmrc_points_to_official_registry() -> None:
     assert lines == [
         "registry=https://registry.npmjs.org/",
         "replace-registry-host=always",
+        "engine-strict=true",
     ]
     assert "strict-ssl=false" not in content
     assert "registry=http://" not in content

@@ -2,7 +2,11 @@
   "name": "seller-ai-copilot-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
+    "preinstall": "node scripts/check-node-engine.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

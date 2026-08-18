@@ -1,5 +1,5 @@
 # Production frontend image (RC / staging). Dev workflow uses frontend/Dockerfile.
-FROM node:20-alpine AS deps
+FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS deps
 
 WORKDIR /app
 
@@ -8,7 +8,7 @@ COPY scripts/validate-lockfile-registry.mjs ./scripts/validate-lockfile-registry
 RUN node scripts/validate-lockfile-registry.mjs \
     && npm ci
 
-FROM node:20-alpine AS builder
+FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS builder
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ ENV NODE_ENV=production
 
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS runner
 
 WORKDIR /app
 
