@@ -679,6 +679,8 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "--cap-drop ALL" in runtime_smoke_block
     assert "--security-opt no-new-privileges" in runtime_smoke_block
     assert "python scripts/validate_backend_runtime_environment.py" in runtime_smoke_block
+    assert "python scripts/validate_backend_os_packages.py" in runtime_smoke_block
+    assert "python scripts/validate_backend_production_smoke.py" in runtime_smoke_block
     assert "|| true" not in runtime_smoke_block
     assert "continue-on-error" not in runtime_smoke_block
 
@@ -722,6 +724,13 @@ def test_backend_production_dockerfile_removes_build_tooling_from_runtime() -> N
     builder_block = content.split("AS builder", 1)[1].split("AS runner", 1)[0]
     runner_block = content.split("AS runner", 1)[1]
 
+    assert "python:3.11-slim-trixie@sha256:" in content
+    assert "AS python-base" in content
+    assert "bsdutils=1:2.41.5-0+deb13u1" in content
+    assert "util-linux=2.41.5-0+deb13u1" in content
+    assert "apt-get upgrade" not in content
+    assert "dist-upgrade" not in content
+    assert "validate_backend_os_packages.py" in content
     assert "pip install --no-cache-dir --prefix=/install -r requirements.txt" in builder_block
     assert "python3.11 -m pip check" in builder_block
     assert "python3.11 -m pip uninstall -y jaraco.context wheel setuptools" in runner_block
@@ -729,6 +738,7 @@ def test_backend_production_dockerfile_removes_build_tooling_from_runtime() -> N
     uninstall_block = runner_block.split("pip uninstall", 1)[1].split("validate_backend_runtime_environment", 1)[0]
     assert "setuptools" in uninstall_block
     assert "scripts/validate_backend_runtime_environment.py" in runner_block
+    assert "scripts/validate_backend_os_packages.py" in runner_block
     assert "PYTHONPATH=/app" in runner_block
     assert "USER app" in runner_block
     assert runner_block.index("pip uninstall") < runner_block.index("USER app")

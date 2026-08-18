@@ -11,12 +11,12 @@ Vulnerability scanning, SBOM generation, and supply-chain enforcement are docume
 
 ## 1. Image inventory
 
-Expected external pinned references: **13** (validated by `validate_container_image_pins.py`).
+Expected external pinned references: **12** (validated by `validate_container_image_pins.py`).
 
 | File | Line | Repository | Tag | Environment | Architectures required |
 | --- | --- | --- | --- | --- | --- |
-| `backend/Dockerfile.prod` | 2, 13 | `python` | `3.11-slim` | RC / production | linux/amd64; linux/arm64 |
-| `backend/Dockerfile` | 1 | `python` | `3.11-slim` | development | linux/amd64; linux/arm64 |
+| `backend/Dockerfile.prod` | 2 | `python` | `3.11-slim-trixie` | RC / production | linux/amd64; linux/arm64 |
+| `backend/Dockerfile` | 1 | `python` | `3.11-slim-trixie` | development | linux/amd64; linux/arm64 |
 | `frontend/Dockerfile.prod` | 2, 11, 26 | `node` | `24-alpine` | RC / production | linux/amd64; linux/arm64 |
 | `frontend/Dockerfile` | 1 | `node` | `24-alpine` | development | linux/amd64; linux/arm64 |
 | `nginx/Dockerfile.rc` | 1 | `nginx` | `1.30-alpine` | RC / production | linux/amd64; linux/arm64 |
@@ -70,7 +70,7 @@ Repository runtime contract: `frontend/.nvmrc` = `24.19.0`, `package.json` `engi
 | Python 3.11 security support ends | **2027-10** (official schedule granularity: month) |
 | Official source | https://devguide.python.org/versions/ |
 | Also | https://peps.python.org/pep-0664/ |
-| Decision | **Retain Python 3.11-slim** |
+| Decision | **Retain Python 3.11-slim-trixie** (explicit Debian trixie suite) |
 | Next mandatory review | **2027-07-01** (three months before scheduled security end) |
 
 ### PostgreSQL
@@ -113,15 +113,29 @@ Repository runtime contract: `frontend/.nvmrc` = `24.19.0`, `package.json` `engi
 
 All digests below are **OCI image index / Docker manifest list** digests (multi-arch), not single-platform child manifests, config digests, or layer digests.
 
-Cross-verified on **2026-08-18** using:
+**Digest resolution date:** 2026-08-18 (re-verified for S3d4b)
 
-1. Docker Hub tag API — top-level `digest` with `media_type: application/vnd.oci.image.index.v1+json`
-2. Docker Registry v2 manifest request — response header `Docker-Content-Digest`
+**Python 3.11-slim-trixie evidence (2026-08-18):**
+
+| Field | Value |
+| --- | --- |
+| Tag | `python:3.11-slim-trixie` |
+| Multi-arch index digest | `sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7` |
+| Media type | `application/vnd.oci.image.index.v1+json` |
+| Tag last pushed | 2026-08-16T23:07:07Z |
+| official-images GitCommit | `fe89472bda6128fef7e964d1f1991534e32dcfb7` |
+| Python patch | 3.11.16 |
+| Debian suite | trixie (from `debian:trixie-slim`) |
+| linux/amd64 child digest | `sha256:ff05d1a05204fb9f7444c435db8e8ec104e587a413280dc9ffc27a4797554182` |
+| linux/arm64 child digest | `sha256:c3030eb5af86633f87e538de534dd455ca0cf2b4eceee87069b713f33d2d03f6` |
+| Hub vs Registry | Registry v2 HEAD unavailable from audit host (connection reset); Hub tag API digest matches prior dual-source pin |
+
+**Backend OS security pins (DSA-6442 / CVE-2026-53615):** production `backend/Dockerfile.prod` pins util-linux source `2.41.5-0+deb13u1` binary versions from `deb.debian.org` trixie-security Packages indexes (amd64/arm64 identical). Validated at build and CI by `validate_backend_os_packages.py`. Perl-base CRITICAL findings remain outside this scope.
 
 | Image reference | Multi-arch digest | Platforms verified (linux) | Digest sources |
 | --- | --- | --- | --- |
 | `node:24-alpine` | `sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
-| `python:3.11-slim` | `sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
+| `python:3.11-slim-trixie` | `sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7` | amd64, arm64 | Hub tag API + official-images GitCommit `fe89472bda6128fef7e964d1f1991534e32dcfb7` |
 | `postgres:16-alpine` | `sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
 | `nginx:1.30-alpine` | `sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
 | `redis:7-alpine` | `sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
@@ -151,7 +165,7 @@ The same `repository:tag` must map to the same digest in every tracked file.
 Validator inventory contract (2026-08-18):
 
 - **8** scanned files
-- **13** runtime external pinned references (unchanged from S3b)
+- **12** runtime external pinned references (S3d4b: prod Dockerfile shares one python-base pin)
 - **6** scanner pinned references (3× Syft + 3× Trivy in `containers` job)
 - **4** internal build references
 

@@ -26,7 +26,7 @@ SCAN_TARGETS = (
 )
 
 EXPECTED_SCAN_FILE_COUNT = len(SCAN_TARGETS)
-EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 13
+EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 12
 EXPECTED_INTERNAL_BUILD_REF_COUNT = 4
 EXPECTED_SCANNER_PINNED_REF_COUNT = 6
 EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT = 2
@@ -456,6 +456,8 @@ def _validate_runtime_smoke_step(path: Path, content: str) -> list[Finding]:
         "--security-opt no-new-privileges",
         "sellerai-backend-ci:${IMAGE_TAG}",
         "python scripts/validate_backend_runtime_environment.py",
+        "python scripts/validate_backend_os_packages.py",
+        "python scripts/validate_backend_production_smoke.py",
         "-e ENVIRONMENT=testing",
         "-e AMAZON_SP_API_ENDPOINT_MODE=mock",
     )

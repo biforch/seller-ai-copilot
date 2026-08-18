@@ -1,5 +1,23 @@
 # Production backend image (RC / staging). Dev workflow uses backend/Dockerfile.
-FROM python:3.11-slim@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7 AS builder
+FROM python:3.11-slim-trixie@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7 AS python-base
+
+COPY scripts/validate_backend_os_packages.py /tmp/validate_backend_os_packages.py
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bsdutils=1:2.41.5-0+deb13u1 \
+        libblkid1=2.41.5-0+deb13u1 \
+        liblastlog2-2=2.41.5-0+deb13u1 \
+        libmount1=2.41.5-0+deb13u1 \
+        libsmartcols1=2.41.5-0+deb13u1 \
+        libuuid1=2.41.5-0+deb13u1 \
+        login=1:4.16.0-2+really2.41.5-0+deb13u1 \
+        mount=2.41.5-0+deb13u1 \
+        util-linux=2.41.5-0+deb13u1 \
+    && python3.11 /tmp/validate_backend_os_packages.py \
+    && rm -rf /var/lib/apt/lists/* /tmp/validate_backend_os_packages.py
+
+FROM python-base AS builder
 
 WORKDIR /build
 
@@ -11,7 +29,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt \
     && PYTHONPATH=/install/lib/python3.11/site-packages python3.11 -m pip check
 
-FROM python:3.11-slim@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7 AS runner
+FROM python-base AS runner
 
 WORKDIR /app
 
@@ -37,7 +55,8 @@ RUN python3.11 -m pip uninstall -y jaraco.context wheel setuptools \
     && ENVIRONMENT=testing AMAZON_SP_API_ENDPOINT_MODE=mock \
         DATABASE_URL=postgresql://localhost:5432/sellerai_test \
         OPENAI_API_KEY=runtime-smoke-not-used \
-        python3.11 scripts/validate_backend_runtime_environment.py
+        python3.11 scripts/validate_backend_runtime_environment.py \
+    && python3.11 scripts/validate_backend_os_packages.py
 
 RUN chown -R app:app /app
 

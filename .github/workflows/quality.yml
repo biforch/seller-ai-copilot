@@ -147,6 +147,26 @@ jobs:
             -e OPENAI_API_KEY=runtime-smoke-not-used \
             "sellerai-backend-ci:${IMAGE_TAG}" \
             python scripts/validate_backend_runtime_environment.py
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            "sellerai-backend-ci:${IMAGE_TAG}" \
+            python scripts/validate_backend_os_packages.py
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            -e ENVIRONMENT=testing \
+            -e AMAZON_SP_API_ENDPOINT_MODE=mock \
+            -e DATABASE_URL=postgresql://localhost:5432/sellerai_test \
+            -e OPENAI_API_KEY=runtime-smoke-not-used \
+            "sellerai-backend-ci:${IMAGE_TAG}" \
+            python scripts/validate_backend_production_smoke.py
       - name: Build production frontend image
         run: >-
           docker build --file frontend/Dockerfile.prod
