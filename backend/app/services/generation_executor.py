@@ -26,6 +26,7 @@ from app.core.exceptions import (
 from app.core.orm_utils import orm_dict, orm_int, orm_optional_str, orm_str, orm_uuid
 from app.core.payload_safety import prepare_request_input, prepare_response_payload
 from app.database.session import SessionLocal
+from app.integrations.amazon.exceptions import amazon_listing_not_found_error
 from app.models.generation import Generation
 from app.models.generation_request import GenerationRequest, GenerationRequestStatus
 from app.models.product import Product
@@ -34,6 +35,10 @@ from app.models.user import User
 from app.prompts.versions import PROMPT_VERSIONS
 from app.schemas.ai_output import ListingAIOutput
 from app.schemas.listing import ListingSnapshot, listing_snapshot_from_ai_output
+from app.services.amazon_catalog_ai_context_service import (
+    AmazonCatalogAIContext,
+    AmazonCatalogAIContextService,
+)
 from app.services.analyzer import AnalyzerService
 from app.services.generation_state import mark_failed, mark_succeeded
 from app.services.listing_proposal import create_proposal_in_transaction, proposal_summary_dict
@@ -175,6 +180,21 @@ class GenerationExecutor:
         if adv is None and existing.advantages is not None:
             adv = list(existing.advantages) if isinstance(existing.advantages, list) else None
         return tc, adv
+
+    def resolve_amazon_catalog_context(
+        self, user_id: uuid.UUID, body: Any
+    ) -> AmazonCatalogAIContext | None:
+        amazon_listing_id = getattr(body, "amazon_listing_id", None)
+        if amazon_listing_id is None:
+            return None
+        product_id = getattr(body, "product_id", None)
+        if product_id is None:
+            raise amazon_listing_not_found_error()
+        return AmazonCatalogAIContextService(self.db).resolve_for_generation(
+            user_id=user_id,
+            product_id=product_id,
+            listing_id=amazon_listing_id,
+        )
 
     def _handle_existing_request(
         self,
@@ -638,6 +658,7 @@ class GenerationExecutor:
         body,
         idempotency_key: str,
         request_hash: str,
+        catalog_context: AmazonCatalogAIContext | None = None,
     ) -> dict[str, Any]:
         user = self._get_user(user_id)
         user_uuid = orm_uuid(user.id)
@@ -648,8 +669,10 @@ class GenerationExecutor:
             body.target_customer,
             body.advantages,
         )
+        if catalog_context is None:
+            catalog_context = self.resolve_amazon_catalog_context(user_uuid, body)
 
-        canonical_input = {
+        canonical_input: dict[str, Any] = {
             "project_id": str(body.project_id) if body.project_id else None,
             "product_id": str(body.product_id) if body.product_id else None,
             "name": body.name,
@@ -659,6 +682,8 @@ class GenerationExecutor:
             "target_customer": target_customer,
             "advantages": advantages,
         }
+        if catalog_context is not None:
+            canonical_input["amazon_catalog_context"] = catalog_context.to_audit_dict()
 
         begin = self.begin_execution(
             user_id=user_uuid,
@@ -691,6 +716,9 @@ class GenerationExecutor:
                 project_goal=project_goal,
                 target_customer=target_customer,
                 advantages=advantages,
+                amazon_catalog_context=(
+                    catalog_context.to_prompt_dict() if catalog_context else None
+                ),
                 request_id=str(begin.request.id),
             )
 

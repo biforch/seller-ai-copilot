@@ -188,6 +188,7 @@ class OpenAIService:
         project_goal: str | None = None,
         target_customer: str | None = None,
         advantages: list | None = None,
+        amazon_catalog_context: dict[str, str | None] | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         prompt = self._render_prompt(
@@ -199,6 +200,7 @@ class OpenAIService:
             project_goal=project_goal,
             target_customer=target_customer,
             advantages=advantages or [],
+            amazon_catalog_context=amazon_catalog_context,
         )
 
         return await self._chat_json(

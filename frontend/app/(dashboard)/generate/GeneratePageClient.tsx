@@ -72,6 +72,8 @@ export function GeneratePageClient(){
       'product_id'
     );
 
+  const amazonListingId = searchParams.get('amazon_listing_id');
+
   const [productLoadError, setProductLoadError] = useState<string | null>(null);
   const [productLoading, setProductLoading] = useState(Boolean(productId));
   const [loadedProductId, setLoadedProductId] = useState<string | null>(null);
@@ -188,6 +190,7 @@ export function GeneratePageClient(){
       setFormData({
         project_id: product.project?.id ?? undefined,
         product_id: product.id,
+        amazon_listing_id: amazonListingId || undefined,
         name: product.name,
         category: product.category ?? 'General',
         market: product.market,
@@ -202,6 +205,7 @@ export function GeneratePageClient(){
           product_id: product.id,
           project_id: product.project.id,
         });
+        if (amazonListingId) canonicalParams.set('amazon_listing_id', amazonListingId);
         router.replace(`/generate?${canonicalParams.toString()}`);
       }
     }).catch(() => {
@@ -212,7 +216,7 @@ export function GeneratePageClient(){
     });
 
     return () => controller.abort();
-  }, [productId, router]);
+  }, [amazonListingId, productId, router]);
 
 
 
@@ -315,6 +319,12 @@ export function GeneratePageClient(){
         {productId && loadedProductId === productId && !productLoading && !productLoadError && (
           <p className="mt-2 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-700">
             SellerAI product loaded from your Amazon listing link. Generated content will remain a review proposal and will not be published to Amazon.
+          </p>
+        )}
+
+        {amazonListingId && loadedProductId === productId && !productLoading && !productLoadError && (
+          <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+            The latest saved Amazon catalog summary will be used as untrusted factual reference. SellerAI will still create a review proposal only.
           </p>
         )}
 

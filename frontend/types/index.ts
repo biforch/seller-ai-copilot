@@ -370,6 +370,8 @@ export interface GenerateFormData {
 
   product_id?: string;
 
+  amazon_listing_id?: string;
+
   name: string;
 
   category: string;

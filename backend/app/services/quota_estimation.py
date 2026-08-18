@@ -18,6 +18,7 @@ def listing_render_variables(canonical_input: dict) -> dict:
         "project_goal": None,
         "target_customer": canonical_input.get("target_customer"),
         "advantages": canonical_input.get("advantages") or [],
+        "amazon_catalog_context": canonical_input.get("amazon_catalog_context"),
     }
 
 

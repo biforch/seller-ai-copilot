@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common_fields import (
     ADVANTAGE_ITEM_MAX,
@@ -19,12 +19,19 @@ from app.schemas.common_fields import (
 class GenerateListingRequest(BaseModel):
     project_id: ProjectIdField
     product_id: ProductIdField | None = None
+    amazon_listing_id: ProductIdField | None = None
     name: NameField
     category: CategoryField
     market: MarketField = "USA"
     platform: PlatformField = "Amazon"
     target_customer: TargetCustomerField = None
     advantages: list[str] | None = Field(default=None, max_length=ADVANTAGES_MAX_COUNT)
+
+    @model_validator(mode="after")
+    def validate_amazon_source(self):
+        if self.amazon_listing_id is not None and self.product_id is None:
+            raise ValueError("amazon_listing_id requires product_id")
+        return self
 
     @field_validator("advantages")
     @classmethod

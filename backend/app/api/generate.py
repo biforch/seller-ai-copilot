@@ -8,6 +8,7 @@ from app.core.response import success_response
 from app.core.security import get_current_user
 from app.database.session import get_db
 from app.schemas.generate import AnalyzeRequest, GenerateListingRequest
+from app.services.amazon_catalog_ai_context_service import AmazonCatalogAIContext
 from app.services.generation_executor import GenerationExecutor
 from app.services.idempotency import (
     IDEMPOTENCY_KEY_HEADER,
@@ -19,19 +20,28 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _listing_hash(body: GenerateListingRequest, target_customer, advantages) -> str:
-    return canonical_request_hash(
-        {
-            "project_id": str(body.project_id) if body.project_id else None,
-            "product_id": str(body.product_id) if body.product_id else None,
-            "name": body.name,
-            "category": body.category,
-            "market": body.market,
-            "platform": body.platform,
-            "target_customer": target_customer,
-            "advantages": advantages,
-        }
-    )
+def _listing_hash(
+    body: GenerateListingRequest,
+    target_customer,
+    advantages,
+    catalog_context: AmazonCatalogAIContext | None = None,
+) -> str:
+    payload = {
+        "project_id": str(body.project_id) if body.project_id else None,
+        "product_id": str(body.product_id) if body.product_id else None,
+        "name": body.name,
+        "category": body.category,
+        "market": body.market,
+        "platform": body.platform,
+        "target_customer": target_customer,
+        "advantages": advantages,
+    }
+    if body.amazon_listing_id is not None:
+        payload["amazon_listing_id"] = str(body.amazon_listing_id)
+        payload["amazon_catalog_context"] = (
+            catalog_context.to_audit_dict() if catalog_context else None
+        )
+    return canonical_request_hash(payload)
 
 
 @router.post("/listing")
@@ -53,13 +63,15 @@ async def generate_listing(
         body.target_customer,
         body.advantages,
     )
-    request_hash = _listing_hash(body, target_customer, advantages)
+    catalog_context = executor.resolve_amazon_catalog_context(user.id, body)
+    request_hash = _listing_hash(body, target_customer, advantages, catalog_context)
 
     data = await executor.execute_listing(
         user_id=current_user["id"],
         body=body,
         idempotency_key=idempotency_key,
         request_hash=request_hash,
+        catalog_context=catalog_context,
     )
     return success_response(data=data)
 

@@ -272,10 +272,11 @@ export default function AmazonConnectionsPage() {
     }
   };
 
-  const openOptimizationWorkspace = (product: AmazonLinkProduct) => {
+  const openOptimizationWorkspace = (product: AmazonLinkProduct, listingId: string) => {
     const params = new URLSearchParams({
       product_id: product.id,
       project_id: product.project_id,
+      amazon_listing_id: listingId,
     });
     router.push(`/generate?${params.toString()}`);
   };
@@ -530,7 +531,7 @@ export default function AmazonConnectionsPage() {
                                       title="Optimize in AI workspace"
                                       onClick={() => {
                                         const product = products.find((item) => item.id === listing.product_id);
-                                        if (product) openOptimizationWorkspace(product);
+                                        if (product) openOptimizationWorkspace(product, listing.id);
                                       }}
                                       className="rounded-lg border border-purple-200 bg-purple-50 p-2 text-purple-700 hover:bg-purple-100"
                                     >

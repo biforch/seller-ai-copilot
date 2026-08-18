@@ -49,15 +49,15 @@ def test_successful_generation_records_model_prompt_version_and_latency(
 
 
 @pytest.mark.parametrize(
-    "request_type,prompt_version",
+    "request_type,expected_version",
     [
-        ("listing", PROMPT_VERSIONS["listing"]),
-        ("analysis", PROMPT_VERSIONS["analysis"]),
-        ("keywords", PROMPT_VERSIONS["keywords"]),
+        ("listing", "listing-v2"),
+        ("analysis", "analysis-v1"),
+        ("keywords", "keywords-v1"),
     ],
 )
-def test_prompt_versions_are_stable(request_type, prompt_version):
-    assert prompt_version.endswith("-v1")
+def test_prompt_versions_are_stable(request_type, expected_version):
+    assert PROMPT_VERSIONS[request_type] == expected_version
 
 
 def test_failed_generation_stores_sanitized_error_code(
