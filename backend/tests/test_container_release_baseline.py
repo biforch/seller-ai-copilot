@@ -11,7 +11,7 @@ import subprocess
 import sys
 from contextlib import redirect_stderr
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import pytest
 
@@ -38,6 +38,9 @@ BACKEND_DOCKERIGNORE = REPO_ROOT / "backend" / ".dockerignore"
 FRONTEND_DOCKERIGNORE = REPO_ROOT / "frontend" / ".dockerignore"
 VALIDATOR_SCRIPT = BACKEND_ROOT / "scripts" / "validate_rc_environment.py"
 QUALITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "quality.yml"
+FRONTEND_NPMRC = REPO_ROOT / "frontend" / ".npmrc"
+FRONTEND_PACKAGE_LOCK = REPO_ROOT / "frontend" / "package-lock.json"
+ALLOWED_NPM_REGISTRY_HOST = "registry.npmjs.org"
 RC_COMPOSE_PROJECT = "sellerai_rc"
 
 
@@ -381,15 +384,87 @@ def test_quality_workflow_runs_frontend_unit_tests_before_build() -> None:
     containers_start = content.index("  containers:")
     frontend_block = content[frontend_start:containers_start]
 
+    validate_index = frontend_block.index("run: npm run validate:lockfile-registry")
+    validator_test_index = frontend_block.index("run: npm run test:lockfile-registry")
     npm_ci_index = frontend_block.index("run: npm ci")
     test_index = frontend_block.index("run: npm test -- --run")
     tsc_index = frontend_block.index("run: npx tsc --noEmit")
     build_index = frontend_block.index("run: npm run build")
 
-    assert npm_ci_index < test_index < tsc_index < build_index
+    assert validate_index < validator_test_index < npm_ci_index < test_index < tsc_index < build_index
     assert "continue-on-error" not in frontend_block
     assert "|| true" not in frontend_block
     assert "vitest watch" not in frontend_block
+
+
+def _assert_official_npm_registry_resolved(resolved: str) -> None:
+    assert isinstance(resolved, str)
+    assert not resolved.startswith("git+")
+    assert not resolved.startswith("file:")
+    assert not resolved.startswith("http://")
+    assert not resolved.startswith("//")
+    assert "registry.npmmirror.com" not in resolved
+
+    parsed = urlparse(resolved)
+    assert parsed.scheme == "https"
+    assert parsed.hostname == ALLOWED_NPM_REGISTRY_HOST
+    assert parsed.port in (None, 443)
+    assert not parsed.username
+    assert not parsed.password
+    assert parsed.query == ""
+    assert parsed.fragment == ""
+    assert parsed.path.startswith("/")
+    assert "\\" not in parsed.path
+
+
+def test_frontend_npmrc_points_to_official_registry() -> None:
+    content = _read(FRONTEND_NPMRC)
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    assert lines == [
+        "registry=https://registry.npmjs.org/",
+        "replace-registry-host=always",
+    ]
+    assert "strict-ssl=false" not in content
+    assert "registry=http://" not in content
+    assert "legacy-peer-deps=true" not in content
+    assert "force=true" not in content
+    assert "ignore-scripts=true" not in content
+    assert "_auth" not in content
+    assert "_authToken" not in content
+    assert "${" not in content
+    assert "proxy=" not in content
+    assert content.endswith("\n")
+
+
+def test_frontend_lockfile_resolved_sources_use_official_registry_only() -> None:
+    lockfile = json.loads(_read(FRONTEND_PACKAGE_LOCK))
+    packages = lockfile.get("packages", {})
+    checked = 0
+
+    for package_path, meta in packages.items():
+        if not isinstance(meta, dict):
+            continue
+        resolved = meta.get("resolved")
+        if resolved is None:
+            assert package_path == ""
+            continue
+
+        checked += 1
+        _assert_official_npm_registry_resolved(resolved)
+
+    assert checked == 651
+
+
+def test_frontend_dockerfile_runs_lockfile_registry_validator_before_npm_ci() -> None:
+    content = _read(FRONTEND_DOCKERFILE_PROD)
+    assert "COPY package.json package-lock.json .npmrc ./" in content
+    assert "COPY scripts/validate-lockfile-registry.mjs ./scripts/validate-lockfile-registry.mjs" in content
+    assert "node scripts/validate-lockfile-registry.mjs" in content
+    validator_index = content.index("node scripts/validate-lockfile-registry.mjs")
+    npm_ci_index = content.index("npm ci")
+    assert validator_index < npm_ci_index
+    assert "continue-on-error" not in content
+    assert "|| true" not in content
 
 
 def test_quality_workflow_validates_and_builds_release_containers() -> None:

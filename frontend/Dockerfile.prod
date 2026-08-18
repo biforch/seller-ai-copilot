@@ -3,8 +3,10 @@ FROM node:20-alpine AS deps
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json package-lock.json .npmrc ./
+COPY scripts/validate-lockfile-registry.mjs ./scripts/validate-lockfile-registry.mjs
+RUN node scripts/validate-lockfile-registry.mjs \
+    && npm ci
 
 FROM node:20-alpine AS builder
 

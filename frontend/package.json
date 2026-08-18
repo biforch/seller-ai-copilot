@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "vitest"
+    "test": "vitest",
+    "validate:lockfile-registry": "node scripts/validate-lockfile-registry.mjs",
+    "test:lockfile-registry": "node --test scripts/validate-lockfile-registry.test.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.4",
