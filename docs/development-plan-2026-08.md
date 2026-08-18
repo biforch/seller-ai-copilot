@@ -1,8 +1,8 @@
 # SellerAI Copilot Development Plan
 
 **Plan version:** 2026-08-18
-**Code baseline:** `65fdc7f` (`main`, S3b supported runtime digest pinning)
-**Current verdict:** Core Amazon MVP feature-complete locally; release readiness is blocked by remaining supply-chain hardening (S3c) and unexecuted container/RC validation.
+**Code baseline:** `025cd68` (`main`, S3c SBOM and vulnerability policy implementation)
+**Current verdict:** Core Amazon MVP feature-complete locally; release readiness blocked until S3c remote supply-chain verification (R1a) and RC validation complete.
 **Source of truth:** Current code, Alembic migrations, automated tests, and this plan. Earlier A3/A4 design reviews remain historical references and are not active delivery plans.
 
 ## 1. Product objective
@@ -137,7 +137,7 @@ Exit gate:
 ### S3 — Dependency and image supply-chain hardening
 
 **Priority:** Required before staging
-**Status:** In Progress
+**Status:** In Progress (S3a/S3b complete; S3c implementation complete, remote verification pending)
 **Scope:** lockfile, production Dockerfiles, Compose/CI image references, release tests.
 
 #### S3a — Official npm registry
@@ -173,20 +173,26 @@ Exit gate:
 
 #### S3c — SBOM and vulnerability policy
 
-**Status:** Next
+**Status:** Implementation complete; remote verification pending
 
 Deliverables:
 
-- Add SBOM generation and a vulnerability scan after deterministic image builds.
-- Define severity and exception policy before making the scan blocking.
+- CycloneDX SBOM generation for backend, frontend, and nginx production images.
+- Offline Trivy vulnerability scans from saved image tar (no Docker socket in scanner containers).
+- Fail-closed policy evaluator (CRITICAL always blocks; HIGH blocks when fix exists).
+- CI artifacts with 14-day retention; no `.trivyignore` in initial phase.
 
-Exit gate:
+Exit gate (verification):
 
-- Clean-machine `npm ci` and all production image builds succeed with pinned digests and documented scan policy.
+- Remote `containers` job completes build + SBOM + Trivy + policy evaluation with pinned scanner images.
+- S3c may be marked **Verified** only after that remote proof — not after local fixture tests alone.
+
+**S3 overall:** In progress — not fully accepted until S3c remote verification passes.
 
 ### S4 — Browser authentication hardening
 
 **Priority:** Required before public staging
+**Status:** Pending (not started; remains prerequisite for public staging)
 **Scope:** authentication contract, frontend client, CSRF, CSP, migration compatibility.
 
 This is an isolated architecture phase and must not be mixed with S1–S3.
@@ -208,10 +214,32 @@ Exit gate:
 
 ### R1 — Remote quality gate and deterministic build
 
-**Entry:** S3a–S3c complete.
-**Deliverables:**
+**Status:** Not complete (release promotion blocked)
+**Entry:** S3a–S3c implementation complete; S3c remote verification pending.
 
-- Review the 53 local commits as a bounded branch/PR sequence.
+#### R1a — Remote supply-chain verification
+
+**Status:** Next
+
+Deliverables:
+
+- Push authorized branch and execute remote `containers` job on GitHub runners.
+- Prove real build + `docker image save` + Syft SBOM + Trivy JSON + policy evaluator on all three production images.
+- Collect CI artifacts (`sellerai-supply-chain-<sha>`) and record scan summary.
+- If policy blocks on CRITICAL or fixable HIGH, report CVE/package/image summaries — do not add ignore rules in S3c.
+
+Exit gate:
+
+- Remote `containers` job passes with no skipped scan step.
+- S3c marked **Verified** only after this gate passes.
+
+#### R1b — Full remote quality gate
+
+**Entry:** R1a complete.
+
+Deliverables:
+
+- Review local commits as a bounded branch/PR sequence.
 - Push only after explicit authorization.
 - Require backend, frontend, Compose, and production-image jobs to pass.
 - Record exact commit, migration head, action SHAs, image digests, test totals, and build artifacts.
@@ -220,7 +248,7 @@ Exit gate: all required remote jobs pass with no skipped job and no secret-beari
 
 ### R2 — Disposable local RC acceptance
 
-**Entry:** R1 complete and Docker available.
+**Entry:** R1b complete and Docker available.
 **Deliverables:**
 
 - Build backend/frontend/nginx production images.
@@ -304,8 +332,8 @@ For changes involving models or migrations, additionally require upgrade → dow
 
 ## 8. Decision checkpoints
 
-The next implementation task is **S3c SBOM and vulnerability policy**.
+The next implementation task is **R1a remote supply-chain verification**.
 
-After S3c, reassess whether any finding changes the S4 design. After R2, decide whether controlled Amazon acceptance is authorized. After R3, decide whether the next product investment is product search, account lifecycle, or measured scale/operations work.
+After S3c is verified remotely, reassess whether any finding changes the S4 design. After R2, decide whether controlled Amazon acceptance is authorized. After R3, decide whether the next product investment is product search, account lifecycle, or measured scale/operations work.
 
 Automatic Amazon publishing remains outside the plan until the read/sync/proposal workflow has production evidence, an explicit publishing threat model, rollback/reconciliation semantics, and separate user authorization.
