@@ -85,3 +85,28 @@ jobs:
       - name: Production build
         working-directory: frontend
         run: npm run build
+
+  containers:
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate RC Compose configuration
+        run: >-
+          docker compose --env-file .env.rc.example
+          -f docker-compose.rc.yml config --quiet
+      - name: Build production backend image
+        run: >-
+          docker build --file backend/Dockerfile.prod
+          --tag sellerai-backend-ci:${{ github.sha }} backend
+      - name: Build production frontend image
+        run: >-
+          docker build --file frontend/Dockerfile.prod
+          --build-arg NEXT_PUBLIC_API_URL=/api/v1
+          --build-arg "NEXT_PUBLIC_APP_NAME=SellerAI Copilot"
+          --tag sellerai-frontend-ci:${{ github.sha }} frontend
+      - name: Build RC nginx image
+        run: >-
+          docker build --file nginx/Dockerfile.rc
+          --tag sellerai-nginx-ci:${{ github.sha }} nginx

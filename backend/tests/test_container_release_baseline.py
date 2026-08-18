@@ -375,6 +375,19 @@ def test_quality_workflow_runs_backend_and_frontend_release_gates() -> None:
     assert "actions/setup-node@v" not in content
 
 
+def test_quality_workflow_validates_and_builds_release_containers() -> None:
+    content = _read(QUALITY_WORKFLOW)
+    assert "containers:" in content
+    assert "needs: [backend, frontend]" in content
+    assert "docker compose --env-file .env.rc.example" in content
+    assert "-f docker-compose.rc.yml config --quiet" in content
+    assert "docker build --file backend/Dockerfile.prod" in content
+    assert "docker build --file frontend/Dockerfile.prod" in content
+    assert "docker build --file nginx/Dockerfile.rc" in content
+    assert "--build-arg NEXT_PUBLIC_API_URL=/api/v1" in content
+    assert "secrets." not in content
+
+
 def test_api_client_uses_relative_base_without_double_api_prefix() -> None:
     constants = _read(REPO_ROOT / "frontend" / "lib" / "constants.ts")
     client = _read(REPO_ROOT / "frontend" / "app/api/client.ts")
