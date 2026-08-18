@@ -1,8 +1,8 @@
 # SellerAI Copilot Development Plan
 
 **Plan version:** 2026-08-18
-**Code baseline:** `025cd68` (`main`, S3c SBOM and vulnerability policy implementation)
-**Current verdict:** Core Amazon MVP feature-complete locally; release readiness blocked until S3c remote supply-chain verification (R1a) and RC validation complete.
+**Code baseline:** `682709c` (prior); R1a-1 toolchain alignment pending commit on `main`
+**Current verdict:** Core Amazon MVP feature-complete locally; S3c remote supply-chain verification still pending; R1a local npm toolchain gate complete pending authorized branch push.
 **Source of truth:** Current code, Alembic migrations, automated tests, and this plan. Earlier A3/A4 design reviews remain historical references and are not active delivery plans.
 
 ## 1. Product objective
@@ -219,9 +219,18 @@ Exit gate:
 
 #### R1a — Remote supply-chain verification
 
-**Status:** Next
+**Status:** Local gate complete (R1a-1); remote verification pending
 
-Deliverables:
+**R1a-1 local npm toolchain gate (complete):**
+
+- Reclassified prior `@emnapi/runtime` extraneous finding as **`NPM_TOOLCHAIN_VERSION_MISMATCH`**, not lockfile graph defect.
+- Pinned reproducible frontend toolchain: Node **24.19.0**, npm **11.17.0** (matches S3b `node:24-alpine` digest).
+- npm **[PR #9221](https://github.com/npm/cli/pull/9221)** fix: lockfile inert optional entries stay; reifier bug fixed in npm **11.13.0+**.
+- Added fail-closed `validate-node-toolchain` and `validate-installed-dependency-tree` gates in CI and Docker (pre/post `npm ci`).
+- Lockfile dependency graph unchanged; only root `engines` metadata updated.
+- **Prohibited:** deleting `@emnapi/runtime` lock entries, direct dependency workaround, extraneous allowlists.
+
+Deliverables (remote, still pending):
 
 - Push authorized branch and execute remote `containers` job on GitHub runners.
 - Prove real build + `docker image save` + Syft SBOM + Trivy JSON + policy evaluator on all three production images.
@@ -232,6 +241,7 @@ Exit gate:
 
 - Remote `containers` job passes with no skipped scan step.
 - S3c marked **Verified** only after this gate passes.
+- R1a overall **not Complete/Verified** until remote proof succeeds.
 
 #### R1b — Full remote quality gate
 
@@ -332,7 +342,7 @@ For changes involving models or migrations, additionally require upgrade → dow
 
 ## 8. Decision checkpoints
 
-The next implementation task is **R1a remote supply-chain verification**.
+The next step is **authorized branch push** for R1a remote `containers` verification (S3c still **Remote verification pending**).
 
 After S3c is verified remotely, reassess whether any finding changes the S4 design. After R2, decide whether controlled Amazon acceptance is authorized. After R3, decide whether the next product investment is product search, account lifecycle, or measured scale/operations work.
 

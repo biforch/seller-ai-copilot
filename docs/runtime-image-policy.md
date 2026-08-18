@@ -50,7 +50,17 @@ Access date for all checks below: **2026-08-18**.
 | Decision | **Upgrade** all frontend runtime references from Node 20 to **Node 24** |
 | Next mandatory review | **2026-10-20** (Node 24 enters Maintenance LTS) or earlier if Node 24 status changes |
 
-Repository runtime contract: `frontend/.nvmrc` = `24`, `package.json` / lockfile root `engines.node` = `>=24 <25`, `.npmrc` `engine-strict=true`, CI `node-version: "24"`.
+Repository runtime contract: `frontend/.nvmrc` = `24.19.0`, `package.json` `engines.node` = `>=24.19.0 <25`, `engines.npm` = `>=11.17.0 <12`, `packageManager` = `npm@11.17.0`, lockfile root mirrors `engines`, `.npmrc` `engine-strict=true`, CI `node-version: "24.19.0"`. The explicit toolchain validator pins **exact** Node **v24.19.0** and npm **11.17.0** for reproducible gates; `engines` expresses compatible ranges only.
+
+### npm optional dependency reifier (R1a)
+
+| Item | Value |
+| --- | --- |
+| Issue class | `NPM_TOOLCHAIN_VERSION_MISMATCH` (not lockfile graph defect) |
+| npm CLI bug | npm **11.6.0–11.12.1** incorrectly reifies inert optional shared deps such as `@emnapi/runtime` |
+| Fix | npm **[PR #9221](https://github.com/npm/cli/pull/9221)** in **11.13.0+**; bundled npm in pinned Node **24.19.0** image is **11.17.0** |
+| Lockfile | Inert optional `@emnapi/runtime` / `@img/sharp-wasm32` entries remain **legal** and must not be deleted |
+| Prohibited workarounds | direct `@emnapi/runtime` dependency, extraneous allowlists, lock entry deletion, `omit=optional`, npm prune/dedupe for masking |
 
 ### Python
 
