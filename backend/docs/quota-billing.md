@@ -33,7 +33,7 @@ When LLM returns successfully but Tx2 fails (score, payload, product, generation
 5. Request becomes `failed` with `error_code=GENERATION_FINALIZE_FAILED`
 6. **No automatic LLM retry**; same idempotency key returns the failed state (409)
 
-> **Rule:** Provider-reported tokens are never billed unless the generation record and Tx2 succeed.  
+> **Rule:** Provider-reported tokens are never billed unless the generation record and Tx2 succeed.
 > We do not fabricate usage on finalize failure even when `tokens_used` was returned by the LLM.
 
 ## LLM failure (before finalize)
@@ -42,7 +42,7 @@ When LLM returns successfully but Tx2 fails (score, payload, product, generation
 
 ## Overage & new requests
 
-After overage, `used_tokens + reserved_tokens` may equal or exceed `monthly_tokens`.  
+After overage, `used_tokens + reserved_tokens` may equal or exceed `monthly_tokens`.
 The next `reserve_tokens()` call sees `available_tokens <= 0` and returns **`403 QUOTA_EXCEEDED`**.
 
 ## Billing period reset
