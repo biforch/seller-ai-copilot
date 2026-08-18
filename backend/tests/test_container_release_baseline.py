@@ -680,9 +680,10 @@ def test_backend_production_dockerfile_removes_build_tooling_from_runtime() -> N
 
     assert "pip install --no-cache-dir --prefix=/install -r requirements.txt" in builder_block
     assert "python3.11 -m pip check" in builder_block
-    assert "python3.11 -m pip uninstall -y jaraco.context wheel" in runner_block
+    assert "python3.11 -m pip uninstall -y jaraco.context wheel setuptools" in runner_block
     assert "python3.11 -m pip uninstall -y pip" in runner_block
-    assert "setuptools" not in runner_block.split("pip uninstall", 1)[1].split("validate_backend_runtime_environment", 1)[0]
+    uninstall_block = runner_block.split("pip uninstall", 1)[1].split("validate_backend_runtime_environment", 1)[0]
+    assert "setuptools" in uninstall_block
     assert "scripts/validate_backend_runtime_environment.py" in runner_block
     assert "PYTHONPATH=/app" in runner_block
     assert "USER app" in runner_block

@@ -16,6 +16,7 @@ SUCCESS_MESSAGE = "backend runtime environment validation passed"
 FORBIDDEN_DISTRIBUTIONS: frozenset[str] = frozenset(
     {
         "pip",
+        "setuptools",
         "wheel",
         "jaraco.context",
     }
@@ -23,6 +24,8 @@ FORBIDDEN_DISTRIBUTIONS: frozenset[str] = frozenset(
 FORBIDDEN_MODULES: frozenset[str] = frozenset(
     {
         "pip",
+        "setuptools",
+        "pkg_resources",
         "wheel",
         "jaraco.context",
     }
