@@ -37,6 +37,7 @@ RUNBOOK = REPO_ROOT / "docs" / "rc-deployment-runbook.md"
 BACKEND_DOCKERIGNORE = REPO_ROOT / "backend" / ".dockerignore"
 FRONTEND_DOCKERIGNORE = REPO_ROOT / "frontend" / ".dockerignore"
 VALIDATOR_SCRIPT = BACKEND_ROOT / "scripts" / "validate_rc_environment.py"
+QUALITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "quality.yml"
 RC_COMPOSE_PROJECT = "sellerai_rc"
 
 
@@ -345,6 +346,33 @@ def test_env_rc_example_placeholders_are_rejected_by_validator() -> None:
 def test_next_config_enables_standalone_output() -> None:
     content = _read(REPO_ROOT / "frontend" / "next.config.js")
     assert 'output: "standalone"' in content or "output: 'standalone'" in content
+    assert "ignoreBuildErrors" not in content
+    assert "ignoreDuringBuilds" not in content
+
+
+def test_frontend_build_has_no_remote_google_font_dependency() -> None:
+    layout = _read(REPO_ROOT / "frontend" / "app" / "layout.tsx")
+    assert "next/font/google" not in layout
+    assert "fonts.googleapis.com" not in layout
+
+
+def test_quality_workflow_runs_backend_and_frontend_release_gates() -> None:
+    content = _read(QUALITY_WORKFLOW)
+    assert "permissions:\n  contents: read" in content
+    assert "postgres:16-alpine" in content
+    assert "sellerai_migration_test" in content
+    assert "ruff check app tests scripts" in content
+    assert "mypy app scripts" in content
+    assert "pytest -q" in content
+    assert "npx tsc --noEmit" in content
+    assert "npm run build" in content
+    assert "pull_request:" in content
+    assert "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683" in content
+    assert "actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38" in content
+    assert "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020" in content
+    assert "actions/checkout@v" not in content
+    assert "actions/setup-python@v" not in content
+    assert "actions/setup-node@v" not in content
 
 
 def test_api_client_uses_relative_base_without_double_api_prefix() -> None:

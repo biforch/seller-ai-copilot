@@ -10,6 +10,8 @@ Development workflow (`docker-compose.yml`, dev Dockerfiles) is unchanged.
 - **Do not** reuse production database credentials or real LLM API keys
 - **Do not** commit `.env.rc` (copy from `.env.rc.example` locally only)
 - Port `8080` (or your `RC_HTTP_PORT`) available on `127.0.0.1`
+- The repository Quality Gate must pass: backend static/full tests and frontend
+  TypeScript/production build. Do not promote a commit with a failed or skipped job.
 
 ## 2. Create local RC env file
 
