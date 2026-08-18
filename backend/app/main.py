@@ -1,10 +1,12 @@
 import logging
 
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import (
@@ -31,6 +33,7 @@ from app.core.exceptions import (
 )
 from app.core.rate_limit import limiter
 from app.core.response import success_response
+from app.database.session import get_db
 from app.integrations.amazon.exceptions import AmazonError
 
 logging.basicConfig(
@@ -221,6 +224,18 @@ async def health_check():
     return success_response(
         data={
             "status": "healthy",
+            "service": "SellerAI Copilot API",
+        }
+    )
+
+
+@app.get("/health/ready")
+def readiness_check(db: Session = Depends(get_db)):
+    db.execute(text("SELECT 1"))
+    db.rollback()
+    return success_response(
+        data={
+            "status": "ready",
             "service": "SellerAI Copilot API",
         }
     )

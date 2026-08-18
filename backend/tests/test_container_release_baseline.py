@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import re
@@ -90,6 +91,26 @@ def _valid_rc_env(**overrides: str) -> dict[str, str]:
     return env
 
 
+def _amazon_enabled_rc_env(**overrides: str) -> dict[str, str]:
+    key = base64.urlsafe_b64encode(b"k" * 32).decode().rstrip("=")
+    pepper = base64.urlsafe_b64encode(b"p" * 32).decode().rstrip("=")
+    env = _valid_rc_env(
+        AMAZON_SP_API_ENABLED="true",
+        AMAZON_SP_API_ENDPOINT_MODE="production",
+        AMAZON_SP_API_REGION="na",
+        AMAZON_LWA_CLIENT_ID="amzn-client-id-placeholder-for-rc",
+        AMAZON_LWA_CLIENT_SECRET="amzn-client-secret-placeholder-for-rc",
+        AMAZON_LWA_TOKEN_URL="https://api.amazon.com/auth/o2/token",
+        AMAZON_SP_API_USER_AGENT="SellerAI-Copilot/1.0.0 (Language=Python)",
+        AMAZON_TOKEN_ACTIVE_KEY_VERSION="1",
+        AMAZON_TOKEN_KEY_V1=key,
+        AMAZON_TOKEN_FINGERPRINT_PEPPER=pepper,
+        AMAZON_OAUTH_ENABLED="false",
+    )
+    env.update(overrides)
+    return env
+
+
 def _write_env_file(path: Path, env: dict[str, str]) -> None:
     lines = [f"{key}={value}" for key, value in env.items()]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -165,6 +186,7 @@ def test_backend_production_dockerfile_exposes_healthcheck_and_workers() -> None
     content = _read(BACKEND_DOCKERFILE_PROD)
     assert "HEALTHCHECK" in content
     assert "/health" in content
+    assert "/health/ready" in content
     assert "--workers" in content
     assert "8000" in content
     assert "scripts" in content
@@ -257,6 +279,23 @@ def test_rc_compose_requires_critical_env_vars() -> None:
         assert f"${{{var}:?" in content, f"missing required env guard for {var}"
 
 
+def test_rc_compose_passes_amazon_capability_configuration_explicitly() -> None:
+    content = _read(RC_COMPOSE)
+    for var in (
+        "AMAZON_SP_API_ENABLED",
+        "AMAZON_SP_API_ENDPOINT_MODE",
+        "AMAZON_LWA_CLIENT_ID",
+        "AMAZON_LWA_CLIENT_SECRET",
+        "AMAZON_TOKEN_KEY_V1",
+        "AMAZON_TOKEN_FINGERPRINT_PEPPER",
+        "AMAZON_OAUTH_ENABLED",
+        "AMAZON_OAUTH_REDIRECT_URI",
+    ):
+        assert len(re.findall(rf"^\s+{var}:", content, flags=re.MULTILINE)) == 2
+    assert "backend/.env" not in content
+    assert "/health/ready" in content
+
+
 def test_dockerignore_excludes_sensitive_and_review_artifacts() -> None:
     required_snippets = (
         ".env",
@@ -326,7 +365,7 @@ def test_nginx_rc_proxy_preserves_api_prefix() -> None:
 def test_runbook_documents_403_and_container_pg_dump() -> None:
     runbook = _read(RUNBOOK)
     assert "403" in runbook
-    assert "401" not in runbook.split("Non-LLM smoke test")[1].split("## 10.")[0]
+    assert "401" not in runbook.split("Non-LLM smoke test")[1].split("## 11.")[0]
     assert "sh -c 'pg_dump -U \"$POSTGRES_USER\" \"$POSTGRES_DB\"'" in runbook
     assert 'docker volume inspect sellerai_rc_postgres_data' in runbook
     assert "com.docker.compose.project=sellerai_rc" in runbook
@@ -353,6 +392,48 @@ def test_validator_accepts_valid_rc_environment() -> None:
     result = _run_validator_main(_valid_rc_env())
     assert result.returncode == 0
     assert result.stdout.strip() == SUCCESS_MESSAGE
+
+
+def test_validator_accepts_secure_amazon_sp_api_profile() -> None:
+    validate_rc_environment(_amazon_enabled_rc_env())
+
+
+def test_validator_accepts_secure_amazon_oauth_profile() -> None:
+    validate_rc_environment(
+        _amazon_enabled_rc_env(
+            AMAZON_OAUTH_ENABLED="true",
+            AMAZON_SP_API_APPLICATION_ID="amzn1.sp.solution.test",
+            AMAZON_OAUTH_REDIRECT_URI="https://rc.example.test/api/v1/amazon/oauth/callback",
+            AMAZON_OAUTH_FRONTEND_SUCCESS_URL="https://rc.example.test/amazon/oauth/success",
+            AMAZON_OAUTH_FRONTEND_ERROR_URL="https://rc.example.test/amazon/oauth/error",
+            AMAZON_OAUTH_STATE_TTL_SECONDS="600",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "reason_fragment"),
+    [
+        ({"AMAZON_SP_API_ENDPOINT_MODE": "sandbox"}, "requires AMAZON_SP_API_ENDPOINT_MODE=production"),
+        ({"AMAZON_LWA_CLIENT_SECRET": ""}, "AMAZON_LWA_CLIENT_SECRET is required"),
+        ({"AMAZON_TOKEN_ACTIVE_KEY_VERSION": "0"}, "must be 1"),
+        ({"AMAZON_TOKEN_KEY_V1": "not-a-key"}, "base64url 32-byte"),
+        ({"AMAZON_TOKEN_FINGERPRINT_PEPPER": "not-a-pepper"}, "base64url 32-byte"),
+        (
+            {"AMAZON_LWA_TOKEN_URL": "https://user:secret@api.amazon.com/auth/o2/token"},
+            "official Amazon endpoint",
+        ),
+        (
+            {"AMAZON_LWA_TOKEN_URL": "https://api.amazon.com/auth/o2/token?target=other"},
+            "official Amazon endpoint",
+        ),
+        ({"AMAZON_OAUTH_ENABLED": "maybe"}, "must be true or false"),
+    ],
+)
+def test_validator_rejects_unsafe_amazon_profile(overrides, reason_fragment) -> None:
+    with pytest.raises(RCEnvironmentError) as exc_info:
+        validate_rc_environment(_amazon_enabled_rc_env(**overrides))
+    assert reason_fragment in exc_info.value.reason
 
 
 @pytest.mark.parametrize(

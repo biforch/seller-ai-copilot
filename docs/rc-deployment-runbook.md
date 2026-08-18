@@ -24,6 +24,9 @@ Edit `.env.rc` and replace **all** placeholders before starting:
 - `DATABASE_URL` (username and password must match `POSTGRES_USER` / `POSTGRES_PASSWORD`; percent-encode reserved characters in the URL only)
 - `JWT_SECRET_KEY` (at least 32 characters)
 
+Amazon remains disabled in the default RC profile. Do not add Amazon secrets unless
+you are intentionally running the capability-gated Amazon rehearsal in section 4.
+
 Never commit this file.
 
 ## 3. Generate RC-only secrets
@@ -50,7 +53,23 @@ If the password contains reserved URL characters (`@`, `:`, `/`, `%`, etc.), per
 
 Staging mode requires at least 32 characters for JWT and rejects known weak defaults.
 
-## 4. Build images
+## 4. Optional Amazon capability profile
+
+Keep `AMAZON_SP_API_ENABLED=false` and `AMAZON_OAUTH_ENABLED=false` for the default
+non-Amazon smoke test. To rehearse Amazon connectivity, set SP-API enabled with
+`AMAZON_SP_API_ENDPOINT_MODE=production`, official LWA credentials, and runtime-generated
+32-byte base64url values for `AMAZON_TOKEN_KEY_V1` and
+`AMAZON_TOKEN_FINGERPRINT_PEPPER`. Never reuse production encryption material in RC.
+
+OAuth additionally requires `AMAZON_OAUTH_ENABLED=true`, the Seller Partner application
+ID, and externally reachable HTTPS redirect/success/error URLs. The localhost-only HTTP
+nginx binding is not a valid Amazon OAuth callback. Place an approved HTTPS ingress in
+front of RC and set `CORS_ORIGINS` to that exact origin before enabling OAuth.
+
+The migration safety gate validates these requirements before Alembic runs. With Amazon
+disabled, empty Amazon credentials remain valid and no Amazon network call is made.
+
+## 5. Build images
 
 ```bash
 docker compose -p sellerai_rc \
@@ -64,7 +83,7 @@ Images:
 - `sellerai-backend-prod:rc` (from `backend/Dockerfile.prod`)
 - `sellerai-frontend-prod:rc` (from `frontend/Dockerfile.prod`)
 
-## 5. Validate Compose config
+## 6. Validate Compose config
 
 ```bash
 docker compose -p sellerai_rc \
@@ -75,7 +94,7 @@ docker compose -p sellerai_rc \
 
 Confirm required variables resolve and services are `postgres`, `migrate`, `backend`, `frontend`, `nginx`.
 
-## 6. Start stack
+## 7. Start stack
 
 ```bash
 docker compose -p sellerai_rc \
@@ -86,7 +105,7 @@ docker compose -p sellerai_rc \
 
 Project name `sellerai_rc` isolates containers, network, and volumes from dev `docker-compose.yml`.
 
-## 7. Migration one-shot behavior and RC safety gate
+## 8. Migration one-shot behavior and RC safety gate
 
 The `migrate` service:
 
@@ -105,12 +124,13 @@ Migrations are **not** run inside each backend replica. Check logs:
 docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml logs migrate
 ```
 
-## 8. Health checks
+## 9. Health checks
 
 | Target | Command / URL |
 |--------|----------------|
 | Nginx (public) | `curl -fsS http://127.0.0.1:8080/health` |
-| Backend (via nginx) | `curl -fsS http://127.0.0.1:8080/api/v1/...` or `/health` |
+| Backend liveness | `curl -fsS http://127.0.0.1:8080/health` |
+| Backend DB readiness | `curl -fsS http://127.0.0.1:8080/health/ready` |
 | OpenAPI | `curl -fsS http://127.0.0.1:8080/openapi.json` |
 | Frontend login | `curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/login` |
 
@@ -120,7 +140,7 @@ Container health:
 docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml ps
 ```
 
-## 9. Non-LLM smoke test (manual)
+## 10. Non-LLM smoke test (manual)
 
 Access via **nginx** at `http://127.0.0.1:8080` (browser same-origin; API base is `/api/v1`).
 
@@ -141,7 +161,7 @@ Suggested checks (no Generate / LLM calls):
 
 **Do not** invoke listing Generate in RC smoke (requires real LLM).
 
-## 10. Logs
+## 11. Logs
 
 ```bash
 docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml logs -f nginx
@@ -152,7 +172,7 @@ docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml logs m
 
 Redact passwords and JWT before sharing logs.
 
-## 11. Stop stack
+## 12. Stop stack
 
 ```bash
 docker compose -p sellerai_rc \
@@ -163,7 +183,7 @@ docker compose -p sellerai_rc \
 
 Add `--volumes` only when you intend to destroy RC database data (see below).
 
-## 12. Remove RC volumes only
+## 13. Remove RC volumes only
 
 With project `-p sellerai_rc` and volume key `postgres_data`, Docker Compose creates a project-scoped volume named **`sellerai_rc_postgres_data`**.
 
@@ -198,11 +218,11 @@ This removes **only** volumes declared in `docker-compose.rc.yml` for project `s
 
 RC cleanup must use label-verified `docker compose ... down --volumes` only.
 
-## 13. Forbidden cleanup
+## 14. Forbidden cleanup
 
 **Never** run `docker system prune` on shared machines — it can delete unrelated images, containers, and volumes.
 
-## 14. Data backup principles
+## 15. Data backup principles
 
 Before schema changes or RC teardown with data you might need:
 
@@ -214,7 +234,7 @@ docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml \
 
 Store dumps outside the repo. **Do not** commit backup files. RC databases are disposable (`*_test` naming); production backups follow separate policy.
 
-## 15. Migration rollback principles
+## 16. Migration rollback principles
 
 1. **Backup first** (pg_dump or snapshot).
 2. Alembic `downgrade` is risky if migrations drop columns/tables or rewrite data — review each revision's `downgrade()` before running.
@@ -222,7 +242,7 @@ Store dumps outside the repo. **Do not** commit backup files. RC databases are d
 4. Do not downgrade production DB casually to match an old app without a written plan.
 5. RC uses the same migration chain as dev; migration guards for destructive tests are pytest-only — normal `alembic upgrade head` is unaffected.
 
-## 16. Application image rollback
+## 17. Application image rollback
 
 ```bash
 # Tag images before deploy, e.g. sellerai-backend-prod:rc-20250814
@@ -235,7 +255,7 @@ docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml up -d 
 
 Database schema must remain compatible with the rolled-back application version.
 
-## 17. Stale generation reconcile (manual)
+## 18. Stale generation reconcile (manual)
 
 There is no cron in RC. To list stale `processing` generation requests:
 
@@ -248,25 +268,26 @@ Or from host with matching `DATABASE_URL` pointed at RC Postgres (127.0.0.1 port
 
 This script **detects only** — it does not retry LLM calls.
 
-## 18. Known limitations
+## 19. Known limitations
 
 | Area | RC behavior |
 |------|-------------|
 | LLM / Generate | Not exercised in RC smoke; placeholder `OPENAI_API_KEY` only satisfies config |
 | Rate limiting | Post-login limits still keyed by client IP |
 | Trusted proxy | RC nginx sets `X-Forwarded-For` from `$remote_addr` only; full trusted-proxy design pending staging |
-| SP-API / Published | Not included |
+| SP-API | Capability-gated and disabled by default; live rehearsal requires explicit secrets |
+| Amazon publishing | Not enabled; generated content remains a review proposal |
 | Redis | Not deployed — config default unused by current business code |
 | Debug ports | Postgres/backend/frontend are not published; nginx binds `127.0.0.1:8080` only |
 
-## 19. Security reminders
+## 20. Security reminders
 
 - Do **not** commit `.env.rc`
 - Do **not** reuse RC credentials in staging/production
 - Do **not** embed secrets in `NEXT_PUBLIC_*` build args
 - Rotate JWT and DB password if `.env.rc` was ever exposed
 
-## 20. Local debug (optional)
+## 21. Local debug (optional)
 
 To attach a debugger to backend temporarily, publish backend on localhost only by adding under `backend` in a **local override file** (not committed):
 

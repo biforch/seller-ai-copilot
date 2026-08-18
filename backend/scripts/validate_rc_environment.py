@@ -6,6 +6,8 @@ It does not replace staging/production deployment approval or migration guards.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import ipaddress
 import os
 import sys
@@ -32,6 +34,91 @@ def _require(env: dict[str, str], key: str) -> str:
     if not value:
         raise RCEnvironmentError(f"{key} is required")
     return value
+
+
+def _strict_bool(env: dict[str, str], key: str, *, default: bool = False) -> bool:
+    raw = env.get(key, "true" if default else "false").strip().lower()
+    if raw not in {"true", "false"}:
+        raise RCEnvironmentError(f"{key} must be true or false")
+    return raw == "true"
+
+
+def _validate_https_url(env: dict[str, str], key: str) -> None:
+    value = _require(env, key)
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RCEnvironmentError(f"{key} must be an absolute HTTPS URL")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise RCEnvironmentError(f"{key} must not include userinfo, query, or fragment")
+
+
+def _decode_32_byte_base64url(value: str) -> None:
+    padding = "=" * (-len(value) % 4)
+    try:
+        raw = base64.b64decode(value + padding, altchars=b"-_", validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("invalid base64url value") from None
+    if len(raw) != 32:
+        raise ValueError("value must decode to 32 bytes")
+
+
+def _validate_amazon_configuration(env: dict[str, str]) -> None:
+    sp_api_enabled = _strict_bool(env, "AMAZON_SP_API_ENABLED")
+    oauth_enabled = _strict_bool(env, "AMAZON_OAUTH_ENABLED")
+    if oauth_enabled and not sp_api_enabled:
+        raise RCEnvironmentError(
+            "AMAZON_OAUTH_ENABLED requires AMAZON_SP_API_ENABLED=true"
+        )
+    if not sp_api_enabled:
+        return
+
+    if _require(env, "AMAZON_SP_API_ENDPOINT_MODE") != "production":
+        raise RCEnvironmentError(
+            "enabled Amazon SP-API requires AMAZON_SP_API_ENDPOINT_MODE=production"
+        )
+    if _require(env, "AMAZON_SP_API_REGION") not in {"na", "eu", "fe"}:
+        raise RCEnvironmentError("AMAZON_SP_API_REGION must be na, eu, or fe")
+    _require(env, "AMAZON_LWA_CLIENT_ID")
+    _require(env, "AMAZON_LWA_CLIENT_SECRET")
+    _require(env, "AMAZON_SP_API_USER_AGENT")
+    token_url = _require(env, "AMAZON_LWA_TOKEN_URL")
+    parsed_token_url = urlparse(token_url)
+    if (
+        parsed_token_url.scheme != "https"
+        or parsed_token_url.hostname != "api.amazon.com"
+        or parsed_token_url.path != "/auth/o2/token"
+        or parsed_token_url.username
+        or parsed_token_url.password
+        or parsed_token_url.query
+        or parsed_token_url.fragment
+    ):
+        raise RCEnvironmentError("AMAZON_LWA_TOKEN_URL must be the official Amazon endpoint")
+
+    if _require(env, "AMAZON_TOKEN_ACTIVE_KEY_VERSION") != "1":
+        raise RCEnvironmentError("AMAZON_TOKEN_ACTIVE_KEY_VERSION must be 1")
+    for key in ("AMAZON_TOKEN_KEY_V1", "AMAZON_TOKEN_FINGERPRINT_PEPPER"):
+        try:
+            _decode_32_byte_base64url(_require(env, key))
+        except ValueError:
+            raise RCEnvironmentError(f"{key} must be a base64url 32-byte value") from None
+
+    if not oauth_enabled:
+        return
+    _require(env, "AMAZON_SP_API_APPLICATION_ID")
+    for key in (
+        "AMAZON_OAUTH_REDIRECT_URI",
+        "AMAZON_OAUTH_FRONTEND_SUCCESS_URL",
+        "AMAZON_OAUTH_FRONTEND_ERROR_URL",
+    ):
+        _validate_https_url(env, key)
+    if env.get("AMAZON_OAUTH_CONSENT_VERSION", "").strip() not in {"", "beta"}:
+        raise RCEnvironmentError("AMAZON_OAUTH_CONSENT_VERSION must be empty or beta")
+    try:
+        ttl = int(_require(env, "AMAZON_OAUTH_STATE_TTL_SECONDS"))
+    except ValueError:
+        raise RCEnvironmentError("AMAZON_OAUTH_STATE_TTL_SECONDS must be 300-900") from None
+    if ttl < 300 or ttl > 900:
+        raise RCEnvironmentError("AMAZON_OAUTH_STATE_TTL_SECONDS must be 300-900")
 
 
 def _validate_postgres_db(postgres_db: str) -> None:
@@ -178,6 +265,8 @@ def validate_rc_environment(environ: dict[str, str] | None = None) -> None:
 
     if url_password != postgres_password:
         raise RCEnvironmentError("DATABASE_URL password must match POSTGRES_PASSWORD")
+
+    _validate_amazon_configuration(env)
 
 
 def main() -> int:
