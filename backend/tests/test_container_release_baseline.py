@@ -640,6 +640,13 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "scan-summary.json" in upload_block
     assert "timeout-minutes: 45" in content
     assert "SYFT_CHECK_FOR_APP_UPDATE=false" in content
+    assert "docker-archive:/input/backend.tar" in content
+    assert "docker-archive:/input/frontend.tar" in content
+    assert "docker-archive:/input/nginx.tar" in content
+    assert "file:/input/" not in content.split("Generate CycloneDX SBOMs", 1)[1].split("Validate SBOM artifacts", 1)[0]
+    assert "cyclonedx-json@1.6=/output/backend.cdx.json" in content
+    assert "cyclonedx-json@1.6=/output/frontend.cdx.json" in content
+    assert "cyclonedx-json@1.6=/output/nginx.cdx.json" in content
     assert "backend: trivy scan command failed" in content
     assert "frontend: trivy scan command failed" in content
     assert "nginx: trivy scan command failed" in content

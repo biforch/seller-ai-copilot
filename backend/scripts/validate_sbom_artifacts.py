@@ -6,7 +6,11 @@ import json
 import re
 import sys
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT_CANARY = str(REPO_ROOT.resolve())
 
 REQUIRED_FILES = ("backend.cdx.json", "frontend.cdx.json", "nginx.cdx.json")
 ALLOWED_SPEC_VERSIONS = frozenset({"1.4", "1.5", "1.6"})
@@ -28,19 +32,105 @@ SECRET_VALUE_PATTERNS = (
 SENSITIVE_KEY_PATTERN = re.compile(
     r"(?i)(password|secret|token|api[_-]?key|authorization|credential|oauth|jwt|private[_-]?key)$"
 )
-ABSOLUTE_PATH_PATTERN = re.compile(
-    r"(/Users/|/home/|[A-Za-z]:\\|/home/runner/work/|\$\{RUNNER_TEMP\})"
-)
 URL_USERINFO_PATTERN = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")
 CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
+HOST_WORKSPACE_PATTERNS = (
+    re.compile(r"^/home/runner/work/"),
+    re.compile(r"^/github/workspace/"),
+    re.compile(r"^/Users/[^/]+/"),
+    re.compile(r"^/private/var/"),
+    re.compile(r"^\$\{RUNNER_TEMP\}"),
+    re.compile(r"^[A-Za-z]:\\Users\\[^\\]+\\"),
+    re.compile(r"^[A-Za-z]:\\actions-runner\\"),
+    re.compile(r"^D:\\a\\[^\\]+\\[^\\]+\\"),
+)
+SCANNER_MOUNT_PATTERNS = (
+    re.compile(r"^/input/[^/]+\.tar$"),
+    re.compile(r"^/output/[^/]+\.cdx\.json$"),
+    re.compile(r"^/root/\.cache/trivy/"),
+)
+CONTAINER_ROOTFS_PREFIXES = (
+    "/usr/",
+    "/lib/",
+    "/lib64/",
+    "/bin/",
+    "/sbin/",
+    "/etc/",
+    "/opt/",
+    "/app/",
+    "/var/",
+    "/tmp/",
+    "/root/",
+    "/srv/",
+    "/run/",
+    "/proc/",
+    "/sys/",
+    "/dev/",
+    "/workspace/",
+)
+CONTAINER_HOME_PREFIXES = (
+    "/home/node",
+    "/home/nextjs",
+    "/home/nginx",
+    "/home/app",
+)
+
 SUCCESS_MESSAGE = "SBOM artifact validation passed"
+
+
+class ArtifactPathKind(str, Enum):
+    NOT_A_PATH = "not_a_path"
+    CONTAINER_ROOTFS = "container_rootfs"
+    SCANNER_MOUNT = "scanner_mount"
+    HOST_WORKSPACE = "host_workspace"
 
 
 @dataclass(frozen=True)
 class Finding:
     filename: str
     reason: str
+
+
+def _looks_like_absolute_path(value: str) -> bool:
+    if value.startswith("/"):
+        return True
+    if re.match(r"^[A-Za-z]:\\", value):
+        return True
+    return value.startswith("${RUNNER_TEMP}")
+
+
+def classify_artifact_path(value: str, *, repo_canary: str = REPO_ROOT_CANARY) -> ArtifactPathKind:
+    if not _looks_like_absolute_path(value):
+        return ArtifactPathKind.NOT_A_PATH
+
+    normalized_repo = repo_canary.rstrip("/")
+    if value == normalized_repo or value.startswith(f"{normalized_repo}/"):
+        return ArtifactPathKind.HOST_WORKSPACE
+
+    for pattern in HOST_WORKSPACE_PATTERNS:
+        if pattern.search(value):
+            return ArtifactPathKind.HOST_WORKSPACE
+
+    for pattern in SCANNER_MOUNT_PATTERNS:
+        if pattern.match(value):
+            return ArtifactPathKind.SCANNER_MOUNT
+
+    for prefix in CONTAINER_ROOTFS_PREFIXES:
+        if value.startswith(prefix):
+            return ArtifactPathKind.CONTAINER_ROOTFS
+
+    for prefix in CONTAINER_HOME_PREFIXES:
+        if value == prefix or value.startswith(f"{prefix}/"):
+            return ArtifactPathKind.CONTAINER_ROOTFS
+
+    if value.startswith("/home/") and not value.startswith("/home/runner/"):
+        return ArtifactPathKind.CONTAINER_ROOTFS
+
+    if re.match(r"^/[a-zA-Z0-9._@+-]+(/[a-zA-Z0-9._@+-]+)*$", value):
+        return ArtifactPathKind.CONTAINER_ROOTFS
+
+    return ArtifactPathKind.HOST_WORKSPACE
 
 
 def _validate_component(component: object, filename: str, index: int) -> list[Finding]:
@@ -83,7 +173,7 @@ def _inspect_json_value(
             findings.append(Finding(filename, "artifact contains oversized string value"))
         if CONTROL_CHAR_PATTERN.search(value):
             findings.append(Finding(filename, "artifact contains control characters"))
-        if ABSOLUTE_PATH_PATTERN.search(value):
+        if classify_artifact_path(value) == ArtifactPathKind.HOST_WORKSPACE:
             findings.append(Finding(filename, "artifact contains absolute host path"))
         if URL_USERINFO_PATTERN.search(value):
             findings.append(Finding(filename, "artifact contains URL userinfo"))

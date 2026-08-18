@@ -77,7 +77,9 @@ Each SBOM file must be CycloneDX JSON with:
 - `specVersion` in allowlist: **1.4**, **1.5**, **1.6**
 - Bounded recursive structure (metadata, components, properties, evidence, externalReferences, nested components)
 - Each component requires `name`; optional `version` / `purl` with correct types
-- No credentials, absolute host paths, runner workspace paths, URL userinfo, or control characters
+- No credentials, host workspace paths (runner checkout, macOS `/Users/...`, Windows workspace), URL userinfo, or control characters
+- OCI/rootfs absolute paths inside scanned images (for example `/usr/...`, `/etc/...`, `/app/...`, container user homes such as `/home/node/...`) are allowed when they do not match host-workspace patterns
+- Scanner mount metadata paths (`/input/*.tar`, `/output/*.cdx.json`) are allowed only as fixed scanner-internal references, not expanded runner temp paths
 
 Validator: `backend/scripts/validate_sbom_artifacts.py` (regular files only; symlinks rejected).
 

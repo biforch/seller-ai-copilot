@@ -14,9 +14,12 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from scripts.validate_sbom_artifacts import (  # noqa: E402
+    ALLOWED_SPEC_VERSIONS,
     MAX_COMPONENTS,
     MAX_FILE_BYTES,
     REQUIRED_FILES,
+    ArtifactPathKind,
+    classify_artifact_path,
     main,
     validate_sbom_directory,
     validate_sbom_file,
@@ -111,6 +114,123 @@ def test_absolute_host_path_fails(tmp_path: Path) -> None:
     (tmp_path / "backend.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
     findings = validate_sbom_file(tmp_path / "backend.cdx.json")
     assert any("absolute host path" in finding.reason for finding in findings)
+
+
+@pytest.mark.parametrize(
+    ("path_value", "expected_kind"),
+    [
+        ("/usr/lib/python3.12/site-packages/pkg", ArtifactPathKind.CONTAINER_ROOTFS),
+        ("/etc/ssl/certs/ca.pem", ArtifactPathKind.CONTAINER_ROOTFS),
+        ("/app/server.js", ArtifactPathKind.CONTAINER_ROOTFS),
+        (
+            "/usr/lib/node_modules/example/evidence/nested/path",
+            ArtifactPathKind.CONTAINER_ROOTFS,
+        ),
+        ("/home/runner/work/seller-ai-copilot/seller-ai-copilot/backend", ArtifactPathKind.HOST_WORKSPACE),
+        ("/github/workspace/frontend/package.json", ArtifactPathKind.HOST_WORKSPACE),
+        ("/Users/dev/project/file.txt", ArtifactPathKind.HOST_WORKSPACE),
+        ("/private/var/folders/abc/T/runner-workspace", ArtifactPathKind.HOST_WORKSPACE),
+        (r"D:\a\seller-ai-copilot\seller-ai-copilot\backend", ArtifactPathKind.HOST_WORKSPACE),
+        ("/input/backend.tar", ArtifactPathKind.SCANNER_MOUNT),
+        ("pkg:npm/example@1.0.0", ArtifactPathKind.NOT_A_PATH),
+    ],
+)
+def test_classify_artifact_path(path_value: str, expected_kind: ArtifactPathKind) -> None:
+    assert classify_artifact_path(path_value) == expected_kind
+
+
+def test_repo_absolute_path_canary_rejected_without_echo(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    payload = _minimal_sbom()
+    payload["metadata"] = {"properties": [{"value": str(repo_root / "backend" / "app")}]}
+    (tmp_path / "backend.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
+    stderr_buffer = io.StringIO()
+    with redirect_stderr(stderr_buffer):
+        exit_code = main([str(tmp_path)])
+    output = stderr_buffer.getvalue()
+    assert exit_code == 1
+    assert any("absolute host path" in finding.reason for finding in validate_sbom_directory(tmp_path)[0])
+    assert str(repo_root) not in output
+
+
+@pytest.mark.parametrize(
+    "container_path",
+    [
+        "/usr/local/bin/node",
+        "/etc/passwd",
+        "/app/.next/server.js",
+        "/home/node/.npmrc",
+        "/home/nextjs/app/server.js",
+    ],
+)
+def test_container_rootfs_paths_allowed(tmp_path: Path, container_path: str) -> None:
+    payload = _minimal_sbom()
+    payload["components"] = [
+        {
+            "name": "example",
+            "version": "1.0.0",
+            "evidence": {"occurrences": [{"location": container_path}]},
+        }
+    ]
+    (tmp_path / "backend.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
+    findings = validate_sbom_file(tmp_path / "backend.cdx.json")
+    assert not any("absolute host path" in finding.reason for finding in findings)
+
+
+@pytest.mark.parametrize(
+    "host_path",
+    [
+        "/home/runner/work/org/repo/backend",
+        "/github/workspace/frontend/package.json",
+        "/Users/alice/project",
+        "/private/var/tmp/runner",
+        r"D:\a\org\repo\frontend",
+    ],
+)
+def test_host_workspace_paths_rejected(tmp_path: Path, host_path: str) -> None:
+    payload = _minimal_sbom()
+    payload["metadata"] = {"properties": [{"value": host_path}]}
+    (tmp_path / "backend.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
+    findings = validate_sbom_file(tmp_path / "backend.cdx.json")
+    assert any("absolute host path" in finding.reason for finding in findings)
+
+
+def test_scanner_mount_metadata_allowed(tmp_path: Path) -> None:
+    payload = _minimal_sbom()
+    payload["metadata"] = {
+        "component": {
+            "type": "container",
+            "name": "backend",
+            "properties": [{"name": "syft:source", "value": "/input/backend.tar"}],
+        }
+    }
+    (tmp_path / "backend.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
+    findings = validate_sbom_file(tmp_path / "backend.cdx.json")
+    assert not any("absolute host path" in finding.reason for finding in findings)
+
+
+def test_missing_spec_version_fails(tmp_path: Path) -> None:
+    payload = _minimal_sbom()
+    del payload["specVersion"]
+    (tmp_path / "backend.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
+    findings = validate_sbom_file(tmp_path / "backend.cdx.json")
+    assert any("specVersion is missing or not allowlisted" in finding.reason for finding in findings)
+
+
+def test_syft_default_spec_version_17_fails_without_pin(tmp_path: Path) -> None:
+    payload = _minimal_sbom(spec_version="1.7")
+    (tmp_path / "backend.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
+    findings = validate_sbom_file(tmp_path / "backend.cdx.json")
+    assert any("specVersion" in finding.reason for finding in findings)
+    assert "1.7" not in ALLOWED_SPEC_VERSIONS
+
+
+@pytest.mark.parametrize("spec_version", ["1.4", "1.5", "1.6"])
+def test_allowlisted_spec_versions_pass(tmp_path: Path, spec_version: str) -> None:
+    payload = _minimal_sbom(spec_version=spec_version)
+    (tmp_path / "backend.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
+    findings = validate_sbom_file(tmp_path / "backend.cdx.json")
+    assert not any("specVersion" in finding.reason for finding in findings)
 
 
 @pytest.mark.parametrize(
