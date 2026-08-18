@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import {
   CANARY_SECRET,
+  EXPECTED_NODE_VERSION,
   NODE_GLOBAL_COREPACK_DIR,
   NODE_GLOBAL_NPM_DIR,
   SUCCESS_MESSAGE,
@@ -14,7 +17,9 @@ import {
   runStandaloneSmoke,
   validateFrontendRuntime,
 } from './validate-frontend-runtime.mjs';
-import { EXPECTED_NODE_VERSION } from './validate-node-toolchain.mjs';
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const frontendRoot = join(scriptDir, '..');
 
 async function createCleanProjectRoot() {
   const root = await mkdtemp(join(tmpdir(), 'frontend-runtime-'));
@@ -265,4 +270,34 @@ test('global corepack directory present is rejected', async () => {
 test('importing validator module does not execute main', async () => {
   const module = await import(`./validate-frontend-runtime.mjs?cacheBust=${Date.now()}`);
   assert.equal(typeof module.validateFrontendRuntime, 'function');
+});
+
+test('runtime node version contract is pinned to v24.19.0', () => {
+  assert.equal(EXPECTED_NODE_VERSION, 'v24.19.0');
+});
+
+test('runtime node version contract matches frontend .nvmrc', async () => {
+  const nvmrc = (await readFile(join(frontendRoot, '.nvmrc'), 'utf8')).trim();
+  assert.equal(nvmrc, '24.19.0');
+  assert.equal(EXPECTED_NODE_VERSION, `v${nvmrc}`);
+});
+
+test('runtime node version contract matches frontend package engines', async () => {
+  const packageJson = JSON.parse(await readFile(join(frontendRoot, 'package.json'), 'utf8'));
+  assert.match(packageJson.engines.node, /24\.19\.0/);
+  assert.match(packageJson.engines.node, /<25/);
+  assert.equal(packageJson.packageManager, 'npm@11.17.0');
+});
+
+test('runtime validator source is self-contained without cross-validator imports', async () => {
+  const source = await readFile(join(scriptDir, 'validate-frontend-runtime.mjs'), 'utf8');
+  assert.doesNotMatch(source, /validate-node-toolchain\.mjs/);
+  assert.doesNotMatch(source, /validate-lockfile-registry\.mjs/);
+  assert.doesNotMatch(source, /validate-installed-dependency-tree\.mjs/);
+  assert.doesNotMatch(source, /from ['"]\.\/[^'"]+['"]/);
+});
+
+test('runtime validator works from isolated temp fixture without other frontend scripts', async () => {
+  const projectRoot = await createCleanProjectRoot();
+  await validateFrontendRuntime(cleanProbes(projectRoot));
 });

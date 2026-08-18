@@ -6,8 +6,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { EXPECTED_NODE_VERSION } from './validate-node-toolchain.mjs';
-
+export const EXPECTED_NODE_VERSION = 'v24.19.0';
 export const SUCCESS_MESSAGE = 'frontend runtime environment validation passed';
 export const SMOKE_SUCCESS_MESSAGE = 'frontend standalone runtime smoke passed';
 
