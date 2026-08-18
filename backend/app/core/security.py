@@ -9,7 +9,7 @@ from app.core.config import settings
 
 # 使用 pbkdf2_sha256 替代 bcrypt（更兼容）
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -47,8 +47,15 @@ def decode_token(token: str) -> dict:
         )
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
     """获取当前用户（依赖注入）"""
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authenticated",
+        )
     token = credentials.credentials
     payload = decode_token(token)
     user_id = payload.get("sub")
