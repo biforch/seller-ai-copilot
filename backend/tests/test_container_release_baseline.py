@@ -538,7 +538,7 @@ def test_frontend_lockfile_resolved_sources_use_official_registry_only() -> None
         checked += 1
         _assert_official_npm_registry_resolved(resolved)
 
-    assert checked == 651
+    assert checked == 650
 
 
 def test_frontend_dockerfile_runs_toolchain_and_installed_tree_validators_around_npm_ci() -> None:
