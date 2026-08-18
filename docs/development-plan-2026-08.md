@@ -1,8 +1,8 @@
 # SellerAI Copilot Development Plan
 
 **Plan version:** 2026-08-18
-**Code baseline:** `8b3f77d` (`main`, S3a official npm registry enforcement)
-**Current verdict:** Core Amazon MVP feature-complete locally; release readiness is blocked by remaining supply-chain hardening (S3b+) and unexecuted container/RC validation.
+**Code baseline:** `65fdc7f` (`main`, S3b supported runtime digest pinning)
+**Current verdict:** Core Amazon MVP feature-complete locally; release readiness is blocked by remaining supply-chain hardening (S3c) and unexecuted container/RC validation.
 **Source of truth:** Current code, Alembic migrations, automated tests, and this plan. Earlier A3/A4 design reviews remain historical references and are not active delivery plans.
 
 ## 1. Product objective
@@ -80,8 +80,8 @@ Publishing content back to Amazon is **not** part of the current MVP. Human revi
 3. **Browser bearer-token storage**
    The 24-hour JWT is JavaScript-readable in `localStorage`; RC has no Content Security Policy. A same-origin XSS or compromised dependency can exfiltrate it.
 
-4. **Mutable container bases**
-   Python, Node, nginx, and PostgreSQL images use mutable tags rather than approved digests.
+4. **Mutable container bases** — **Resolved in `65fdc7f` (S3b).**
+   Python, Node, nginx, and PostgreSQL release/CI/dev references now use reviewed `tag@sha256:digest` pins with an offline validator and documented lifecycle policy.
 
 5. **Unapproved npm registry dependency** — **Resolved in `8b3f77d` (S3a).**
    The frontend lockfile now resolves all tarballs from `registry.npmjs.org`; `.npmrc`, CI, Docker, and static validators fail closed before `npm ci` when disallowed sources appear.
@@ -159,7 +159,7 @@ Exit gate:
 
 #### S3b — Runtime lifecycle and image digest pinning
 
-**Status:** Next
+**Status:** Complete (`65fdc7f`)
 
 Deliverables:
 
@@ -173,7 +173,7 @@ Exit gate:
 
 #### S3c — SBOM and vulnerability policy
 
-**Status:** Pending
+**Status:** Next
 
 Deliverables:
 
@@ -304,8 +304,8 @@ For changes involving models or migrations, additionally require upgrade → dow
 
 ## 8. Decision checkpoints
 
-The next implementation task is **S3b runtime lifecycle and image digest pinning**.
+The next implementation task is **S3c SBOM and vulnerability policy**.
 
-After S3b, proceed to S3c SBOM and vulnerability policy, then reassess whether any finding changes the S4 design. After R2, decide whether controlled Amazon acceptance is authorized. After R3, decide whether the next product investment is product search, account lifecycle, or measured scale/operations work.
+After S3c, reassess whether any finding changes the S4 design. After R2, decide whether controlled Amazon acceptance is authorized. After R3, decide whether the next product investment is product search, account lifecycle, or measured scale/operations work.
 
 Automatic Amazon publishing remains outside the plan until the read/sync/proposal workflow has production evidence, an explicit publishing threat model, rollback/reconciliation semantics, and separate user authorization.
