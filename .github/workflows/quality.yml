@@ -184,35 +184,49 @@ jobs:
       - name: Generate Trivy vulnerability reports
         run: |
           set -euo pipefail
+          RUNNER_UID="$(id -u)"
+          RUNNER_GID="$(id -g)"
+          if ! [[ "${RUNNER_UID}" =~ ^[0-9]+$ && "${RUNNER_GID}" =~ ^[0-9]+$ ]]; then
+            echo "runner uid/gid validation failed" >&2
+            exit 1
+          fi
+          echo "scanner-user-validated"
           SCAN_INPUT="${RUNNER_TEMP}/sellerai-scan/input"
           SCAN_OUTPUT="${RUNNER_TEMP}/sellerai-scan/output"
-          CACHE_DIR="${RUNNER_TEMP}/sellerai-scan/trivy-cache"
-          mkdir -p "${CACHE_DIR}"
+          TRIVY_CACHE_DIR="${RUNNER_TEMP}/sellerai-scan/trivy-cache"
+          umask 077
+          mkdir -p "${SCAN_INPUT}" "${SCAN_OUTPUT}" "${TRIVY_CACHE_DIR}"
           scan_status=0
           if ! docker run --rm \
+            --user "${RUNNER_UID}:${RUNNER_GID}" \
+            -e HOME=/tmp/trivy-home \
             -v "${SCAN_INPUT}:/input:ro" \
             -v "${SCAN_OUTPUT}:/output:rw" \
-            -v "${CACHE_DIR}:/root/.cache/trivy:rw" \
+            -v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" \
             "${TRIVY_IMAGE}" \
-            image --input /input/backend.tar --format json --output /output/backend.trivy.json --scanners vuln --exit-code 0; then
+            image --cache-dir /trivy-cache --input /input/backend.tar --format json --output /output/backend.trivy.json --scanners vuln --exit-code 0; then
             echo "backend: trivy scan command failed" >&2
             scan_status=1
           fi
           if ! docker run --rm \
+            --user "${RUNNER_UID}:${RUNNER_GID}" \
+            -e HOME=/tmp/trivy-home \
             -v "${SCAN_INPUT}:/input:ro" \
             -v "${SCAN_OUTPUT}:/output:rw" \
-            -v "${CACHE_DIR}:/root/.cache/trivy:rw" \
+            -v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" \
             "${TRIVY_IMAGE}" \
-            image --input /input/frontend.tar --format json --output /output/frontend.trivy.json --scanners vuln --exit-code 0; then
+            image --cache-dir /trivy-cache --input /input/frontend.tar --format json --output /output/frontend.trivy.json --scanners vuln --exit-code 0; then
             echo "frontend: trivy scan command failed" >&2
             scan_status=1
           fi
           if ! docker run --rm \
+            --user "${RUNNER_UID}:${RUNNER_GID}" \
+            -e HOME=/tmp/trivy-home \
             -v "${SCAN_INPUT}:/input:ro" \
             -v "${SCAN_OUTPUT}:/output:rw" \
-            -v "${CACHE_DIR}:/root/.cache/trivy:rw" \
+            -v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" \
             "${TRIVY_IMAGE}" \
-            image --input /input/nginx.tar --format json --output /output/nginx.trivy.json --scanners vuln --exit-code 0; then
+            image --cache-dir /trivy-cache --input /input/nginx.tar --format json --output /output/nginx.trivy.json --scanners vuln --exit-code 0; then
             echo "nginx: trivy scan command failed" >&2
             scan_status=1
           fi
@@ -238,4 +252,22 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          rm -rf "${RUNNER_TEMP}/sellerai-scan"
+          : "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
+          CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-scan"
+          if [[ "${CLEANUP_TARGET}" == "/" ]]; then
+            echo "unsafe cleanup target" >&2
+            exit 1
+          fi
+          if [[ -z "${CLEANUP_TARGET}" ]]; then
+            echo "unsafe cleanup target" >&2
+            exit 1
+          fi
+          if [[ "${CLEANUP_TARGET}" == "${RUNNER_TEMP}" ]]; then
+            echo "cleanup target must not equal RUNNER_TEMP root" >&2
+            exit 1
+          fi
+          if [[ -n "${GITHUB_WORKSPACE:-}" && "${CLEANUP_TARGET}" == "${GITHUB_WORKSPACE}" ]]; then
+            echo "cleanup target must not equal workspace root" >&2
+            exit 1
+          fi
+          rm -rf "${CLEANUP_TARGET}"

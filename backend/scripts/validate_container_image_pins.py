@@ -36,8 +36,10 @@ ALLOWED_SCANNER_SHELL_VARS = frozenset(
         "SYFT_IMAGE",
         "TRIVY_IMAGE",
         "RUNNER_TEMP",
+        "RUNNER_UID",
+        "RUNNER_GID",
         "IMAGE_TAG",
-        "CACHE_DIR",
+        "TRIVY_CACHE_DIR",
         "SCAN_INPUT",
         "SCAN_OUTPUT",
     }
@@ -58,6 +60,8 @@ SCANNER_FORBIDDEN_CREDENTIAL_ENV = re.compile(
     r"NPM_TOKEN|REGISTRY_|DOCKER_AUTH|client_secret|access_token|refresh_token)",
     re.IGNORECASE,
 )
+TRIVY_STEP_NAME = "Generate Trivy vulnerability reports"
+CLEANUP_STEP_NAME = "Cleanup supply-chain scan workspace"
 
 ALLOWED_SCANNER_IMAGES = frozenset(
     {
@@ -356,6 +360,114 @@ def service_has_build_nearby(content: str, image_line_no: int) -> bool:
     return False
 
 
+def _extract_step_run_block(content: str, step_name: str) -> str | None:
+    marker = f"- name: {step_name}"
+    start = content.find(marker)
+    if start < 0:
+        return None
+    run_marker = "run: |"
+    run_start = content.find(run_marker, start)
+    if run_start < 0:
+        return None
+    body_start = content.find("\n", run_start) + 1
+    lines: list[str] = []
+    for line in content[body_start:].splitlines():
+        if line.startswith("      - name:") or line.startswith("      uses:"):
+            break
+        if line.startswith("      if:"):
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _validate_trivy_scan_step(path: Path, content: str) -> list[Finding]:
+    findings: list[Finding] = []
+    block = _extract_step_run_block(content, TRIVY_STEP_NAME)
+    if block is None:
+        findings.append(Finding(path, 0, "containers job must define Generate Trivy vulnerability reports step"))
+        return findings
+
+    if not re.search(r'RUNNER_UID="\$\(id -u\)"', block):
+        findings.append(Finding(path, 0, "Trivy step must capture RUNNER_UID from id -u"))
+    if not re.search(r'RUNNER_GID="\$\(id -g\)"', block):
+        findings.append(Finding(path, 0, "Trivy step must capture RUNNER_GID from id -g"))
+    if not re.search(r'\$\{RUNNER_UID\}" =~ \^\[0-9\]\+\$', block):
+        findings.append(Finding(path, 0, "Trivy step must validate RUNNER_UID as decimal digits"))
+    if not re.search(r'\$\{RUNNER_GID\}" =~ \^\[0-9\]\+\$', block):
+        findings.append(Finding(path, 0, "Trivy step must validate RUNNER_GID as decimal digits"))
+    if "scanner-user-validated" not in block:
+        findings.append(Finding(path, 0, "Trivy step must emit scanner-user-validated after uid/gid validation"))
+
+    user_runs = re.findall(r'--user "\$\{RUNNER_UID\}:\$\{RUNNER_GID\}"', block)
+    if len(user_runs) != 3:
+        findings.append(
+            Finding(path, 0, f"Trivy step must run three scanner containers as runner uid/gid, found {len(user_runs)}")
+        )
+
+    cache_dir_flags = re.findall(r"--cache-dir /trivy-cache", block)
+    if len(cache_dir_flags) != 3:
+        findings.append(
+            Finding(path, 0, f"Trivy step must pass --cache-dir /trivy-cache three times, found {len(cache_dir_flags)}")
+        )
+
+    cache_mounts = re.findall(r'"\$\{TRIVY_CACHE_DIR\}:/trivy-cache:rw"', block)
+    if len(cache_mounts) != 3:
+        findings.append(
+            Finding(path, 0, f"Trivy step must mount TRIVY_CACHE_DIR to /trivy-cache three times, found {len(cache_mounts)}")
+        )
+
+    if "/root/.cache/trivy" in block:
+        findings.append(Finding(path, 0, "Trivy step must not mount root-owned default cache path"))
+    if "sudo" in block or "chmod 777" in block or "--privileged" in block:
+        findings.append(Finding(path, 0, "Trivy step must not use sudo, chmod 777, or privileged helpers"))
+    if re.search(r"--network\s+host|--net\s+host", block):
+        findings.append(Finding(path, 0, "Trivy step must not use host network"))
+    if "$HOME" in block or "GITHUB_WORKSPACE" in block:
+        findings.append(Finding(path, 0, "Trivy step must not mount runner home or workspace"))
+
+    input_mounts = re.findall(r'"\$\{SCAN_INPUT\}:/input:ro"', block)
+    output_mounts = re.findall(r'"\$\{SCAN_OUTPUT\}:/output:rw"', block)
+    if len(input_mounts) != 3 or len(output_mounts) != 3:
+        findings.append(Finding(path, 0, "Trivy step must keep input :ro and output :rw for all three scans"))
+
+    return findings
+
+
+def _validate_cleanup_step(path: Path, content: str) -> list[Finding]:
+    findings: list[Finding] = []
+    marker = f"- name: {CLEANUP_STEP_NAME}"
+    if marker not in content:
+        findings.append(Finding(path, 0, "containers job must define cleanup step"))
+        return findings
+
+    cleanup_section = content.split(marker, 1)[1].split("- name:", 1)[0]
+    if "if: always()" not in cleanup_section:
+        findings.append(Finding(path, 0, "cleanup step must use if: always()"))
+
+    block = _extract_step_run_block(content, CLEANUP_STEP_NAME)
+    if block is None:
+        findings.append(Finding(path, 0, "cleanup step must define a run block"))
+        return findings
+
+    if 'rm -rf "${CLEANUP_TARGET}"' not in block:
+        findings.append(Finding(path, 0, "cleanup step must remove sellerai-scan workspace via CLEANUP_TARGET"))
+    if ": \"${RUNNER_TEMP:?RUNNER_TEMP must be set}\"" not in block:
+        findings.append(Finding(path, 0, "cleanup step must fail closed when RUNNER_TEMP is unset"))
+    if 'CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-scan"' not in block:
+        findings.append(Finding(path, 0, "cleanup step must define a fixed CLEANUP_TARGET"))
+    if '[[ "${CLEANUP_TARGET}" == "/" ]]' not in block:
+        findings.append(Finding(path, 0, "cleanup step must reject root cleanup target"))
+    if '[[ "${CLEANUP_TARGET}" == "${RUNNER_TEMP}" ]]' not in block:
+        findings.append(Finding(path, 0, "cleanup step must reject RUNNER_TEMP itself as cleanup target"))
+
+    forbidden = ("sudo", "chmod 777", "|| true", "continue-on-error", "docker run")
+    for token in forbidden:
+        if token in block:
+            findings.append(Finding(path, 0, f"cleanup step must not use {token}"))
+
+    return findings
+
+
 def _validate_scanner_env_line(path: Path, line_no: int, line: str, var_name: str) -> list[Finding]:
     findings: list[Finding] = []
     if "${{" in line:
@@ -533,6 +645,8 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
                     ),
                 )
             )
+        findings.extend(_validate_trivy_scan_step(path, content))
+        findings.extend(_validate_cleanup_step(path, content))
 
     return findings, external_refs, 0, scanner_refs
 

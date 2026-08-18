@@ -651,7 +651,13 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "frontend: trivy scan command failed" in content
     assert "nginx: trivy scan command failed" in content
     assert "Cleanup supply-chain scan workspace" in content
-    assert 'rm -rf "${RUNNER_TEMP}/sellerai-scan"' in content
+    assert 'rm -rf "${CLEANUP_TARGET}"' in content
+    assert 'CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-scan"' in content
+    assert "--user \"${RUNNER_UID}:${RUNNER_GID}\"" in content
+    assert "scanner-user-validated" in content
+    assert "--cache-dir /trivy-cache" in content
+    assert '"${TRIVY_CACHE_DIR}:/trivy-cache:rw"' in content
+    assert "/root/.cache/trivy" not in content.split("Generate Trivy", 1)[1].split("Evaluate vulnerability", 1)[0]
     assert "--privileged" not in content.split("containers:", 1)[1]
     assert "--env-file" not in content.split("Generate Trivy", 1)[1].split("Evaluate vulnerability", 1)[0]
 

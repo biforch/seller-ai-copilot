@@ -463,6 +463,84 @@ def test_repository_scanner_identity_count() -> None:
     assert stats.scanner_pinned_refs == EXPECTED_SCANNER_PINNED_REF_COUNT
 
 
+def test_trivy_step_requires_runner_uid_gid_and_cache_dir() -> None:
+    content = Path(REPO_ROOT / ".github/workflows/quality.yml").read_text(encoding="utf-8")
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert findings == []
+
+
+def _minimal_trivy_step(*extra_lines: str) -> str:
+    runs = [
+        'docker run --rm --user "${RUNNER_UID}:${RUNNER_GID}" '
+        '-v "${SCAN_INPUT}:/input:ro" -v "${SCAN_OUTPUT}:/output:rw" '
+        '-v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" "${TRIVY_IMAGE}" '
+        "image --cache-dir /trivy-cache --input /input/backend.tar",
+        'docker run --rm --user "${RUNNER_UID}:${RUNNER_GID}" '
+        '-v "${SCAN_INPUT}:/input:ro" -v "${SCAN_OUTPUT}:/output:rw" '
+        '-v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" "${TRIVY_IMAGE}" '
+        "image --cache-dir /trivy-cache --input /input/frontend.tar",
+        'docker run --rm --user "${RUNNER_UID}:${RUNNER_GID}" '
+        '-v "${SCAN_INPUT}:/input:ro" -v "${SCAN_OUTPUT}:/output:rw" '
+        '-v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" "${TRIVY_IMAGE}" '
+        "image --cache-dir /trivy-cache --input /input/nginx.tar",
+    ]
+    if extra_lines:
+        runs = list(extra_lines)
+    body = "\n".join(
+        [
+            "          set -euo pipefail",
+            '          RUNNER_UID="$(id -u)"',
+            '          RUNNER_GID="$(id -g)"',
+            '          if ! [[ "${RUNNER_UID}" =~ ^[0-9]+$ && "${RUNNER_GID}" =~ ^[0-9]+$ ]]; then',
+            "            exit 1",
+            "          fi",
+            "          echo scanner-user-validated",
+            '          SCAN_INPUT="${RUNNER_TEMP}/sellerai-scan/input"',
+            '          SCAN_OUTPUT="${RUNNER_TEMP}/sellerai-scan/output"',
+            '          TRIVY_CACHE_DIR="${RUNNER_TEMP}/sellerai-scan/trivy-cache"',
+            *[f"          {line}" for line in runs],
+        ]
+    )
+    return textwrap.dedent(
+        f"""
+        jobs:
+          containers:
+            env:
+              SYFT_IMAGE: {SYFT_PIN}
+              TRIVY_IMAGE: {TRIVY_PIN}
+            steps:
+              - name: Generate Trivy vulnerability reports
+                run: |
+{body}
+        """
+    ).strip()
+
+
+def test_trivy_step_rejects_root_cache_mount() -> None:
+    content = _minimal_trivy_step(
+        'docker run --rm -v "${TRIVY_CACHE_DIR}:/root/.cache/trivy:rw" "${TRIVY_IMAGE}" image --cache-dir /trivy-cache',
+        'docker run --rm --user "${RUNNER_UID}:${RUNNER_GID}" -v "${SCAN_INPUT}:/input:ro" -v "${SCAN_OUTPUT}:/output:rw" -v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" "${TRIVY_IMAGE}" image --cache-dir /trivy-cache',
+        'docker run --rm --user "${RUNNER_UID}:${RUNNER_GID}" -v "${SCAN_INPUT}:/input:ro" -v "${SCAN_OUTPUT}:/output:rw" -v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" "${TRIVY_IMAGE}" image --cache-dir /trivy-cache',
+    )
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert any("root-owned default cache path" in finding.reason for finding in findings)
+
+
+def test_cleanup_step_requires_fail_closed_target() -> None:
+    content = _minimal_trivy_step()
+    content += textwrap.dedent(
+        """
+              - name: Cleanup supply-chain scan workspace
+                if: always()
+                run: |
+                  set -euo pipefail
+                  rm -rf "${RUNNER_TEMP}/sellerai-scan"
+        """
+    )
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert any("fail closed when RUNNER_TEMP is unset" in finding.reason for finding in findings)
+
+
 def test_valid_nginx_digest_example_matches_policy() -> None:
     policy = POLICY_DOC.read_text(encoding="utf-8")
     assert "nginx:1.30-alpine" in policy
