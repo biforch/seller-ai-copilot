@@ -10,18 +10,20 @@ interface ListingResultProps {
   result: ListingResult;
 }
 
-export function ListingResultView({ result }: ListingResultProps) {
-  const [copied, setCopied] = useState<string | null>(null);
-
-  const copyToClipboard = async (text: string, key: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(key);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
-  const CopyButton = ({ text, id }: { text: string; id: string }) => (
+function CopyButton({
+  text,
+  id,
+  copied,
+  onCopy,
+}: {
+  text: string;
+  id: string;
+  copied: string | null;
+  onCopy: (text: string, id: string) => void;
+}) {
+  return (
     <button
-      onClick={() => copyToClipboard(text, id)}
+      onClick={() => onCopy(text, id)}
       className="p-1 text-gray-400 hover:text-gray-600"
       title="Copy"
     >
@@ -32,6 +34,16 @@ export function ListingResultView({ result }: ListingResultProps) {
       )}
     </button>
   );
+}
+
+export function ListingResultView({ result }: ListingResultProps) {
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const copyToClipboard = async (text: string, key: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
+  };
 
   return (
     <div className="space-y-6">
@@ -40,7 +52,12 @@ export function ListingResultView({ result }: ListingResultProps) {
       <div className="bg-white rounded-xl border p-6">
         <div className="flex items-start justify-between mb-2">
           <h3 className="text-sm font-medium text-gray-500">Title</h3>
-          <CopyButton text={result.title} id="title" />
+          <CopyButton
+            text={result.title}
+            id="title"
+            copied={copied}
+            onCopy={copyToClipboard}
+          />
         </div>
         <p className="text-lg font-semibold text-gray-900">{result.title}</p>
       </div>
@@ -52,7 +69,12 @@ export function ListingResultView({ result }: ListingResultProps) {
             <li key={i} className="flex items-start gap-2">
               <span className="text-blue-600 mt-1">•</span>
               <span className="flex-1 text-gray-800">{bullet}</span>
-              <CopyButton text={bullet} id={`bullet-${i}`} />
+              <CopyButton
+                text={bullet}
+                id={`bullet-${i}`}
+                copied={copied}
+                onCopy={copyToClipboard}
+              />
             </li>
           ))}
         </ul>
@@ -61,7 +83,12 @@ export function ListingResultView({ result }: ListingResultProps) {
       <div className="bg-white rounded-xl border p-6">
         <div className="flex items-start justify-between mb-2">
           <h3 className="text-sm font-medium text-gray-500">Description</h3>
-          <CopyButton text={result.description} id="description" />
+          <CopyButton
+            text={result.description}
+            id="description"
+            copied={copied}
+            onCopy={copyToClipboard}
+          />
         </div>
         <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">
           {result.description}

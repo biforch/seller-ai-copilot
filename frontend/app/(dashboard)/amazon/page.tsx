@@ -344,12 +344,16 @@ export default function AmazonConnectionsPage() {
 
   useEffect(() => {
     mountedRef.current = true;
+    const accountsGate = accountsGateRef.current;
+    const marketplaceGate = marketplaceGateRef.current;
+    const listingGate = listingGateRef.current;
+    const productsGate = productsGateRef.current;
     return () => {
       mountedRef.current = false;
-      accountsGateRef.current.invalidate();
-      marketplaceGateRef.current.invalidate();
-      listingGateRef.current.invalidate();
-      productsGateRef.current.invalidate();
+      accountsGate.invalidate();
+      marketplaceGate.invalidate();
+      listingGate.invalidate();
+      productsGate.invalidate();
     };
   }, []);
 

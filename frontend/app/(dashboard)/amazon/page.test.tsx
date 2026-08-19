@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AmazonConnectionsPage from '@/app/(dashboard)/amazon/page';
 import { amazonApi, type AmazonAccount, type AmazonCatalogSnapshot, type AmazonListing, type AmazonMarketplace } from '@/app/api/amazon';
 import { ApiClientError } from '@/lib/api-client-error';
+import { LatestRequestGate } from '@/lib/latest-request';
 import type { PaginatedResponse } from '@/types';
 
 vi.mock('next/navigation', () => ({
@@ -303,6 +304,7 @@ describe('AmazonConnectionsPage async races', () => {
   it('aborts in-flight requests on unmount without state update warnings', async () => {
     const marketplacesDeferred = createDeferred<{ items: AmazonMarketplace[]; total: number }>();
     let capturedSignal: AbortSignal | undefined;
+    const invalidateSpy = vi.spyOn(LatestRequestGate.prototype, 'invalidate');
     vi.spyOn(amazonApi, 'listMarketplaces').mockImplementation((_accountId, signal) => {
       capturedSignal = signal;
       return marketplacesDeferred.promise;
@@ -316,8 +318,10 @@ describe('AmazonConnectionsPage async races', () => {
       expect(capturedSignal).toBeDefined();
     });
 
+    invalidateSpy.mockClear();
     unmount();
     expect(capturedSignal?.aborted).toBe(true);
+    expect(invalidateSpy).toHaveBeenCalledTimes(4);
 
     marketplacesDeferred.resolve({
       items: [marketplace('a', 'M1', 'United States')],

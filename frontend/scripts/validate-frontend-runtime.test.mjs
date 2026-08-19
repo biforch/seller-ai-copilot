@@ -268,8 +268,8 @@ test('global corepack directory present is rejected', async () => {
 });
 
 test('importing validator module does not execute main', async () => {
-  const module = await import(`./validate-frontend-runtime.mjs?cacheBust=${Date.now()}`);
-  assert.equal(typeof module.validateFrontendRuntime, 'function');
+  const importedModule = await import(`./validate-frontend-runtime.mjs?cacheBust=${Date.now()}`);
+  assert.equal(typeof importedModule.validateFrontendRuntime, 'function');
 });
 
 test('runtime node version contract is pinned to v24.19.0', () => {
