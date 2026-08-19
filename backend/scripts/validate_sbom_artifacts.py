@@ -13,7 +13,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT_CANARY = str(REPO_ROOT.resolve())
 
-REQUIRED_FILES = ("backend.cdx.json", "frontend.cdx.json", "nginx.cdx.json")
+REQUIRED_FILES = (
+    "backend.cdx.json",
+    "backend-arm64.cdx.json",
+    "frontend.cdx.json",
+    "nginx.cdx.json",
+)
 ALLOWED_SPEC_VERSIONS = frozenset({"1.4", "1.5", "1.6"})
 MAX_FILE_BYTES = 50 * 1024 * 1024
 MAX_COMPONENTS = 50_000

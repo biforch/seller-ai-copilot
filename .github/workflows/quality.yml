@@ -139,6 +139,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm \
+            --network none \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev \
             --cap-drop ALL \
@@ -150,6 +151,7 @@ jobs:
             "sellerai-backend-ci:${IMAGE_TAG}" \
             python scripts/validate_backend_runtime_environment.py
           docker run --rm \
+            --network none \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev \
             --cap-drop ALL \
@@ -161,6 +163,7 @@ jobs:
             "sellerai-backend-ci:${IMAGE_TAG}" \
             python scripts/validate_backend_alpine_os_packages.py
           docker run --rm \
+            --network none \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev \
             --cap-drop ALL \
@@ -172,6 +175,7 @@ jobs:
             "sellerai-backend-ci:${IMAGE_TAG}" \
             python scripts/validate_backend_production_smoke.py
           docker run --rm \
+            --network none \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev \
             --cap-drop ALL \
@@ -203,6 +207,7 @@ jobs:
           set -euo pipefail
           IMAGE="sellerai-backend-ci:${IMAGE_TAG}-arm64"
           docker run --rm --platform linux/arm64 \
+            --network none \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev \
             --cap-drop ALL \
@@ -214,6 +219,7 @@ jobs:
             "${IMAGE}" \
             python scripts/validate_backend_runtime_environment.py
           docker run --rm --platform linux/arm64 \
+            --network none \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev \
             --cap-drop ALL \
@@ -267,6 +273,7 @@ jobs:
           set -euo pipefail
           SCAN_INPUT="${RUNNER_TEMP}/sellerai-scan/input"
           docker image save "sellerai-backend-ci:${IMAGE_TAG}" -o "${SCAN_INPUT}/backend.tar"
+          docker image save "sellerai-backend-ci:${IMAGE_TAG}-arm64" -o "${SCAN_INPUT}/backend-arm64.tar"
           docker image save "sellerai-frontend-ci:${IMAGE_TAG}" -o "${SCAN_INPUT}/frontend.tar"
           docker image save "sellerai-nginx-ci:${IMAGE_TAG}" -o "${SCAN_INPUT}/nginx.tar"
       - name: Generate CycloneDX SBOMs
@@ -281,6 +288,13 @@ jobs:
             "${SYFT_IMAGE}" \
             docker-archive:/input/backend.tar \
             -o cyclonedx-json@1.6=/output/backend.cdx.json
+          docker run --rm \
+            -e SYFT_CHECK_FOR_APP_UPDATE=false \
+            -v "${SCAN_INPUT}:/input:ro" \
+            -v "${SCAN_OUTPUT}:/output:rw" \
+            "${SYFT_IMAGE}" \
+            docker-archive:/input/backend-arm64.tar \
+            -o cyclonedx-json@1.6=/output/backend-arm64.cdx.json
           docker run --rm \
             -e SYFT_CHECK_FOR_APP_UPDATE=false \
             -v "${SCAN_INPUT}:/input:ro" \
@@ -331,6 +345,17 @@ jobs:
             -v "${SCAN_OUTPUT}:/output:rw" \
             -v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" \
             "${TRIVY_IMAGE}" \
+            image --cache-dir /trivy-cache --input /input/backend-arm64.tar --format json --output /output/backend-arm64.trivy.json --scanners vuln --exit-code 0; then
+            echo "backend-arm64: trivy scan command failed" >&2
+            scan_status=1
+          fi
+          if ! docker run --rm \
+            --user "${RUNNER_UID}:${RUNNER_GID}" \
+            -e HOME=/tmp/trivy-home \
+            -v "${SCAN_INPUT}:/input:ro" \
+            -v "${SCAN_OUTPUT}:/output:rw" \
+            -v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" \
+            "${TRIVY_IMAGE}" \
             image --cache-dir /trivy-cache --input /input/frontend.tar --format json --output /output/frontend.trivy.json --scanners vuln --exit-code 0; then
             echo "frontend: trivy scan command failed" >&2
             scan_status=1
@@ -356,9 +381,11 @@ jobs:
           name: sellerai-supply-chain-${{ github.sha }}
           path: |
             ${{ runner.temp }}/sellerai-scan/output/backend.cdx.json
+            ${{ runner.temp }}/sellerai-scan/output/backend-arm64.cdx.json
             ${{ runner.temp }}/sellerai-scan/output/frontend.cdx.json
             ${{ runner.temp }}/sellerai-scan/output/nginx.cdx.json
             ${{ runner.temp }}/sellerai-scan/output/backend.trivy.json
+            ${{ runner.temp }}/sellerai-scan/output/backend-arm64.trivy.json
             ${{ runner.temp }}/sellerai-scan/output/frontend.trivy.json
             ${{ runner.temp }}/sellerai-scan/output/nginx.trivy.json
             ${{ runner.temp }}/sellerai-scan/output/scan-summary.json
@@ -370,453 +397,6 @@ jobs:
           set -euo pipefail
           : "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
           CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-scan"
-          if [[ "${CLEANUP_TARGET}" == "/" ]]; then
-            echo "unsafe cleanup target" >&2
-            exit 1
-          fi
-          if [[ -z "${CLEANUP_TARGET}" ]]; then
-            echo "unsafe cleanup target" >&2
-            exit 1
-          fi
-          if [[ "${CLEANUP_TARGET}" == "${RUNNER_TEMP}" ]]; then
-            echo "cleanup target must not equal RUNNER_TEMP root" >&2
-            exit 1
-          fi
-          if [[ -n "${GITHUB_WORKSPACE:-}" && "${CLEANUP_TARGET}" == "${GITHUB_WORKSPACE}" ]]; then
-            echo "cleanup target must not equal workspace root" >&2
-            exit 1
-          fi
-          rm -rf "${CLEANUP_TARGET}"
-
-  backend-alpine-candidate-audit:
-    if: github.event_name == 'pull_request'
-    needs: [backend, frontend]
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      actions: write
-    env:
-      ALPINE_CANDIDATE_INDEX_REF: python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1
-      ALPINE_CANDIDATE_AMD64_REF: python:3.11-alpine3.24@sha256:cc19a3e1085aba7d26690cf0725d9a3e083cbea0feec34ba8133d40a8ac1d399
-      ALPINE_CANDIDATE_ARM64_REF: python:3.11-alpine3.24@sha256:df8376721de6f98515643fca8e7aac56e6a39bc178697a1d8c020ffa050b655e
-      SYFT_IMAGE: anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0
-      TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Validate pinned container base images
-        run: python backend/scripts/validate_container_image_pins.py
-      - name: Prepare Alpine candidate audit workspace
-        run: |
-          set -euo pipefail
-          RUNNER_UID="$(id -u)"
-          RUNNER_GID="$(id -g)"
-          if ! [[ "${RUNNER_UID}" =~ ^[0-9]+$ && "${RUNNER_GID}" =~ ^[0-9]+$ ]]; then
-            echo "runner uid/gid validation failed" >&2
-            exit 1
-          fi
-          umask 077
-          ALPINE_AUDIT_BASE="${RUNNER_TEMP}/sellerai-alpine-audit"
-          mkdir -p \
-            "${ALPINE_AUDIT_BASE}/input" \
-            "${ALPINE_AUDIT_BASE}/output" \
-            "${ALPINE_AUDIT_BASE}/staging-amd64/wheelhouse" \
-            "${ALPINE_AUDIT_BASE}/staging-amd64/target" \
-            "${ALPINE_AUDIT_BASE}/staging-amd64/home" \
-            "${ALPINE_AUDIT_BASE}/staging-arm64/wheelhouse"
-      - name: Pull and save Alpine candidate images
-        run: |
-          set -euo pipefail
-          ALPINE_AUDIT_INPUT="${RUNNER_TEMP}/sellerai-alpine-audit/input"
-          docker pull --platform linux/amd64 "${ALPINE_CANDIDATE_AMD64_REF}"
-          docker pull --platform linux/arm64 "${ALPINE_CANDIDATE_ARM64_REF}"
-          docker image save "${ALPINE_CANDIDATE_AMD64_REF}" -o "${ALPINE_AUDIT_INPUT}/candidate-amd64.tar"
-          docker image save "${ALPINE_CANDIDATE_ARM64_REF}" -o "${ALPINE_AUDIT_INPUT}/candidate-arm64.tar"
-          amd64_meta="$(docker image inspect "${ALPINE_CANDIDATE_AMD64_REF}" --format '{{.Architecture}} {{index .RepoDigests 0}}')"
-          arm64_meta="$(docker image inspect "${ALPINE_CANDIDATE_ARM64_REF}" --format '{{.Architecture}} {{index .RepoDigests 0}}')"
-          echo "${amd64_meta}" | grep -q 'amd64'
-          echo "${arm64_meta}" | grep -q 'arm64'
-          echo "${amd64_meta}" | grep -q 'sha256:cc19a3e1085aba7d26690cf0725d9a3e083cbea0feec34ba8133d40a8ac1d399'
-          echo "${arm64_meta}" | grep -q 'sha256:df8376721de6f98515643fca8e7aac56e6a39bc178697a1d8c020ffa050b655e'
-      - name: Generate Alpine candidate CycloneDX SBOMs
-        run: |
-          set -euo pipefail
-          ALPINE_AUDIT_INPUT="${RUNNER_TEMP}/sellerai-alpine-audit/input"
-          ALPINE_AUDIT_OUTPUT="${RUNNER_TEMP}/sellerai-alpine-audit/output"
-          docker run --rm \
-            -e SYFT_CHECK_FOR_APP_UPDATE=false \
-            -v "${ALPINE_AUDIT_INPUT}:/input:ro" \
-            -v "${ALPINE_AUDIT_OUTPUT}:/output:rw" \
-            "${SYFT_IMAGE}" \
-            docker-archive:/input/candidate-amd64.tar \
-            -o cyclonedx-json@1.6=/output/candidate-amd64.cdx.json
-          docker run --rm \
-            -e SYFT_CHECK_FOR_APP_UPDATE=false \
-            -v "${ALPINE_AUDIT_INPUT}:/input:ro" \
-            -v "${ALPINE_AUDIT_OUTPUT}:/output:rw" \
-            "${SYFT_IMAGE}" \
-            docker-archive:/input/candidate-arm64.tar \
-            -o cyclonedx-json@1.6=/output/candidate-arm64.cdx.json
-      - name: Validate Alpine candidate SBOM artifacts
-        run: >-
-          python backend/scripts/validate_sbom_artifacts.py --files
-          "${{ runner.temp }}/sellerai-alpine-audit/output"
-          candidate-amd64.cdx.json candidate-arm64.cdx.json
-      - name: Generate Alpine candidate Trivy reports
-        run: |
-          set -euo pipefail
-          RUNNER_UID="$(id -u)"
-          RUNNER_GID="$(id -g)"
-          if ! [[ "${RUNNER_UID}" =~ ^[0-9]+$ && "${RUNNER_GID}" =~ ^[0-9]+$ ]]; then
-            echo "runner uid/gid validation failed" >&2
-            exit 1
-          fi
-          echo "scanner-user-validated"
-          ALPINE_AUDIT_INPUT="${RUNNER_TEMP}/sellerai-alpine-audit/input"
-          ALPINE_AUDIT_OUTPUT="${RUNNER_TEMP}/sellerai-alpine-audit/output"
-          ALPINE_TRIVY_CACHE_DIR="${RUNNER_TEMP}/sellerai-alpine-audit/trivy-cache"
-          umask 077
-          mkdir -p "${ALPINE_AUDIT_INPUT}" "${ALPINE_AUDIT_OUTPUT}" "${ALPINE_TRIVY_CACHE_DIR}"
-          scan_status=0
-          if ! docker run --rm \
-            --user "${RUNNER_UID}:${RUNNER_GID}" \
-            -e HOME=/tmp/trivy-home \
-            -v "${ALPINE_AUDIT_INPUT}:/input:ro" \
-            -v "${ALPINE_AUDIT_OUTPUT}:/output:rw" \
-            -v "${ALPINE_TRIVY_CACHE_DIR}:/trivy-cache:rw" \
-            "${TRIVY_IMAGE}" \
-            image --cache-dir /trivy-cache --input /input/candidate-amd64.tar --format json --output /output/candidate-amd64.trivy.json --scanners vuln --exit-code 0; then
-            echo "candidate-amd64: trivy scan command failed" >&2
-            scan_status=1
-          fi
-          if ! docker run --rm \
-            --user "${RUNNER_UID}:${RUNNER_GID}" \
-            -e HOME=/tmp/trivy-home \
-            -v "${ALPINE_AUDIT_INPUT}:/input:ro" \
-            -v "${ALPINE_AUDIT_OUTPUT}:/output:rw" \
-            -v "${ALPINE_TRIVY_CACHE_DIR}:/trivy-cache:rw" \
-            "${TRIVY_IMAGE}" \
-            image --cache-dir /trivy-cache --input /input/candidate-arm64.tar --format json --output /output/candidate-arm64.trivy.json --scanners vuln --exit-code 0; then
-            echo "candidate-arm64: trivy scan command failed" >&2
-            scan_status=1
-          fi
-          exit "${scan_status}"
-      - name: Audit amd64 musllinux wheel install
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          RUNNER_UID="$(id -u)"
-          RUNNER_GID="$(id -g)"
-          if ! [[ "${RUNNER_UID}" =~ ^[0-9]+$ && "${RUNNER_GID}" =~ ^[0-9]+$ ]]; then
-            echo "runner uid/gid validation failed" >&2
-            exit 1
-          fi
-          ALPINE_AUDIT_BASE="${RUNNER_TEMP}/sellerai-alpine-audit"
-          ALPINE_AUDIT_OUTPUT="${ALPINE_AUDIT_BASE}/output"
-          AMD64_WHEELHOUSE="${ALPINE_AUDIT_BASE}/staging-amd64/wheelhouse"
-          AMD64_TARGET="${ALPINE_AUDIT_BASE}/staging-amd64/target"
-          AMD64_HOME="${ALPINE_AUDIT_BASE}/staging-amd64/home"
-          docker_run_amd64() {
-            local network_mode="$1"
-            shift
-            docker run --rm \
-              --read-only \
-              --tmpfs /tmp:rw,noexec,nosuid,nodev \
-              --network "${network_mode}" \
-              --user "${RUNNER_UID}:${RUNNER_GID}" \
-              -e HOME=/home/audit \
-              -e PYTHONPATH=/audit/ro \
-              -e PYTHONNOUSERSITE=1 \
-              --cap-drop ALL \
-              --security-opt no-new-privileges \
-              -v "${GITHUB_WORKSPACE}/backend/requirements.txt:/input/requirements.txt:ro" \
-              -v "${GITHUB_WORKSPACE}/backend/scripts/audit_alpine_candidate_wheels_amd64.py:/audit/ro/audit_alpine_candidate_wheels_amd64.py:ro" \
-              -v "${GITHUB_WORKSPACE}/backend/scripts/alpine_wheel_audit_common.py:/audit/ro/alpine_wheel_audit_common.py:ro" \
-              -v "${GITHUB_WORKSPACE}/backend/scripts/validate_target_site_packages.py:/audit/ro/validate_target_site_packages.py:ro" \
-              -v "${ALPINE_AUDIT_OUTPUT}:/output:rw" \
-              -v "${AMD64_WHEELHOUSE}:/wheelhouse:rw" \
-              -v "${AMD64_TARGET}:/target:rw" \
-              -v "${AMD64_HOME}:/home/audit:rw" \
-              "${ALPINE_CANDIDATE_AMD64_REF}" \
-              "$@"
-          }
-          docker_run_amd64 bridge python /audit/ro/audit_alpine_candidate_wheels_amd64.py probe
-          docker_run_amd64 bridge python /audit/ro/audit_alpine_candidate_wheels_amd64.py download
-          docker_run_amd64 none python /audit/ro/audit_alpine_candidate_wheels_amd64.py install
-      - name: Audit arm64 musllinux wheel resolution
-        if: ${{ !cancelled() }}
-        run: |
-          set -euo pipefail
-          ALPINE_AUDIT_BASE="${RUNNER_TEMP}/sellerai-alpine-audit"
-          PYTHONPATH="${GITHUB_WORKSPACE}/backend/scripts" python backend/scripts/audit_alpine_candidate_wheels_arm64.py \
-            backend/requirements.txt \
-            "${ALPINE_AUDIT_BASE}/output/wheel-arm64.json" \
-            "${ALPINE_AUDIT_BASE}/staging-arm64/wheelhouse"
-      - name: Validate Alpine candidate wheel manifests
-        if: ${{ !cancelled() }}
-        run: python backend/scripts/validate_alpine_candidate_wheel_manifest.py "${RUNNER_TEMP}/sellerai-alpine-audit/output"
-      - name: Evaluate Alpine candidate vulnerability policy
-        if: ${{ !cancelled() }}
-        run: python backend/scripts/evaluate_alpine_candidate_reports.py "${RUNNER_TEMP}/sellerai-alpine-audit/output"
-      - name: Upload Alpine candidate audit artifacts
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: sellerai-alpine-candidate-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/sellerai-alpine-audit/output/candidate-amd64.cdx.json
-            ${{ runner.temp }}/sellerai-alpine-audit/output/candidate-arm64.cdx.json
-            ${{ runner.temp }}/sellerai-alpine-audit/output/candidate-amd64.trivy.json
-            ${{ runner.temp }}/sellerai-alpine-audit/output/candidate-arm64.trivy.json
-            ${{ runner.temp }}/sellerai-alpine-audit/output/candidate-policy-summary.json
-            ${{ runner.temp }}/sellerai-alpine-audit/output/wheel-amd64.json
-            ${{ runner.temp }}/sellerai-alpine-audit/output/wheel-arm64.json
-          retention-days: 14
-          if-no-files-found: error
-      - name: Cleanup Alpine candidate audit workspace
-        if: always()
-        run: |
-          set -euo pipefail
-          : "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
-          CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-alpine-audit"
-          if [[ "${CLEANUP_TARGET}" == "/" ]]; then
-            echo "unsafe cleanup target" >&2
-            exit 1
-          fi
-          if [[ -z "${CLEANUP_TARGET}" ]]; then
-            echo "unsafe cleanup target" >&2
-            exit 1
-          fi
-          if [[ "${CLEANUP_TARGET}" == "${RUNNER_TEMP}" ]]; then
-            echo "cleanup target must not equal RUNNER_TEMP root" >&2
-            exit 1
-          fi
-          if [[ -n "${GITHUB_WORKSPACE:-}" && "${CLEANUP_TARGET}" == "${GITHUB_WORKSPACE}" ]]; then
-            echo "cleanup target must not equal workspace root" >&2
-            exit 1
-          fi
-          rm -rf "${CLEANUP_TARGET}"
-
-  backend-alpine-hardened-candidate:
-    if: github.event_name == 'pull_request'
-    needs: [backend, frontend]
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      actions: write
-    env:
-      ALPINE_CANDIDATE_INDEX_REF: python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1
-      SYFT_IMAGE: anchore/syft:v1.51.0@sha256:678bfa565b60f747aac0f8e964fe5588a24445b8d0a480e91f6efd70020dfbb0
-      TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Validate pinned container base images
-        run: python backend/scripts/validate_container_image_pins.py
-      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.6.0
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.10.0
-      - name: Prepare Alpine hardened candidate workspace
-        run: |
-          set -euo pipefail
-          umask 077
-          HARDENED_BASE="${RUNNER_TEMP}/sellerai-alpine-hardened"
-          mkdir -p \
-            "${HARDENED_BASE}/input" \
-            "${HARDENED_BASE}/output" \
-            "${HARDENED_BASE}/staging"
-      - name: Build amd64 hardened Alpine backend candidate
-        env:
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          IMAGE="sellerai-backend-alpine-hardened:${IMAGE_TAG}-amd64"
-          docker buildx build \
-            --platform linux/amd64 \
-            --file backend/Dockerfile.prod \
-            --tag "${IMAGE}" \
-            --load \
-            backend
-          docker image inspect "${IMAGE}" --format '{{.Architecture}}' | grep -q '^amd64$'
-      - name: Run amd64 hardened runtime and smoke validation
-        env:
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          IMAGE="sellerai-backend-alpine-hardened:${IMAGE_TAG}-amd64"
-          HARDENED_OUTPUT="${RUNNER_TEMP}/sellerai-alpine-hardened/output"
-          docker run --rm \
-            --network none \
-            --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev \
-            --cap-drop ALL \
-            --security-opt no-new-privileges \
-            -e ENVIRONMENT=testing \
-            -e AMAZON_SP_API_ENDPOINT_MODE=mock \
-            -e DATABASE_URL=postgresql://localhost:5432/sellerai_test \
-            -e OPENAI_API_KEY=runtime-smoke-not-used \
-            "${IMAGE}" \
-            python scripts/validate_alpine_hardened_smoke.py
-          docker run --rm --user 0 "${IMAGE}" sh -c 'apk info -q' > "${HARDENED_OUTPUT}/amd64-apk-inventory.txt"
-          python backend/scripts/write_alpine_hardened_verification_manifest.py amd64 runtime_smoke \
-            "${HARDENED_OUTPUT}/backend-alpine-amd64-smoke-manifest.json" \
-            --check runtime_environment=true \
-            --check alpine_os_packages=true \
-            --check production_smoke=true \
-            --check hardened_smoke=true \
-            --check uvicorn_health=true \
-            --check non_root_user=true \
-            --apk-inventory-file "${HARDENED_OUTPUT}/amd64-apk-inventory.txt"
-          python backend/scripts/validate_alpine_hardened_verification_manifest.py \
-            "${HARDENED_OUTPUT}/backend-alpine-amd64-smoke-manifest.json"
-      - name: Build arm64 hardened Alpine backend candidate
-        env:
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          IMAGE="sellerai-backend-alpine-hardened:${IMAGE_TAG}-arm64"
-          docker buildx build \
-            --platform linux/arm64 \
-            --file backend/Dockerfile.prod \
-            --tag "${IMAGE}" \
-            --load \
-            backend
-          docker image inspect "${IMAGE}" --format '{{.Architecture}}' | grep -q '^arm64$'
-      - name: Run arm64 build-only verification
-        env:
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          IMAGE="sellerai-backend-alpine-hardened:${IMAGE_TAG}-arm64"
-          HARDENED_OUTPUT="${RUNNER_TEMP}/sellerai-alpine-hardened/output"
-          docker run --rm --platform linux/arm64 \
-            --network none \
-            --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev \
-            --cap-drop ALL \
-            --security-opt no-new-privileges \
-            -e ENVIRONMENT=testing \
-            -e AMAZON_SP_API_ENDPOINT_MODE=mock \
-            -e DATABASE_URL=postgresql://localhost:5432/sellerai_test \
-            -e OPENAI_API_KEY=runtime-smoke-not-used \
-            "${IMAGE}" \
-            python scripts/validate_backend_runtime_environment.py
-          docker run --rm --platform linux/arm64 \
-            --network none \
-            --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev \
-            --cap-drop ALL \
-            --security-opt no-new-privileges \
-            -e ENVIRONMENT=testing \
-            -e AMAZON_SP_API_ENDPOINT_MODE=mock \
-            -e DATABASE_URL=postgresql://localhost:5432/sellerai_test \
-            -e OPENAI_API_KEY=runtime-smoke-not-used \
-            "${IMAGE}" \
-            python scripts/validate_backend_alpine_os_packages.py
-          docker run --rm --platform linux/arm64 "${IMAGE}" sh -c 'test "$(id -u)" -eq 1001'
-          docker run --rm --platform linux/arm64 --user 0 "${IMAGE}" sh -c 'apk info -q' > "${HARDENED_OUTPUT}/arm64-apk-inventory.txt"
-          python backend/scripts/write_alpine_hardened_verification_manifest.py arm64 build_only \
-            "${HARDENED_OUTPUT}/backend-alpine-arm64-verification-manifest.json" \
-            --check image_config=true \
-            --check runtime_environment=true \
-            --check alpine_os_packages=true \
-            --check non_root_user=true \
-            --apk-inventory-file "${HARDENED_OUTPUT}/arm64-apk-inventory.txt"
-          python backend/scripts/validate_alpine_hardened_verification_manifest.py \
-            "${HARDENED_OUTPUT}/backend-alpine-arm64-verification-manifest.json"
-      - name: Save hardened candidate images for offline scan
-        env:
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          HARDENED_INPUT="${RUNNER_TEMP}/sellerai-alpine-hardened/input"
-          docker image save "sellerai-backend-alpine-hardened:${IMAGE_TAG}-amd64" -o "${HARDENED_INPUT}/backend-alpine-amd64.tar"
-          docker image save "sellerai-backend-alpine-hardened:${IMAGE_TAG}-arm64" -o "${HARDENED_INPUT}/backend-alpine-arm64.tar"
-      - name: Generate hardened Alpine candidate CycloneDX SBOMs
-        run: |
-          set -euo pipefail
-          HARDENED_INPUT="${RUNNER_TEMP}/sellerai-alpine-hardened/input"
-          HARDENED_OUTPUT="${RUNNER_TEMP}/sellerai-alpine-hardened/output"
-          docker run --rm \
-            -e SYFT_CHECK_FOR_APP_UPDATE=false \
-            -v "${HARDENED_INPUT}:/input:ro" \
-            -v "${HARDENED_OUTPUT}:/output:rw" \
-            "${SYFT_IMAGE}" \
-            docker-archive:/input/backend-alpine-amd64.tar \
-            -o cyclonedx-json@1.6=/output/backend-alpine-amd64.cdx.json
-          docker run --rm \
-            -e SYFT_CHECK_FOR_APP_UPDATE=false \
-            -v "${HARDENED_INPUT}:/input:ro" \
-            -v "${HARDENED_OUTPUT}:/output:rw" \
-            "${SYFT_IMAGE}" \
-            docker-archive:/input/backend-alpine-arm64.tar \
-            -o cyclonedx-json@1.6=/output/backend-alpine-arm64.cdx.json
-      - name: Validate hardened Alpine candidate SBOM artifacts
-        run: >-
-          python backend/scripts/validate_sbom_artifacts.py --files
-          "${{ runner.temp }}/sellerai-alpine-hardened/output"
-          backend-alpine-amd64.cdx.json backend-alpine-arm64.cdx.json
-      - name: Generate hardened Alpine candidate Trivy reports
-        run: |
-          set -euo pipefail
-          RUNNER_UID="$(id -u)"
-          RUNNER_GID="$(id -g)"
-          if ! [[ "${RUNNER_UID}" =~ ^[0-9]+$ && "${RUNNER_GID}" =~ ^[0-9]+$ ]]; then
-            echo "runner uid/gid validation failed" >&2
-            exit 1
-          fi
-          echo "scanner-user-validated"
-          HARDENED_INPUT="${RUNNER_TEMP}/sellerai-alpine-hardened/input"
-          HARDENED_OUTPUT="${RUNNER_TEMP}/sellerai-alpine-hardened/output"
-          HARDENED_TRIVY_CACHE_DIR="${RUNNER_TEMP}/sellerai-alpine-hardened/trivy-cache"
-          umask 077
-          mkdir -p "${HARDENED_INPUT}" "${HARDENED_OUTPUT}" "${HARDENED_TRIVY_CACHE_DIR}"
-          scan_status=0
-          if ! docker run --rm \
-            --user "${RUNNER_UID}:${RUNNER_GID}" \
-            -e HOME=/tmp/trivy-home \
-            -v "${HARDENED_INPUT}:/input:ro" \
-            -v "${HARDENED_OUTPUT}:/output:rw" \
-            -v "${HARDENED_TRIVY_CACHE_DIR}:/trivy-cache:rw" \
-            "${TRIVY_IMAGE}" \
-            image --cache-dir /trivy-cache --input /input/backend-alpine-amd64.tar --format json --output /output/backend-alpine-amd64.trivy.json --scanners vuln --exit-code 0; then
-            echo "backend-alpine-amd64: trivy scan command failed" >&2
-            scan_status=1
-          fi
-          if ! docker run --rm \
-            --user "${RUNNER_UID}:${RUNNER_GID}" \
-            -e HOME=/tmp/trivy-home \
-            -v "${HARDENED_INPUT}:/input:ro" \
-            -v "${HARDENED_OUTPUT}:/output:rw" \
-            -v "${HARDENED_TRIVY_CACHE_DIR}:/trivy-cache:rw" \
-            "${TRIVY_IMAGE}" \
-            image --cache-dir /trivy-cache --input /input/backend-alpine-arm64.tar --format json --output /output/backend-alpine-arm64.trivy.json --scanners vuln --exit-code 0; then
-            echo "backend-alpine-arm64: trivy scan command failed" >&2
-            scan_status=1
-          fi
-          exit "${scan_status}"
-      - name: Evaluate hardened Alpine candidate vulnerability policy
-        run: python backend/scripts/evaluate_alpine_hardened_candidate_reports.py "${RUNNER_TEMP}/sellerai-alpine-hardened/output"
-      - name: Upload hardened Alpine candidate artifacts
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: sellerai-alpine-hardened-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/sellerai-alpine-hardened/output/backend-alpine-amd64.cdx.json
-            ${{ runner.temp }}/sellerai-alpine-hardened/output/backend-alpine-arm64.cdx.json
-            ${{ runner.temp }}/sellerai-alpine-hardened/output/backend-alpine-amd64.trivy.json
-            ${{ runner.temp }}/sellerai-alpine-hardened/output/backend-alpine-arm64.trivy.json
-            ${{ runner.temp }}/sellerai-alpine-hardened/output/backend-alpine-hardened-summary.json
-            ${{ runner.temp }}/sellerai-alpine-hardened/output/backend-alpine-amd64-smoke-manifest.json
-            ${{ runner.temp }}/sellerai-alpine-hardened/output/backend-alpine-arm64-verification-manifest.json
-          retention-days: 14
-          if-no-files-found: error
-      - name: Cleanup Alpine hardened candidate workspace
-        if: always()
-        run: |
-          set -euo pipefail
-          : "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
-          CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-alpine-hardened"
           if [[ "${CLEANUP_TARGET}" == "/" ]]; then
             echo "unsafe cleanup target" >&2
             exit 1

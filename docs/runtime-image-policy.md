@@ -11,7 +11,7 @@ Vulnerability scanning, SBOM generation, and supply-chain enforcement are docume
 
 ## 1. Image inventory
 
-Expected external pinned references: **12** (validated by `validate_container_image_pins.py`; production backend Alpine adds duplicate digest lines in audit alias Dockerfile).
+Expected external pinned references: **14** (validated by `validate_container_image_pins.py`).
 
 | File | Line | Repository | Tag | Environment | Architectures required |
 | --- | --- | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ Repository runtime contract: `frontend/.nvmrc` = `24.19.0`, `package.json` `engi
 | Python 3.11 security support ends | **2027-10** (official schedule granularity: month) |
 | Official source | https://devguide.python.org/versions/ |
 | Also | https://peps.python.org/pep-0664/ |
-| Decision | **Retain Python 3.11-slim-trixie** (explicit Debian trixie suite) |
+| Decision | **Retain Python 3.11-slim-trixie** for the **development** backend Dockerfile only. Production/RC backend (`backend/Dockerfile.prod`) uses Alpine 3.24 (`python:3.11-alpine3.24`) after S3d4c3. |
 | Next mandatory review | **2027-07-01** (three months before scheduled security end) |
 
 ### PostgreSQL
@@ -136,7 +136,7 @@ All digests below are **OCI image index / Docker manifest list** digests (multi-
 | --- | --- | --- | --- |
 | `node:24-alpine` | `sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
 | `python:3.11-slim-trixie` | `sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7` | amd64, arm64 | Hub tag API + official-images GitCommit `fe89472bda6128fef7e964d1f1991534e32dcfb7` (development backend only) |
-| `python:3.11-alpine3.24` | `sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1` | amd64, arm64 (production backend + audit) | S3d4c2 hardened candidate verification |
+| `python:3.11-alpine3.24` | `sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1` | amd64, arm64 (production backend) | S3d4c3 production migration; S3d5 retired candidate jobs |
 | `postgres:16-alpine` | `sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
 | `nginx:1.30-alpine` | `sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
 | `redis:7-alpine` | `sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
@@ -163,12 +163,12 @@ The same `repository:tag` must map to the same digest in every tracked file.
 | CI — containers job | validator before Compose validation and Docker builds |
 | CI — postgres service | pinned digest in workflow file (services start before steps) |
 
-Validator inventory contract (2026-08-19):
+Validator inventory contract (2026-08-19, S3d5):
 
-- **9** scanned files (includes `backend/Dockerfile.alpine-candidate` audit-only Dockerfile)
-- **17** runtime external pinned references (production backend Alpine + audit alias + development Debian backend)
-- **14** scanner pinned references (containers + Alpine audit + hardened candidate jobs)
-- **6** scanner approved identities (SYFT_IMAGE + TRIVY_IMAGE per scan job)
+- **8** scanned files (audit-only `backend/Dockerfile.alpine-candidate` removed)
+- **14** runtime external pinned references (production backend Alpine + development Debian backend)
+- **8** scanner pinned references (`containers` job only: 4 Syft + 4 Trivy)
+- **2** scanner approved identities (`SYFT_IMAGE` + `TRIVY_IMAGE` on the production `containers` job)
 - **4** internal build references
 
 ---
@@ -220,4 +220,23 @@ Cross-verified on **2026-08-18**:
 - **Tag drift:** Tags such as `24-alpine` can point to new digests upstream; refresh pins deliberately after review.
 - **Redis:** Dev-only; no production lifecycle commitment in this policy.
 - **Internal RC tags:** Local build tags are outside external pin scope but validated against an internal allowlist.
-- **S3c scope:** Runtime pinning does not claim images are vulnerability-free. SBOM/scan policy lives in `docs/supply-chain-security-policy.md`. Remote CI scan proof is pending for S3c completion.
+- **S3c scope:** Runtime pinning does not claim images are vulnerability-free. SBOM/scan policy lives in `docs/supply-chain-security-policy.md`. Production `containers` scans four targets (backend amd64, backend arm64, frontend, nginx).
+
+---
+
+## 9. Historical Alpine candidate audit archive (S3d5)
+
+Temporary PR-only jobs `backend-alpine-candidate-audit` and `backend-alpine-hardened-candidate` were retired in S3d5 after production Alpine migration. They are **not** current CI jobs. Remote GitHub Actions runs and 14-day artifacts remain historical evidence; do not treat the designed raw-candidate failure as a production policy failure.
+
+| Item | Value |
+| --- | --- |
+| Raw index digest (now production FROM) | `python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1` |
+| Retired linux/amd64 child digest | `sha256:cc19a3e1085aba7d26690cf0725d9a3e083cbea0feec34ba8133d40a8ac1d399` |
+| Retired linux/arm64 child digest | `sha256:df8376721de6f98515643fca8e7aac56e6a39bc178697a1d8c020ffa050b655e` |
+| Wheel audit | 60 wheels, 0 sdist, 0 missing |
+| Raw candidate blocker | HIGH+fix on unmodified official image packages `wheel` and `jaraco.context` (`ALPINE_REMOTE_CANDIDATE_BLOCKED` by design) |
+| Hardened candidate | production Dockerfile.prod; policy blocked=0 |
+| Production Alpine migration | S3d4c3; hardening HEAD `bd36fd3` Run [32243262386](https://github.com/biforch/seller-ai-copilot/actions/runs/32243262386) |
+| Last pre-S3d5 Quality Gate (lint + 3-image production blocked=0; raw candidate designed-fail) | Run [32272275793](https://github.com/biforch/seller-ai-copilot/actions/runs/32272275793) @ `e3d8084` — containers job `96131809502` blocked=0; hardened job `96131809397` success; raw job `96131809593` designed failure |
+| Wheel audit evidence Run | [32272275793](https://github.com/biforch/seller-ai-copilot/actions/runs/32272275793) job `96131809593` |
+| Hardened candidate verification Run | [32272275793](https://github.com/biforch/seller-ai-copilot/actions/runs/32272275793) job `96131809397` |

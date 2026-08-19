@@ -17,7 +17,6 @@ POLICY_DOC = REPO_ROOT / "docs" / "runtime-image-policy.md"
 SCAN_TARGETS = (
     REPO_ROOT / "backend" / "Dockerfile",
     REPO_ROOT / "backend" / "Dockerfile.prod",
-    REPO_ROOT / "backend" / "Dockerfile.alpine-candidate",
     REPO_ROOT / "frontend" / "Dockerfile",
     REPO_ROOT / "frontend" / "Dockerfile.prod",
     REPO_ROOT / "nginx" / "Dockerfile.rc",
@@ -27,10 +26,11 @@ SCAN_TARGETS = (
 )
 
 EXPECTED_SCAN_FILE_COUNT = len(SCAN_TARGETS)
-EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 17
+EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 14
 EXPECTED_INTERNAL_BUILD_REF_COUNT = 4
-EXPECTED_SCANNER_PINNED_REF_COUNT = 14
-EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT = 6
+EXPECTED_SCANNER_PINNED_REF_COUNT = 8
+EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT = 2
+EXPECTED_PRODUCTION_SCAN_TARGET_COUNT = 4
 
 ALLOWED_SCANNER_SHELL_VARS = frozenset(
     {
@@ -43,30 +43,53 @@ ALLOWED_SCANNER_SHELL_VARS = frozenset(
         "TRIVY_CACHE_DIR",
         "SCAN_INPUT",
         "SCAN_OUTPUT",
-        "ALPINE_CANDIDATE_INDEX_REF",
-        "ALPINE_CANDIDATE_AMD64_REF",
-        "ALPINE_CANDIDATE_ARM64_REF",
-        "ALPINE_AUDIT_INPUT",
-        "ALPINE_AUDIT_OUTPUT",
-        "ALPINE_TRIVY_CACHE_DIR",
-        "HARDENED_INPUT",
-        "HARDENED_OUTPUT",
-        "HARDENED_TRIVY_CACHE_DIR",
         "CLEANUP_TARGET",
     }
 )
 
-APPROVED_AUDIT_CANDIDATES = frozenset(
+APPROVED_ALPINE_BACKEND_BASE = (
+    "python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1"
+)
+APPROVED_ALPINE_BACKEND_BASES = frozenset({APPROVED_ALPINE_BACKEND_BASE})
+RETIRED_ALPINE_AUDIT_CHILD_DIGESTS = frozenset(
     {
-        "python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1",
-        "python:3.11-alpine3.24@sha256:cc19a3e1085aba7d26690cf0725d9a3e083cbea0feec34ba8133d40a8ac1d399",
-        "python:3.11-alpine3.24@sha256:df8376721de6f98515643fca8e7aac56e6a39bc178697a1d8c020ffa050b655e",
+        "sha256:cc19a3e1085aba7d26690cf0725d9a3e083cbea0feec34ba8133d40a8ac1d399",
+        "sha256:df8376721de6f98515643fca8e7aac56e6a39bc178697a1d8c020ffa050b655e",
     }
+)
+RETIRED_ALPINE_JOB_NAMES = (
+    "backend-alpine-candidate-audit",
+    "backend-alpine-hardened-candidate",
+)
+RETIRED_ALPINE_TOKENS = (
+    "ALPINE_CANDIDATE_INDEX_REF",
+    "ALPINE_CANDIDATE_AMD64_REF",
+    "ALPINE_CANDIDATE_ARM64_REF",
+    "ALPINE_AUDIT_INPUT",
+    "ALPINE_AUDIT_OUTPUT",
+    "ALPINE_TRIVY_CACHE_DIR",
+    "HARDENED_INPUT",
+    "HARDENED_OUTPUT",
+    "HARDENED_TRIVY_CACHE_DIR",
+    "Dockerfile.alpine-candidate",
+    "sellerai-alpine-candidate-",
+    "sellerai-alpine-hardened-",
+    "evaluate_alpine_candidate_reports.py",
+    "evaluate_alpine_hardened_candidate_reports.py",
 )
 
 CONTAINERS_JOB_NAME = "containers"
-ALPINE_CANDIDATE_JOB_NAME = "backend-alpine-candidate-audit"
-ALPINE_HARDENED_JOB_NAME = "backend-alpine-hardened-candidate"
+PRODUCTION_ARTIFACT_JSON_FILES = (
+    "backend.cdx.json",
+    "backend-arm64.cdx.json",
+    "frontend.cdx.json",
+    "nginx.cdx.json",
+    "backend.trivy.json",
+    "backend-arm64.trivy.json",
+    "frontend.trivy.json",
+    "nginx.trivy.json",
+    "scan-summary.json",
+)
 
 APPROVED_BUILD_ACTIONS = frozenset(
     {
@@ -78,7 +101,6 @@ APPROVED_BUILD_ACTIONS = frozenset(
 BACKEND_ALPINE_DOCKERFILES = frozenset(
     {
         REPO_ROOT / "backend" / "Dockerfile.prod",
-        REPO_ROOT / "backend" / "Dockerfile.alpine-candidate",
     }
 )
 
@@ -97,30 +119,13 @@ SCANNER_FORBIDDEN_CREDENTIAL_ENV = re.compile(
     r"NPM_TOKEN|REGISTRY_|DOCKER_AUTH|client_secret|access_token|refresh_token)",
     re.IGNORECASE,
 )
+SYFT_STEP_NAME = "Generate CycloneDX SBOMs"
 TRIVY_STEP_NAME = "Generate Trivy vulnerability reports"
-ALPINE_TRIVY_STEP_NAME = "Generate Alpine candidate Trivy reports"
-ALPINE_SYFT_STEP_NAME = "Generate Alpine candidate CycloneDX SBOMs"
 CLEANUP_STEP_NAME = "Cleanup supply-chain scan workspace"
-ALPINE_CLEANUP_STEP_NAME = "Cleanup Alpine candidate audit workspace"
-ALPINE_ARTIFACT_STEP_NAME = "Upload Alpine candidate audit artifacts"
-ALPINE_WHEEL_AMD64_STEP = "Audit amd64 musllinux wheel install"
-ALPINE_WHEEL_ARM64_STEP = "Audit arm64 musllinux wheel resolution"
-ALPINE_WHEEL_VALIDATE_STEP = "Validate Alpine candidate wheel manifests"
-ALPINE_POLICY_STEP = "Evaluate Alpine candidate vulnerability policy"
-ALPINE_SBOM_VALIDATE_STEP = "Validate Alpine candidate SBOM artifacts"
-ALPINE_TRIVY_GENERATE_STEP = "Generate Alpine candidate Trivy reports"
-ALPINE_HARDENED_SYFT_STEP = "Generate hardened Alpine candidate CycloneDX SBOMs"
-ALPINE_HARDENED_TRIVY_STEP = "Generate hardened Alpine candidate Trivy reports"
-ALPINE_HARDENED_SBOM_VALIDATE_STEP = "Validate hardened Alpine candidate SBOM artifacts"
-ALPINE_HARDENED_POLICY_STEP = "Evaluate hardened Alpine candidate vulnerability policy"
-ALPINE_HARDENED_ARTIFACT_STEP = "Upload hardened Alpine candidate artifacts"
-ALPINE_HARDENED_CLEANUP_STEP = "Cleanup Alpine hardened candidate workspace"
-ALPINE_HARDENED_AMD64_BUILD_STEP = "Build amd64 hardened Alpine backend candidate"
-ALPINE_HARDENED_AMD64_SMOKE_STEP = "Run amd64 hardened runtime and smoke validation"
-ALPINE_HARDENED_ARM64_BUILD_STEP = "Build arm64 hardened Alpine backend candidate"
-ALPINE_HARDENED_ARM64_VERIFY_STEP = "Run arm64 build-only verification"
+ARTIFACT_STEP_NAME = "Upload supply-chain scan artifacts"
 RUNTIME_SMOKE_STEP_NAME = "Validate backend production runtime environment"
 FRONTEND_RUNTIME_SMOKE_STEP_NAME = "Validate frontend production runtime environment"
+ARM64_VERIFY_STEP_NAME = "Validate production backend arm64 build"
 
 ALLOWED_SCANNER_IMAGES = frozenset(
     {
@@ -207,12 +212,12 @@ def _validate_external_image(path: Path, line_no: int, ref: str) -> list[Finding
             )
         ]
 
-    if ref in APPROVED_AUDIT_CANDIDATES:
+    if ref in APPROVED_ALPINE_BACKEND_BASES:
         return [
             Finding(
                 path,
                 line_no,
-                "approved audit candidate image must not be used as runtime base image",
+                "approved Alpine backend base must only be used in backend production Dockerfile",
             )
         ]
 
@@ -321,7 +326,7 @@ def _validate_alpine_backend_dockerfile_content(path: Path, content: str) -> lis
         if "@" in db_fragment or "://" in db_fragment and "://" in db_fragment.split("://", 1)[-1]:
             if "postgresql://localhost" not in db_fragment:
                 findings.append(
-                    Finding(path, 0, "Alpine candidate Dockerfile must not embed credential DATABASE_URL")
+                    Finding(path, 0, "Alpine backend Dockerfile must not embed credential DATABASE_URL")
                 )
     return findings
 
@@ -358,7 +363,7 @@ def _scan_dockerfile(path: Path, content: str) -> tuple[list[Finding], list[tupl
             findings.append(Finding(path, line_no, f"unknown stage alias {ref!r}"))
             continue
 
-        if path in BACKEND_ALPINE_DOCKERFILES and ref in APPROVED_AUDIT_CANDIDATES:
+        if path in BACKEND_ALPINE_DOCKERFILES and ref in APPROVED_ALPINE_BACKEND_BASES:
             external_refs.append((path, line_no, ref))
             if alias:
                 known_stages.add(alias)
@@ -542,21 +547,43 @@ def _validate_trivy_scan_step(path: Path, content: str) -> list[Finding]:
         findings.append(Finding(path, 0, "Trivy step must emit scanner-user-validated after uid/gid validation"))
 
     user_runs = re.findall(r'--user "\$\{RUNNER_UID\}:\$\{RUNNER_GID\}"', block)
-    if len(user_runs) != 3:
+    if len(user_runs) != EXPECTED_PRODUCTION_SCAN_TARGET_COUNT:
         findings.append(
-            Finding(path, 0, f"Trivy step must run three scanner containers as runner uid/gid, found {len(user_runs)}")
+            Finding(
+                path,
+                0,
+                (
+                    "Trivy step must run "
+                    f"{EXPECTED_PRODUCTION_SCAN_TARGET_COUNT} scanner containers as runner uid/gid, "
+                    f"found {len(user_runs)}"
+                ),
+            )
         )
 
     cache_dir_flags = re.findall(r"--cache-dir /trivy-cache", block)
-    if len(cache_dir_flags) != 3:
+    if len(cache_dir_flags) != EXPECTED_PRODUCTION_SCAN_TARGET_COUNT:
         findings.append(
-            Finding(path, 0, f"Trivy step must pass --cache-dir /trivy-cache three times, found {len(cache_dir_flags)}")
+            Finding(
+                path,
+                0,
+                (
+                    "Trivy step must pass --cache-dir /trivy-cache "
+                    f"{EXPECTED_PRODUCTION_SCAN_TARGET_COUNT} times, found {len(cache_dir_flags)}"
+                ),
+            )
         )
 
     cache_mounts = re.findall(r'"\$\{TRIVY_CACHE_DIR\}:/trivy-cache:rw"', block)
-    if len(cache_mounts) != 3:
+    if len(cache_mounts) != EXPECTED_PRODUCTION_SCAN_TARGET_COUNT:
         findings.append(
-            Finding(path, 0, f"Trivy step must mount TRIVY_CACHE_DIR to /trivy-cache three times, found {len(cache_mounts)}")
+            Finding(
+                path,
+                0,
+                (
+                    "Trivy step must mount TRIVY_CACHE_DIR to /trivy-cache "
+                    f"{EXPECTED_PRODUCTION_SCAN_TARGET_COUNT} times, found {len(cache_mounts)}"
+                ),
+            )
         )
 
     if "/root/.cache/trivy" in block:
@@ -570,8 +597,22 @@ def _validate_trivy_scan_step(path: Path, content: str) -> list[Finding]:
 
     input_mounts = re.findall(r'"\$\{SCAN_INPUT\}:/input:ro"', block)
     output_mounts = re.findall(r'"\$\{SCAN_OUTPUT\}:/output:rw"', block)
-    if len(input_mounts) != 3 or len(output_mounts) != 3:
-        findings.append(Finding(path, 0, "Trivy step must keep input :ro and output :rw for all three scans"))
+    if (
+        len(input_mounts) != EXPECTED_PRODUCTION_SCAN_TARGET_COUNT
+        or len(output_mounts) != EXPECTED_PRODUCTION_SCAN_TARGET_COUNT
+    ):
+        findings.append(
+            Finding(
+                path,
+                0,
+                (
+                    "Trivy step must keep input :ro and output :rw for all "
+                    f"{EXPECTED_PRODUCTION_SCAN_TARGET_COUNT} scans"
+                ),
+            )
+        )
+    if "backend-arm64.tar" not in block or "backend-arm64.trivy.json" not in block:
+        findings.append(Finding(path, 0, "Trivy step must scan backend-arm64.tar into backend-arm64.trivy.json"))
 
     return findings
 
@@ -590,6 +631,7 @@ def _validate_runtime_smoke_step(path: Path, content: str) -> list[Finding]:
 
     required_tokens = (
         "docker run --rm",
+        "--network none",
         "--read-only",
         "--tmpfs /tmp:rw,noexec,nosuid,nodev",
         "--cap-drop ALL",
@@ -787,420 +829,130 @@ def _validate_scanner_env_line(path: Path, line_no: int, line: str, var_name: st
     return findings
 
 
-def _validate_alpine_candidate_env_line(path: Path, line_no: int, line: str, var_name: str) -> list[Finding]:
+def _validate_syft_scan_step(path: Path, content: str) -> list[Finding]:
     findings: list[Finding] = []
-    if "${{" in line:
-        findings.append(
-            Finding(path, line_no, f"{var_name} must not use workflow interpolation")
-        )
-    if re.search(r"\b(secrets|inputs|vars)\.", line):
-        findings.append(
-            Finding(path, line_no, f"{var_name} must not reference secrets, inputs, or repository variables")
-        )
-    value_match = re.match(rf"^\s+{var_name}:\s*(?P<ref>\S+)\s*(?:#.*)?$", line)
-    if not value_match:
-        findings.append(Finding(path, line_no, f"{var_name} must define a static pinned candidate reference"))
-        return findings
-    ref = value_match.group("ref")
-    if ref not in APPROVED_AUDIT_CANDIDATES:
-        findings.append(
-            Finding(path, line_no, f"{var_name} must use an approved audit candidate reference")
-        )
-    return findings
-
-
-def _validate_alpine_trivy_step(path: Path, content: str) -> list[Finding]:
-    findings: list[Finding] = []
-    block = _extract_step_run_block(content, ALPINE_TRIVY_STEP_NAME)
+    block = _extract_step_run_block(content, SYFT_STEP_NAME)
     if block is None:
-        findings.append(Finding(path, 0, "Alpine candidate job must define Generate Alpine candidate Trivy reports step"))
+        findings.append(Finding(path, 0, "containers job must define Generate CycloneDX SBOMs step"))
         return findings
-
-    user_runs = re.findall(r'--user "\$\{RUNNER_UID\}:\$\{RUNNER_GID\}"', block)
-    if len(user_runs) != 2:
-        findings.append(
-            Finding(path, 0, f"Alpine Trivy step must run two scanner containers as runner uid/gid, found {len(user_runs)}")
-        )
-    cache_mounts = re.findall(r'"\$\{ALPINE_TRIVY_CACHE_DIR\}:/trivy-cache:rw"', block)
-    if len(cache_mounts) != 2:
-        findings.append(
-            Finding(path, 0, f"Alpine Trivy step must mount ALPINE_TRIVY_CACHE_DIR twice, found {len(cache_mounts)}")
-        )
-    if "/var/run/docker.sock" in block or "sudo" in block or "chmod 777" in block:
-        findings.append(Finding(path, 0, "Alpine Trivy step must not use docker socket or privilege helpers"))
-    return findings
-
-
-def _extract_alpine_job_step_names(content: str) -> list[str]:
-    marker = f"{ALPINE_CANDIDATE_JOB_NAME}:"
-    if marker not in content:
-        return []
-    job_block = content.split(marker, 1)[1]
-    step_names: list[str] = []
-    for line in job_block.splitlines():
-        if re.match(r"^  [a-zA-Z0-9_-]+:\s*$", line):
-            break
-        match = re.match(r"^      - name: (.+)$", line)
-        if match:
-            step_names.append(match.group(1))
-    return step_names
-
-
-def _validate_alpine_step_order(path: Path, content: str) -> list[Finding]:
-    findings: list[Finding] = []
-    steps = _extract_alpine_job_step_names(content)
-    if not steps:
-        findings.append(Finding(path, 0, "Alpine candidate job must define ordered steps"))
-        return findings
-
-    required_order = (
-        ALPINE_SBOM_VALIDATE_STEP,
-        ALPINE_TRIVY_GENERATE_STEP,
-        ALPINE_WHEEL_AMD64_STEP,
-        ALPINE_WHEEL_ARM64_STEP,
-        ALPINE_WHEEL_VALIDATE_STEP,
-        ALPINE_POLICY_STEP,
-        ALPINE_ARTIFACT_STEP_NAME,
-        ALPINE_CLEANUP_STEP_NAME,
+    required_outputs = (
+        "docker-archive:/input/backend.tar",
+        "docker-archive:/input/backend-arm64.tar",
+        "docker-archive:/input/frontend.tar",
+        "docker-archive:/input/nginx.tar",
+        "cyclonedx-json@1.6=/output/backend.cdx.json",
+        "cyclonedx-json@1.6=/output/backend-arm64.cdx.json",
+        "cyclonedx-json@1.6=/output/frontend.cdx.json",
+        "cyclonedx-json@1.6=/output/nginx.cdx.json",
     )
-    indices = {name: steps.index(name) for name in required_order if name in steps}
-    missing = [name for name in required_order if name not in indices]
-    if missing:
-        findings.append(Finding(path, 0, f"Alpine candidate job missing required steps: {', '.join(missing)}"))
-        return findings
-
-    ordered_pairs = (
-        (ALPINE_SBOM_VALIDATE_STEP, ALPINE_TRIVY_GENERATE_STEP),
-        (ALPINE_TRIVY_GENERATE_STEP, ALPINE_WHEEL_AMD64_STEP),
-        (ALPINE_WHEEL_AMD64_STEP, ALPINE_WHEEL_ARM64_STEP),
-        (ALPINE_WHEEL_ARM64_STEP, ALPINE_WHEEL_VALIDATE_STEP),
-        (ALPINE_WHEEL_VALIDATE_STEP, ALPINE_POLICY_STEP),
-        (ALPINE_POLICY_STEP, ALPINE_ARTIFACT_STEP_NAME),
-        (ALPINE_ARTIFACT_STEP_NAME, ALPINE_CLEANUP_STEP_NAME),
-    )
-    for earlier, later in ordered_pairs:
-        if indices[earlier] >= indices[later]:
-            findings.append(
-                Finding(path, 0, f"Alpine step order invalid: {earlier} must precede {later}")
+    for token in required_outputs:
+        if token not in block:
+            findings.append(Finding(path, 0, f"Syft step missing required contract token: {token}"))
+    syft_runs = block.count('"${SYFT_IMAGE}"')
+    if syft_runs != EXPECTED_PRODUCTION_SCAN_TARGET_COUNT:
+        findings.append(
+            Finding(
+                path,
+                0,
+                (
+                    "Syft step must invoke SYFT_IMAGE "
+                    f"{EXPECTED_PRODUCTION_SCAN_TARGET_COUNT} times, found {syft_runs}"
+                ),
             )
+        )
+    input_mounts = re.findall(r'"\$\{SCAN_INPUT\}:/input:ro"', block)
+    output_mounts = re.findall(r'"\$\{SCAN_OUTPUT\}:/output:rw"', block)
+    if (
+        len(input_mounts) != EXPECTED_PRODUCTION_SCAN_TARGET_COUNT
+        or len(output_mounts) != EXPECTED_PRODUCTION_SCAN_TARGET_COUNT
+    ):
+        findings.append(
+            Finding(
+                path,
+                0,
+                (
+                    "Syft step must keep input :ro and output :rw for all "
+                    f"{EXPECTED_PRODUCTION_SCAN_TARGET_COUNT} scans"
+                ),
+            )
+        )
     return findings
 
 
-def _validate_alpine_wheel_steps(path: Path, content: str) -> list[Finding]:
+def _validate_production_artifact_upload(path: Path, content: str) -> list[Finding]:
     findings: list[Finding] = []
-    for step_name in (ALPINE_WHEEL_AMD64_STEP, ALPINE_WHEEL_ARM64_STEP):
-        block = _extract_step_run_block(content, step_name)
-        if block is None:
-            findings.append(Finding(path, 0, f"{step_name} must define a run block"))
-            continue
-        for token in ("continue-on-error", "|| true", "/var/run/docker.sock", "$HOME", "--env-file"):
-            if token in block:
-                findings.append(Finding(path, 0, f"{step_name} must not use {token}"))
-        if step_name == ALPINE_WHEEL_AMD64_STEP:
-            if "audit_alpine_candidate_wheels_amd64.py" not in block:
-                findings.append(Finding(path, 0, "amd64 wheel audit must invoke audit_alpine_candidate_wheels_amd64.py"))
-            if "alpine_wheel_audit_common.py" not in block:
-                findings.append(Finding(path, 0, "amd64 wheel audit must mount alpine_wheel_audit_common.py"))
-            if "validate_target_site_packages.py" not in block:
-                findings.append(Finding(path, 0, "amd64 wheel audit must mount validate_target_site_packages.py"))
-            if "/audit/ro/" not in block:
-                findings.append(Finding(path, 0, "amd64 wheel audit must mount scripts under /audit/ro"))
-            if '--user "${RUNNER_UID}:${RUNNER_GID}"' not in block:
-                findings.append(Finding(path, 0, "amd64 wheel audit must run as runner uid/gid"))
-            for phase in (" probe", " download", " install"):
-                if phase not in block:
-                    findings.append(Finding(path, 0, f"amd64 wheel audit must invoke{phase} phase"))
-            if "docker_run_amd64 none" not in block and "--network none" not in block:
-                findings.append(Finding(path, 0, "amd64 wheel install phase must disable network"))
-            if "staging-amd64/wheelhouse" not in block:
-                findings.append(Finding(path, 0, "amd64 wheel audit must use staging-amd64 wheelhouse"))
-        if step_name == ALPINE_WHEEL_ARM64_STEP:
-            if "audit_alpine_candidate_wheels_arm64.py" not in block:
-                findings.append(Finding(path, 0, "arm64 wheel audit must invoke audit_alpine_candidate_wheels_arm64.py"))
-            if "if: ${{ !cancelled() }}" not in content.split(f"- name: {ALPINE_WHEEL_ARM64_STEP}", 1)[1].split("- name:", 1)[0]:
-                findings.append(Finding(path, 0, "arm64 wheel audit must use if not cancelled"))
-    policy_marker = f"- name: {ALPINE_POLICY_STEP}"
-    if policy_marker in content:
-        policy_section = content.split(policy_marker, 1)[1].split("- name:", 1)[0]
-        if "if: ${{ !cancelled() }}" not in policy_section:
-            findings.append(Finding(path, 0, "Alpine policy step must use if not cancelled"))
-    return findings
-
-
-def _validate_alpine_cleanup_step(path: Path, content: str) -> list[Finding]:
-    findings: list[Finding] = []
-    marker = f"- name: {ALPINE_CLEANUP_STEP_NAME}"
+    marker = f"- name: {ARTIFACT_STEP_NAME}"
     if marker not in content:
-        findings.append(Finding(path, 0, "Alpine candidate job must define cleanup step"))
-        return findings
-    cleanup_section = content.split(marker, 1)[1].split("- name:", 1)[0]
-    if "if: always()" not in cleanup_section:
-        findings.append(Finding(path, 0, "Alpine cleanup step must use if: always()"))
-    block = _extract_step_run_block(content, ALPINE_CLEANUP_STEP_NAME)
-    if block is None:
-        findings.append(Finding(path, 0, "Alpine cleanup step must define a run block"))
-        return findings
-    if 'CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-alpine-audit"' not in block:
-        findings.append(Finding(path, 0, "Alpine cleanup step must target sellerai-alpine-audit workspace"))
-    if 'rm -rf "${CLEANUP_TARGET}"' not in block:
-        findings.append(Finding(path, 0, "Alpine cleanup step must remove CLEANUP_TARGET"))
-    for token in ("sudo", "chmod 777", "|| true", "docker run"):
-        if token in block:
-            findings.append(Finding(path, 0, f"Alpine cleanup step must not use {token}"))
-    return findings
-
-
-def _validate_alpine_artifact_upload(path: Path, content: str) -> list[Finding]:
-    findings: list[Finding] = []
-    marker = f"- name: {ALPINE_ARTIFACT_STEP_NAME}"
-    if marker not in content:
-        findings.append(Finding(path, 0, "Alpine candidate job must define artifact upload step"))
+        findings.append(Finding(path, 0, "containers job must define artifact upload step"))
         return findings
     section = content.split(marker, 1)[1].split("- name:", 1)[0]
     if "if: always()" not in section:
-        findings.append(Finding(path, 0, "Alpine artifact upload must use if: always()"))
+        findings.append(Finding(path, 0, "artifact upload must use if: always()"))
     if "if-no-files-found: error" not in section:
-        findings.append(Finding(path, 0, "Alpine artifact upload must fail when files are missing"))
-    forbidden_artifacts = (".tar", ".whl", "trivy-cache", "pip-cache", ".env")
-    for forbidden in forbidden_artifacts:
-        if forbidden in section:
-            findings.append(Finding(path, 0, f"Alpine artifact upload must not include {forbidden}"))
-    required_files = (
-        "candidate-amd64.cdx.json",
-        "candidate-arm64.cdx.json",
-        "candidate-amd64.trivy.json",
-        "candidate-arm64.trivy.json",
-        "candidate-policy-summary.json",
-        "wheel-amd64.json",
-        "wheel-arm64.json",
-    )
-    for filename in required_files:
+        findings.append(Finding(path, 0, "artifact upload must fail when files are missing"))
+    if "github.sha" not in section:
+        findings.append(Finding(path, 0, "artifact name must include full commit SHA"))
+    json_paths = [
+        line.strip()
+        for line in section.splitlines()
+        if line.strip().endswith(".json")
+    ]
+    if len(json_paths) != len(PRODUCTION_ARTIFACT_JSON_FILES):
+        findings.append(
+            Finding(
+                path,
+                0,
+                (
+                    "artifact upload must list exactly "
+                    f"{len(PRODUCTION_ARTIFACT_JSON_FILES)} JSON paths, found {len(json_paths)}"
+                ),
+            )
+        )
+    for filename in PRODUCTION_ARTIFACT_JSON_FILES:
         if filename not in section:
-            findings.append(Finding(path, 0, f"Alpine artifact upload must include {filename}"))
+            findings.append(Finding(path, 0, f"artifact upload must include {filename}"))
+    forbidden_upload_tokens = (".tar", ".whl", "wheelhouse", ".env", "trivy-cache")
+    for token in forbidden_upload_tokens:
+        if token in section:
+            findings.append(Finding(path, 0, f"artifact upload must not include {token}"))
     return findings
 
 
-def _validate_alpine_hardened_trivy_step(path: Path, content: str) -> list[Finding]:
+def _validate_arm64_build_only_step(path: Path, content: str) -> list[Finding]:
     findings: list[Finding] = []
-    block = _extract_step_run_block(content, ALPINE_HARDENED_TRIVY_STEP)
+    block = _extract_step_run_block(content, ARM64_VERIFY_STEP_NAME)
     if block is None:
-        findings.append(
-            Finding(path, 0, "Alpine hardened job must define Generate hardened Alpine candidate Trivy reports step")
-        )
-        return findings
-
-    user_runs = re.findall(r'--user "\$\{RUNNER_UID\}:\$\{RUNNER_GID\}"', block)
-    if len(user_runs) != 2:
-        findings.append(
-            Finding(
-                path,
-                0,
-                f"Alpine hardened Trivy step must run two scanner containers as runner uid/gid, found {len(user_runs)}",
-            )
-        )
-    cache_mounts = re.findall(r'"\$\{HARDENED_TRIVY_CACHE_DIR\}:/trivy-cache:rw"', block)
-    if len(cache_mounts) != 2:
-        findings.append(
-            Finding(
-                path,
-                0,
-                f"Alpine hardened Trivy step must mount HARDENED_TRIVY_CACHE_DIR twice, found {len(cache_mounts)}",
-            )
-        )
-    if "/var/run/docker.sock" in block or "sudo" in block or "chmod 777" in block:
-        findings.append(Finding(path, 0, "Alpine hardened Trivy step must not use docker socket or privilege helpers"))
-    return findings
-
-
-def _extract_alpine_hardened_job_step_names(content: str) -> list[str]:
-    marker = f"{ALPINE_HARDENED_JOB_NAME}:"
-    if marker not in content:
-        return []
-    job_block = content.split(marker, 1)[1]
-    step_names: list[str] = []
-    for line in job_block.splitlines():
-        if re.match(r"^  [a-zA-Z0-9_-]+:\s*$", line):
-            break
-        match = re.match(r"^      - name: (.+)$", line)
-        if match:
-            step_names.append(match.group(1))
-        uses_match = re.match(r"^      - uses: (.+)$", line)
-        if uses_match and not step_names:
-            step_names.append(f"uses:{uses_match.group(1)}")
-    return step_names
-
-
-def _validate_alpine_hardened_step_order(path: Path, content: str) -> list[Finding]:
-    findings: list[Finding] = []
-    if f"{ALPINE_HARDENED_JOB_NAME}:" not in content:
-        return findings
-
-    required_steps = (
-        ALPINE_HARDENED_AMD64_BUILD_STEP,
-        ALPINE_HARDENED_AMD64_SMOKE_STEP,
-        ALPINE_HARDENED_ARM64_BUILD_STEP,
-        ALPINE_HARDENED_ARM64_VERIFY_STEP,
-        ALPINE_HARDENED_SBOM_VALIDATE_STEP,
-        ALPINE_HARDENED_TRIVY_STEP,
-        ALPINE_HARDENED_POLICY_STEP,
-        ALPINE_HARDENED_ARTIFACT_STEP,
-        ALPINE_HARDENED_CLEANUP_STEP,
-    )
-    indices: dict[str, int] = {}
-    for step_name in required_steps:
-        marker = f"- name: {step_name}"
-        if marker not in content:
-            findings.append(Finding(path, 0, f"Alpine hardened job missing required step: {step_name}"))
-            continue
-        indices[step_name] = content.index(marker)
-
-    if findings:
-        return findings
-
-    ordered_pairs = (
-        (ALPINE_HARDENED_AMD64_BUILD_STEP, ALPINE_HARDENED_AMD64_SMOKE_STEP),
-        (ALPINE_HARDENED_AMD64_SMOKE_STEP, ALPINE_HARDENED_ARM64_BUILD_STEP),
-        (ALPINE_HARDENED_ARM64_BUILD_STEP, ALPINE_HARDENED_ARM64_VERIFY_STEP),
-        (ALPINE_HARDENED_ARM64_VERIFY_STEP, ALPINE_HARDENED_SBOM_VALIDATE_STEP),
-        (ALPINE_HARDENED_SBOM_VALIDATE_STEP, ALPINE_HARDENED_TRIVY_STEP),
-        (ALPINE_HARDENED_TRIVY_STEP, ALPINE_HARDENED_POLICY_STEP),
-        (ALPINE_HARDENED_POLICY_STEP, ALPINE_HARDENED_ARTIFACT_STEP),
-        (ALPINE_HARDENED_ARTIFACT_STEP, ALPINE_HARDENED_CLEANUP_STEP),
-    )
-    for earlier, later in ordered_pairs:
-        if indices[earlier] >= indices[later]:
-            findings.append(
-                Finding(path, 0, f"Alpine hardened step order invalid: {earlier} must precede {later}")
-            )
-    return findings
-
-
-def _validate_alpine_hardened_smoke_step(path: Path, content: str) -> list[Finding]:
-    findings: list[Finding] = []
-    block = _extract_step_run_block(content, ALPINE_HARDENED_AMD64_SMOKE_STEP)
-    if block is None:
-        findings.append(Finding(path, 0, "Alpine hardened job must define amd64 smoke step"))
+        findings.append(Finding(path, 0, "containers job must define production backend arm64 build validation"))
         return findings
     required_tokens = (
+        "--platform linux/arm64",
         "--network none",
         "--read-only",
-        "--tmpfs /tmp:rw,noexec,nosuid,nodev",
-        "--cap-drop ALL",
-        "--security-opt no-new-privileges",
-        "validate_alpine_hardened_smoke.py",
-        "DATABASE_URL=postgresql://localhost:5432/sellerai_test",
-        "backend-alpine-amd64-smoke-manifest.json",
-    )
-    for token in required_tokens:
-        if token not in block:
-            findings.append(Finding(path, 0, f"Alpine hardened amd64 smoke step must include {token!r}"))
-    for token in ("continue-on-error", "|| true", "/var/run/docker.sock", "--env-file"):
-        if token in block:
-            findings.append(Finding(path, 0, f"Alpine hardened amd64 smoke step must not use {token}"))
-    return findings
-
-
-def _validate_alpine_hardened_arm64_step(path: Path, content: str) -> list[Finding]:
-    findings: list[Finding] = []
-    block = _extract_step_run_block(content, ALPINE_HARDENED_ARM64_VERIFY_STEP)
-    if block is None:
-        findings.append(Finding(path, 0, "Alpine hardened job must define arm64 build-only verification step"))
-        return findings
-    required_tokens = (
-        "build_only",
-        "backend-alpine-arm64-verification-manifest.json",
         "validate_backend_runtime_environment.py",
         "validate_backend_alpine_os_packages.py",
         'test "$(id -u)" -eq 1001',
     )
     for token in required_tokens:
         if token not in block:
-            findings.append(Finding(path, 0, f"Alpine hardened arm64 verification step must include {token!r}"))
-    if "validate_alpine_hardened_smoke.py" in block:
-        findings.append(Finding(path, 0, "arm64 verification must not claim runtime smoke"))
+            findings.append(Finding(path, 0, f"arm64 build-only step missing required contract token: {token}"))
+    if "validate_alpine_hardened_smoke.py" in block or "validate_backend_production_smoke.py" in block:
+        findings.append(Finding(path, 0, "arm64 build-only step must not claim full Uvicorn smoke"))
     return findings
 
 
-def _validate_alpine_hardened_build_actions(path: Path, content: str) -> list[Finding]:
+def _validate_retired_alpine_audit_assets(path: Path, content: str) -> list[Finding]:
     findings: list[Finding] = []
-    marker = f"{ALPINE_HARDENED_JOB_NAME}:"
-    if marker not in content:
-        return findings
-    job_block = content.split(marker, 1)[1].split("\n  backend-", 1)[0]
-    for line_no_offset, line in enumerate(job_block.splitlines(), start=1):
-        uses_match = re.match(r"^      - uses: (\S+)", line)
-        if not uses_match:
-            continue
-        action_ref = uses_match.group(1)
-        if action_ref.startswith("actions/"):
-            continue
-        if action_ref.startswith("docker/setup-"):
-            if action_ref not in APPROVED_BUILD_ACTIONS:
-                findings.append(
-                    Finding(path, line_no_offset, f"unapproved build action reference {action_ref!r}")
-                )
-            if "@v" in action_ref and "@" in action_ref.split("@", 1)[1][:2]:
-                if not re.search(r"@[0-9a-f]{40}\b", action_ref):
-                    findings.append(Finding(path, line_no_offset, "build actions must pin full commit SHA"))
-        if "docker push" in line:
-            findings.append(Finding(path, line_no_offset, "Alpine hardened job must not push images"))
-    build_block = _extract_step_run_block(content, ALPINE_HARDENED_AMD64_BUILD_STEP)
-    if build_block is None or "Dockerfile.prod" not in build_block:
-        findings.append(Finding(path, 0, "Alpine hardened job must build from Dockerfile.prod"))
-    arm64_build = _extract_step_run_block(content, ALPINE_HARDENED_ARM64_BUILD_STEP)
-    if arm64_build is None or "--platform linux/arm64" not in arm64_build:
-        findings.append(Finding(path, 0, "Alpine hardened job must build arm64 with buildx platform flag"))
-    return findings
-
-
-def _validate_alpine_hardened_cleanup_step(path: Path, content: str) -> list[Finding]:
-    findings: list[Finding] = []
-    marker = f"- name: {ALPINE_HARDENED_CLEANUP_STEP}"
-    if marker not in content:
-        findings.append(Finding(path, 0, "Alpine hardened job must define cleanup step"))
-        return findings
-    cleanup_section = content.split(marker, 1)[1].split("- name:", 1)[0]
-    if "if: always()" not in cleanup_section:
-        findings.append(Finding(path, 0, "Alpine hardened cleanup step must use if: always()"))
-    block = _extract_step_run_block(content, ALPINE_HARDENED_CLEANUP_STEP)
-    if block is None:
-        findings.append(Finding(path, 0, "Alpine hardened cleanup step must define a run block"))
-        return findings
-    if 'CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-alpine-hardened"' not in block:
-        findings.append(Finding(path, 0, "Alpine hardened cleanup step must target sellerai-alpine-hardened workspace"))
-    for token in ("sudo", "chmod 777", "|| true", "docker run"):
-        if token in block:
-            findings.append(Finding(path, 0, f"Alpine hardened cleanup step must not use {token}"))
-    return findings
-
-
-def _validate_alpine_hardened_artifact_upload(path: Path, content: str) -> list[Finding]:
-    findings: list[Finding] = []
-    marker = f"- name: {ALPINE_HARDENED_ARTIFACT_STEP}"
-    if marker not in content:
-        findings.append(Finding(path, 0, "Alpine hardened job must define artifact upload step"))
-        return findings
-    section = content.split(marker, 1)[1].split("- name:", 1)[0]
-    if "if: always()" not in section:
-        findings.append(Finding(path, 0, "Alpine hardened artifact upload must use if: always()"))
-    if "if-no-files-found: error" not in section:
-        findings.append(Finding(path, 0, "Alpine hardened artifact upload must fail when files are missing"))
-    forbidden_artifacts = (".tar", ".whl", "trivy-cache", "pip-cache", ".env")
-    for forbidden in forbidden_artifacts:
-        if forbidden in section:
-            findings.append(Finding(path, 0, f"Alpine hardened artifact upload must not include {forbidden}"))
-    required_files = (
-        "backend-alpine-amd64.cdx.json",
-        "backend-alpine-arm64.cdx.json",
-        "backend-alpine-amd64.trivy.json",
-        "backend-alpine-arm64.trivy.json",
-        "backend-alpine-hardened-summary.json",
-        "backend-alpine-amd64-smoke-manifest.json",
-        "backend-alpine-arm64-verification-manifest.json",
-    )
-    for filename in required_files:
-        if filename not in section:
-            findings.append(Finding(path, 0, f"Alpine hardened artifact upload must include {filename}"))
+    for job_name in RETIRED_ALPINE_JOB_NAMES:
+        if f"{job_name}:" in content:
+            findings.append(Finding(path, 0, f"retired Alpine audit job {job_name} must not remain in workflow"))
+    for token in RETIRED_ALPINE_TOKENS:
+        if token in content:
+            findings.append(Finding(path, 0, f"retired Alpine audit token {token} must not remain in workflow"))
+    for digest in RETIRED_ALPINE_AUDIT_CHILD_DIGESTS:
+        if digest in content:
+            findings.append(
+                Finding(path, 0, "retired Alpine candidate child digest must not remain in workflow")
+            )
     return findings
 
 
@@ -1211,15 +963,11 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
     scanner_identities = 0
     containers_syft_pin: str | None = None
     containers_trivy_pin: str | None = None
-    alpine_syft_pin: str | None = None
-    alpine_trivy_pin: str | None = None
-    hardened_syft_pin: str | None = None
-    hardened_trivy_pin: str | None = None
-    alpine_candidate_env_count = 0
-    hardened_candidate_env_count = 0
     in_services = False
     current_job: str | None = None
     in_scanner_step = False
+
+    findings.extend(_validate_retired_alpine_audit_assets(path, content))
 
     for line_no, line in enumerate(content.splitlines(), start=1):
         job_match = re.match(r"^  ([a-zA-Z0-9_-]+):\s*$", line)
@@ -1228,17 +976,10 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
             in_scanner_step = False
             continue
 
-        in_scan_job = current_job in {
-            CONTAINERS_JOB_NAME,
-            ALPINE_CANDIDATE_JOB_NAME,
-            ALPINE_HARDENED_JOB_NAME,
-        }
+        in_scan_job = current_job == CONTAINERS_JOB_NAME
 
         if in_scan_job and re.match(
-            r"^      - name: (Generate CycloneDX SBOMs|Generate Trivy vulnerability reports|"
-            r"Generate Alpine candidate CycloneDX SBOMs|Generate Alpine candidate Trivy reports|"
-            r"Generate hardened Alpine candidate CycloneDX SBOMs|"
-            r"Generate hardened Alpine candidate Trivy reports)\s*$",
+            r"^      - name: (Generate CycloneDX SBOMs|Generate Trivy vulnerability reports)\s*$",
             line,
         ):
             in_scanner_step = True
@@ -1272,105 +1013,6 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
                 findings.extend(_validate_scanner_env_line(path, line_no, line, "TRIVY_IMAGE"))
             elif re.match(r"^          TRIVY_IMAGE:", line):
                 findings.append(Finding(path, line_no, "step env must not override TRIVY_IMAGE"))
-
-        if current_job == ALPINE_CANDIDATE_JOB_NAME:
-            if re.match(r"^      SYFT_IMAGE:", line):
-                scanner_identities += 1
-                match = re.match(r"^      SYFT_IMAGE:\s*(?P<ref>\S+)", line)
-                if match:
-                    alpine_syft_pin = match.group("ref")
-                findings.extend(_validate_scanner_env_line(path, line_no, line, "SYFT_IMAGE"))
-            elif re.match(r"^          SYFT_IMAGE:", line):
-                findings.append(Finding(path, line_no, "step env must not override SYFT_IMAGE"))
-            if re.match(r"^      TRIVY_IMAGE:", line):
-                scanner_identities += 1
-                match = re.match(r"^      TRIVY_IMAGE:\s*(?P<ref>\S+)", line)
-                if match:
-                    alpine_trivy_pin = match.group("ref")
-                findings.extend(_validate_scanner_env_line(path, line_no, line, "TRIVY_IMAGE"))
-            elif re.match(r"^          TRIVY_IMAGE:", line):
-                findings.append(Finding(path, line_no, "step env must not override TRIVY_IMAGE"))
-            for var_name in (
-                "ALPINE_CANDIDATE_INDEX_REF",
-                "ALPINE_CANDIDATE_AMD64_REF",
-                "ALPINE_CANDIDATE_ARM64_REF",
-            ):
-                if re.match(rf"^      {var_name}:", line):
-                    alpine_candidate_env_count += 1
-                    findings.extend(_validate_alpine_candidate_env_line(path, line_no, line, var_name))
-                elif re.match(rf"^          {var_name}:", line):
-                    findings.append(Finding(path, line_no, f"step env must not override {var_name}"))
-            if "docker push" in line:
-                findings.append(Finding(path, line_no, "Alpine candidate job must not push images"))
-            if current_job == ALPINE_CANDIDATE_JOB_NAME:
-                for candidate_ref in APPROVED_AUDIT_CANDIDATES:
-                    if candidate_ref not in line:
-                        continue
-                    if re.match(r"^\s+ALPINE_CANDIDATE_(INDEX|AMD64|ARM64)_REF:", line):
-                        continue
-                    if any(
-                        token in line
-                        for token in (
-                            "docker pull",
-                            "docker image save",
-                            "docker image inspect",
-                            "docker run",
-                            "${ALPINE_CANDIDATE_",
-                        )
-                    ):
-                        continue
-                    findings.append(
-                        Finding(
-                            path,
-                            line_no,
-                            "audit candidate digest must be referenced via ALPINE_CANDIDATE_* env vars",
-                        )
-                    )
-
-        if current_job == ALPINE_HARDENED_JOB_NAME:
-            if re.match(r"^      SYFT_IMAGE:", line):
-                scanner_identities += 1
-                match = re.match(r"^      SYFT_IMAGE:\s*(?P<ref>\S+)", line)
-                if match:
-                    hardened_syft_pin = match.group("ref")
-                findings.extend(_validate_scanner_env_line(path, line_no, line, "SYFT_IMAGE"))
-            elif re.match(r"^          SYFT_IMAGE:", line):
-                findings.append(Finding(path, line_no, "step env must not override SYFT_IMAGE"))
-            if re.match(r"^      TRIVY_IMAGE:", line):
-                scanner_identities += 1
-                match = re.match(r"^      TRIVY_IMAGE:\s*(?P<ref>\S+)", line)
-                if match:
-                    hardened_trivy_pin = match.group("ref")
-                findings.extend(_validate_scanner_env_line(path, line_no, line, "TRIVY_IMAGE"))
-            elif re.match(r"^          TRIVY_IMAGE:", line):
-                findings.append(Finding(path, line_no, "step env must not override TRIVY_IMAGE"))
-            if re.match(r"^      ALPINE_CANDIDATE_INDEX_REF:", line):
-                hardened_candidate_env_count += 1
-                findings.extend(
-                    _validate_alpine_candidate_env_line(path, line_no, line, "ALPINE_CANDIDATE_INDEX_REF")
-                )
-            elif re.match(r"^          ALPINE_CANDIDATE_INDEX_REF:", line):
-                findings.append(Finding(path, line_no, "step env must not override ALPINE_CANDIDATE_INDEX_REF"))
-            if "docker push" in line:
-                findings.append(Finding(path, line_no, "Alpine hardened job must not push images"))
-            if "secrets." in line or "github.token" in line.lower():
-                findings.append(Finding(path, line_no, "Alpine hardened job must not use secrets"))
-            for candidate_ref in APPROVED_AUDIT_CANDIDATES:
-                if candidate_ref not in line:
-                    continue
-                if re.match(r"^\s+ALPINE_CANDIDATE_INDEX_REF:", line):
-                    continue
-                if "Dockerfile.prod" in line:
-                    continue
-                if "Dockerfile.alpine-candidate" in line:
-                    continue
-                findings.append(
-                    Finding(
-                        path,
-                        line_no,
-                        "hardened candidate digest must be referenced via ALPINE_CANDIDATE_INDEX_REF or Dockerfile",
-                    )
-                )
 
         if in_scan_job and in_scanner_step and (
             "docker run" in line or '"${SYFT_IMAGE}"' in line or '"${TRIVY_IMAGE}"' in line
@@ -1416,18 +1058,15 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
                         )
                     )
 
-        for candidate_ref in APPROVED_AUDIT_CANDIDATES:
-            if candidate_ref not in line:
-                continue
-            if current_job in {ALPINE_CANDIDATE_JOB_NAME, ALPINE_HARDENED_JOB_NAME}:
-                continue
-            findings.append(
-                Finding(
-                    path,
-                    line_no,
-                    "approved audit candidate image is only allowed in Alpine audit jobs or candidate Dockerfile",
+        for alpine_ref in APPROVED_ALPINE_BACKEND_BASES:
+            if alpine_ref in line and current_job != CONTAINERS_JOB_NAME:
+                findings.append(
+                    Finding(
+                        path,
+                        line_no,
+                        "approved Alpine backend base must only be used in backend production Dockerfile",
+                    )
                 )
-            )
 
         if re.match(r"^    services:\s*$", line):
             in_services = True
@@ -1452,8 +1091,10 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
         if ref in ALLOWED_SCANNER_IMAGES:
             findings.append(Finding(path, line_no, "scanner image must not be used as a service container"))
             continue
-        if ref in APPROVED_AUDIT_CANDIDATES:
-            findings.append(Finding(path, line_no, "audit candidate image must not be used as a service container"))
+        if ref in APPROVED_ALPINE_BACKEND_BASES:
+            findings.append(
+                Finding(path, line_no, "approved Alpine backend base must not be used as a service container")
+            )
             continue
         findings.extend(_validate_external_image(path, line_no, ref))
         external_refs.append((path, line_no, ref))
@@ -1467,70 +1108,25 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
             and containers_syft_pin == containers_trivy_pin
         ):
             findings.append(Finding(path, 0, "containers SYFT_IMAGE and TRIVY_IMAGE must be distinct"))
+        if scanner_identities != EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT:
+            findings.append(
+                Finding(
+                    path,
+                    0,
+                    (
+                        "expected "
+                        f"{EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT} scanner approved identities, "
+                        f"found {scanner_identities}"
+                    ),
+                )
+            )
+        findings.extend(_validate_syft_scan_step(path, content))
         findings.extend(_validate_trivy_scan_step(path, content))
         findings.extend(_validate_runtime_smoke_step(path, content))
         findings.extend(_validate_frontend_runtime_smoke_step(path, content))
+        findings.extend(_validate_arm64_build_only_step(path, content))
+        findings.extend(_validate_production_artifact_upload(path, content))
         findings.extend(_validate_cleanup_step(path, content))
-
-    if f"{ALPINE_CANDIDATE_JOB_NAME}:" in content:
-        if alpine_syft_pin is None or alpine_trivy_pin is None:
-            findings.append(Finding(path, 0, "Alpine candidate job must define SYFT_IMAGE and TRIVY_IMAGE"))
-        if alpine_candidate_env_count != 3:
-            findings.append(
-                Finding(
-                    path,
-                    0,
-                    f"expected 3 Alpine candidate env identities, found {alpine_candidate_env_count}",
-                )
-            )
-        if "if: github.event_name == 'pull_request'" not in content:
-            findings.append(Finding(path, 0, "Alpine candidate job must be pull_request gated"))
-        findings.extend(_validate_alpine_trivy_step(path, content))
-        findings.extend(_validate_alpine_step_order(path, content))
-        findings.extend(_validate_alpine_wheel_steps(path, content))
-        findings.extend(_validate_alpine_cleanup_step(path, content))
-        findings.extend(_validate_alpine_artifact_upload(path, content))
-
-    if f"{ALPINE_HARDENED_JOB_NAME}:" in content:
-        if hardened_syft_pin is None or hardened_trivy_pin is None:
-            findings.append(Finding(path, 0, "Alpine hardened job must define SYFT_IMAGE and TRIVY_IMAGE"))
-        if hardened_candidate_env_count != 1:
-            findings.append(
-                Finding(
-                    path,
-                    0,
-                    f"expected 1 Alpine hardened candidate env identity, found {hardened_candidate_env_count}",
-                )
-            )
-        hardened_marker = f"{ALPINE_HARDENED_JOB_NAME}:"
-        hardened_block = content.split(hardened_marker, 1)[1].split("\n  backend-", 1)[0]
-        if "permissions:" in hardened_block and "contents: write" in hardened_block:
-            findings.append(Finding(path, 0, "Alpine hardened job must not expand contents write permission"))
-        findings.extend(_validate_alpine_hardened_trivy_step(path, content))
-        findings.extend(_validate_alpine_hardened_step_order(path, content))
-        findings.extend(_validate_alpine_hardened_smoke_step(path, content))
-        findings.extend(_validate_alpine_hardened_arm64_step(path, content))
-        findings.extend(_validate_alpine_hardened_build_actions(path, content))
-        findings.extend(_validate_alpine_hardened_cleanup_step(path, content))
-        findings.extend(_validate_alpine_hardened_artifact_upload(path, content))
-
-    alpine_jobs_present = (
-        "containers:" in content
-        or f"{ALPINE_CANDIDATE_JOB_NAME}:" in content
-        or f"{ALPINE_HARDENED_JOB_NAME}:" in content
-    )
-    if alpine_jobs_present and scanner_identities != EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT:
-        findings.append(
-            Finding(
-                path,
-                0,
-                (
-                    "expected "
-                    f"{EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT} scanner approved identities, "
-                    f"found {scanner_identities}"
-                ),
-            )
-        )
 
     return findings, external_refs, 0, scanner_refs
 

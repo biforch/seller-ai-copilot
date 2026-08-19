@@ -23,7 +23,6 @@ from scripts.validate_sbom_artifacts import (  # noqa: E402
     main,
     validate_sbom_directory,
     validate_sbom_file,
-    validate_sbom_files,
 )
 
 SECRET_CANARY = "state-canary-secret-do-not-echo"
@@ -42,11 +41,11 @@ def _write_sboms(directory: Path) -> None:
         (directory / filename).write_text(json.dumps(_minimal_sbom(filename.split(".")[0])), encoding="utf-8")
 
 
-def test_three_valid_minimal_cyclonedx_files_pass(tmp_path: Path) -> None:
+def test_four_valid_minimal_cyclonedx_files_pass(tmp_path: Path) -> None:
     _write_sboms(tmp_path)
     findings, checked = validate_sbom_directory(tmp_path)
     assert findings == []
-    assert checked == 3
+    assert checked == 4
 
 
 def test_missing_required_file_fails(tmp_path: Path) -> None:
@@ -323,26 +322,54 @@ def test_external_reference_userinfo_fails(tmp_path: Path) -> None:
     assert any("URL userinfo" in finding.reason for finding in findings)
 
 
-def test_candidate_sbom_files_do_not_change_production_contract(tmp_path: Path) -> None:
+def test_missing_backend_arm64_sbom_fails(tmp_path: Path) -> None:
+    _write_sboms(tmp_path)
+    (tmp_path / "backend-arm64.cdx.json").unlink()
+    findings, _ = validate_sbom_directory(tmp_path)
+    assert any("missing" in finding.reason for finding in findings)
+    assert any("backend-arm64.cdx.json" in finding.filename for finding in findings)
+
+
+def test_malformed_backend_arm64_sbom_fails(tmp_path: Path) -> None:
+    _write_sboms(tmp_path)
+    (tmp_path / "backend-arm64.cdx.json").write_text("{not-json", encoding="utf-8")
+    findings = validate_sbom_file(tmp_path / "backend-arm64.cdx.json")
+    assert any("not valid JSON" in finding.reason for finding in findings)
+
+
+def test_backend_arm64_symlink_is_rejected(tmp_path: Path) -> None:
+    real_file = tmp_path / "backend-arm64-real.cdx.json"
+    real_file.write_text(json.dumps(_minimal_sbom()), encoding="utf-8")
+    symlink = tmp_path / "backend-arm64.cdx.json"
+    symlink.symlink_to(real_file)
+    findings = validate_sbom_file(symlink)
+    assert any("regular file" in finding.reason for finding in findings)
+
+
+def test_backend_arm64_host_path_fails(tmp_path: Path) -> None:
+    payload = _minimal_sbom()
+    payload["metadata"] = {"properties": [{"value": "/Users/secret/path"}]}
+    (tmp_path / "backend-arm64.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
+    findings = validate_sbom_file(tmp_path / "backend-arm64.cdx.json")
+    assert any("absolute host path" in finding.reason for finding in findings)
+
+
+def test_backend_arm64_secret_like_content_fails(tmp_path: Path) -> None:
+    payload = _minimal_sbom()
+    payload["metadata"] = {"properties": [{"name": "token", "value": "client_secret=abc"}]}
+    (tmp_path / "backend-arm64.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
+    findings = validate_sbom_file(tmp_path / "backend-arm64.cdx.json")
+    assert any("secret-like content" in finding.reason for finding in findings)
+
+
+def test_extra_non_production_sbom_files_do_not_change_production_contract(tmp_path: Path) -> None:
     _write_sboms(tmp_path)
     production_findings, production_checked = validate_sbom_directory(tmp_path)
     assert production_findings == []
     assert production_checked == len(REQUIRED_FILES)
 
-    (tmp_path / "candidate-amd64.cdx.json").write_text(
-        json.dumps(_minimal_sbom("alpine-amd64", spec_version="1.6")),
+    (tmp_path / "extra-scan.cdx.json").write_text(
+        json.dumps(_minimal_sbom("extra", spec_version="1.6")),
         encoding="utf-8",
     )
-    (tmp_path / "candidate-arm64.cdx.json").write_text(
-        json.dumps(_minimal_sbom("alpine-arm64", spec_version="1.6")),
-        encoding="utf-8",
-    )
-    candidate_findings, candidate_checked = validate_sbom_files(
-        tmp_path,
-        ("candidate-amd64.cdx.json", "candidate-arm64.cdx.json"),
-    )
-    assert candidate_findings == []
-    assert candidate_checked == 2
-
     assert main([str(tmp_path)]) == 0
-    assert main(["--files", str(tmp_path), "candidate-amd64.cdx.json", "candidate-arm64.cdx.json"]) == 0

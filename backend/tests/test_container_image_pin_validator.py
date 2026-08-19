@@ -18,7 +18,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from scripts.validate_container_image_pins import (  # noqa: E402
     ALLOWED_SCANNER_IMAGES,
-    APPROVED_AUDIT_CANDIDATES,
+    APPROVED_ALPINE_BACKEND_BASES,
     EXPECTED_INTERNAL_BUILD_REF_COUNT,
     EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT,
     EXPECTED_SCAN_FILE_COUNT,
@@ -319,8 +319,8 @@ def test_validator_script_runs_from_repo_root() -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().startswith(SUCCESS_MESSAGE)
     assert "15 runtime external pinned references" not in result.stdout
-    assert "17 runtime external pinned references" in result.stdout
-    assert "14 scanner pinned references" in result.stdout
+    assert "14 runtime external pinned references" in result.stdout
+    assert "8 scanner pinned references" in result.stdout
 
 
 def test_scanner_allowlist_is_explicit() -> None:
@@ -455,7 +455,7 @@ def test_scanner_container_forbidden_mounts_are_rejected() -> None:
 
 
 def test_scanner_approved_identity_count() -> None:
-    assert EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT == 6
+    assert EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT == 2
     assert len(ALLOWED_SCANNER_IMAGES) == 2
 
 
@@ -485,6 +485,10 @@ def _minimal_trivy_step(*extra_lines: str) -> str:
         '-v "${SCAN_INPUT}:/input:ro" -v "${SCAN_OUTPUT}:/output:rw" '
         '-v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" "${TRIVY_IMAGE}" '
         "image --cache-dir /trivy-cache --input /input/nginx.tar",
+        'docker run --rm --user "${RUNNER_UID}:${RUNNER_GID}" '
+        '-v "${SCAN_INPUT}:/input:ro" -v "${SCAN_OUTPUT}:/output:rw" '
+        '-v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" "${TRIVY_IMAGE}" '
+        "image --cache-dir /trivy-cache --input /input/backend-arm64.tar",
     ]
     if extra_lines:
         runs = list(extra_lines)
@@ -543,21 +547,21 @@ def test_cleanup_step_requires_fail_closed_target() -> None:
     assert any("fail closed when RUNNER_TEMP is unset" in finding.reason for finding in findings)
 
 
-def test_audit_candidate_in_dockerfile_is_rejected() -> None:
-    candidate = next(iter(APPROVED_AUDIT_CANDIDATES))
-    content = f"FROM {candidate}\n"
+def test_alpine_backend_base_in_generic_dockerfile_is_rejected() -> None:
+    alpine_base = next(iter(APPROVED_ALPINE_BACKEND_BASES))
+    content = f"FROM {alpine_base}\n"
     findings, _, _ = _scan_dockerfile(Path("Dockerfile.prod"), content)
-    assert any("audit candidate" in finding.reason for finding in findings)
+    assert any("backend production Dockerfile" in finding.reason for finding in findings)
 
 
-def test_audit_candidate_in_compose_is_rejected() -> None:
-    candidate = next(iter(APPROVED_AUDIT_CANDIDATES))
-    content = f"services:\n  backend:\n    image: {candidate}\n"
+def test_alpine_backend_base_in_compose_is_rejected() -> None:
+    alpine_base = next(iter(APPROVED_ALPINE_BACKEND_BASES))
+    content = f"services:\n  backend:\n    image: {alpine_base}\n"
     findings, _, _ = _scan_compose(Path("docker-compose.rc.yml"), content)
-    assert any("audit candidate" in finding.reason for finding in findings)
+    assert any("backend production Dockerfile" in finding.reason or "service container" in finding.reason for finding in findings)
 
 
-def test_audit_candidate_floating_tag_is_rejected() -> None:
+def test_retired_alpine_candidate_job_is_rejected() -> None:
     content = textwrap.dedent(
         """
         jobs:
@@ -567,7 +571,7 @@ def test_audit_candidate_floating_tag_is_rejected() -> None:
         """
     ).strip()
     findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
-    assert any("approved audit candidate reference" in finding.reason for finding in findings)
+    assert any("retired Alpine audit" in finding.reason for finding in findings)
 
 
 def test_valid_nginx_digest_example_matches_policy() -> None:

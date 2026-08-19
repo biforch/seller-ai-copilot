@@ -551,8 +551,10 @@ def test_quality_workflow_frontend_eslint_gate_blocks_errors_and_warnings() -> N
     assert "npx tsc" not in containers_onward
     assert "needs: [backend, frontend]" in containers_onward
     assert "Evaluate vulnerability policy" in containers_onward
-    assert "Evaluate Alpine candidate vulnerability policy" in containers_onward
-    assert "Evaluate hardened Alpine candidate vulnerability policy" in containers_onward
+    assert "backend-alpine-candidate-audit:" not in content
+    assert "backend-alpine-hardened-candidate:" not in content
+    assert "Evaluate Alpine candidate vulnerability policy" not in content
+    assert "Evaluate hardened Alpine candidate vulnerability policy" not in content
 
 
 def _assert_official_npm_registry_resolved(resolved: str) -> None:
@@ -718,20 +720,28 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     upload_block = content.split("- name: Upload supply-chain scan artifacts", 1)[1].split("- name:", 1)[0]
     assert ".tar" not in upload_block
     assert "backend.cdx.json" in upload_block
+    assert "backend-arm64.cdx.json" in upload_block
     assert "frontend.cdx.json" in upload_block
     assert "nginx.cdx.json" in upload_block
     assert "backend.trivy.json" in upload_block
+    assert "backend-arm64.trivy.json" in upload_block
+    assert "frontend.trivy.json" in upload_block
+    assert "nginx.trivy.json" in upload_block
     assert "scan-summary.json" in upload_block
+    assert len([line for line in upload_block.splitlines() if line.strip().endswith(".json")]) == 9
     assert "timeout-minutes: 45" in content
     assert "SYFT_CHECK_FOR_APP_UPDATE=false" in content
     assert "docker-archive:/input/backend.tar" in content
+    assert "docker-archive:/input/backend-arm64.tar" in content
     assert "docker-archive:/input/frontend.tar" in content
     assert "docker-archive:/input/nginx.tar" in content
     assert "file:/input/" not in content.split("Generate CycloneDX SBOMs", 1)[1].split("Validate SBOM artifacts", 1)[0]
     assert "cyclonedx-json@1.6=/output/backend.cdx.json" in content
+    assert "cyclonedx-json@1.6=/output/backend-arm64.cdx.json" in content
     assert "cyclonedx-json@1.6=/output/frontend.cdx.json" in content
     assert "cyclonedx-json@1.6=/output/nginx.cdx.json" in content
     assert "backend: trivy scan command failed" in content
+    assert "backend-arm64: trivy scan command failed" in content
     assert "frontend: trivy scan command failed" in content
     assert "nginx: trivy scan command failed" in content
     assert "Cleanup supply-chain scan workspace" in content
@@ -746,7 +756,8 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "--env-file" not in content.split("Generate Trivy", 1)[1].split("Evaluate vulnerability", 1)[0]
 
     runtime_smoke_block = content.split("- name: Validate backend production runtime environment", 1)[1].split("- name:", 1)[0]
-    containers_block = content.split("containers:", 1)[1].split("\n  backend-alpine-candidate-audit:", 1)[0]
+    containers_block = content.split("containers:", 1)[1]
+    assert "--network none" in runtime_smoke_block
     assert "--read-only" in runtime_smoke_block
     assert "--tmpfs /tmp:rw,noexec,nosuid,nodev" in runtime_smoke_block
     assert "--cap-drop ALL" in runtime_smoke_block
@@ -758,97 +769,43 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130" in containers_block
     assert "Build production backend arm64 image" in containers_block
     assert "Validate production backend arm64 build" in containers_block
+    assert "backend-arm64.tar" in containers_block
+    assert "validate_alpine_hardened_smoke.py" in runtime_smoke_block
+    arm64_block = content.split("- name: Validate production backend arm64 build", 1)[1].split("- name:", 1)[0]
+    assert "validate_backend_runtime_environment.py" in arm64_block
+    assert "validate_backend_alpine_os_packages.py" in arm64_block
+    assert "validate_alpine_hardened_smoke.py" not in arm64_block
+    assert "validate_backend_production_smoke.py" not in arm64_block
+    assert "--network none" in arm64_block
     assert "|| true" not in runtime_smoke_block
     assert "continue-on-error" not in runtime_smoke_block
-
-
-def test_quality_workflow_alpine_candidate_audit_job() -> None:
-    content = _read(QUALITY_WORKFLOW)
-    assert "backend-alpine-candidate-audit:" in content
-    assert "if: github.event_name == 'pull_request'" in content.split("backend-alpine-candidate-audit:", 1)[1].split("steps:", 1)[0]
-    assert "ALPINE_CANDIDATE_AMD64_REF:" in content
-    assert "candidate-amd64.cdx.json" in content
-    assert "evaluate_alpine_candidate_reports.py" in content
-    assert "validate_alpine_candidate_wheel_manifest.py" in content
-    assert "name: sellerai-alpine-candidate-${{ github.sha }}" in content
-    alpine_job = content.split("backend-alpine-candidate-audit:", 1)[1].split("\n  backend-alpine-hardened-candidate:", 1)[0]
-    step_names = [
-        line.split("- name:", 1)[1].strip()
-        for line in alpine_job.splitlines()
-        if line.strip().startswith("- name:")
+    assert "continue-on-error" not in containers_block
+    assert "|| true" not in containers_block
+    jobs_header = content.split("jobs:", 1)[1]
+    job_names = [
+        line[2:-1]
+        for line in jobs_header.splitlines()
+        if line.startswith("  ") and not line.startswith("    ") and line.endswith(":")
     ]
-    policy_index = step_names.index("Evaluate Alpine candidate vulnerability policy")
-    wheel_amd64_index = step_names.index("Audit amd64 musllinux wheel install")
-    wheel_arm64_index = step_names.index("Audit arm64 musllinux wheel resolution")
-    wheel_validate_index = step_names.index("Validate Alpine candidate wheel manifests")
-    upload_index = step_names.index("Upload Alpine candidate audit artifacts")
-    cleanup_index = step_names.index("Cleanup Alpine candidate audit workspace")
-    assert wheel_amd64_index < policy_index
-    assert wheel_arm64_index < policy_index
-    assert wheel_validate_index < policy_index
-    assert policy_index < upload_index
-    assert upload_index < cleanup_index
-    wheel_amd64_block = alpine_job.split("- name: Audit amd64 musllinux wheel install", 1)[1].split("- name:", 1)[0]
-    wheel_arm64_block = alpine_job.split("- name: Audit arm64 musllinux wheel resolution", 1)[1].split("- name:", 1)[0]
-    assert "continue-on-error" not in wheel_amd64_block
-    assert "|| true" not in wheel_amd64_block
-    assert "continue-on-error" not in wheel_arm64_block
-    assert "|| true" not in wheel_arm64_block
-    assert "/var/run/docker.sock" not in wheel_amd64_block
-    assert '--user "${RUNNER_UID}:${RUNNER_GID}"' in wheel_amd64_block
-    assert "/audit/ro/" in wheel_amd64_block
-    assert " probe" in wheel_amd64_block
-    assert " download" in wheel_amd64_block
-    assert " install" in wheel_amd64_block
-    assert "docker_run_amd64 none" in wheel_amd64_block
-    assert "staging-amd64/wheelhouse" in alpine_job
-    assert "validate_target_site_packages.py" in wheel_amd64_block
-    assert "if: ${{ !cancelled() }}" in wheel_arm64_block
-    policy_block = alpine_job.split("- name: Evaluate Alpine candidate vulnerability policy", 1)[1].split("- name:", 1)[0]
-    assert "if: ${{ !cancelled() }}" in policy_block
-    amd64_script = _read(REPO_ROOT / "backend" / "scripts" / "audit_alpine_candidate_wheels_amd64.py")
-    assert "venv" not in amd64_script
-    assert "--target" in amd64_script
-    assert "python -m pip" not in amd64_script
-    assert '"-m", "pip"' in amd64_script or "'-m', 'pip'" in amd64_script
-    alpine_upload = content.split("- name: Upload Alpine candidate audit artifacts", 1)[1].split("- name:", 1)[0]
-    assert "if: always()" in alpine_upload
-    assert ".tar" not in alpine_upload
-    assert ".whl" not in alpine_upload
-    assert "wheel-amd64.json" in alpine_upload
-    assert "wheel-arm64.json" in alpine_upload
-    assert "candidate-policy-summary.json" in alpine_upload
-    assert len([name for name in alpine_upload.splitlines() if ".json" in name]) == 7
-    assert "docker push" not in content.split("backend-alpine-candidate-audit:", 1)[1].split("backend-alpine-hardened-candidate:", 1)[0]
+    assert job_names == ["backend", "frontend", "containers"]
 
 
-def test_quality_workflow_alpine_hardened_candidate_job() -> None:
+def test_quality_workflow_retired_alpine_candidate_jobs() -> None:
     content = _read(QUALITY_WORKFLOW)
-    assert "backend-alpine-hardened-candidate:" in content
-    hardened_job = content.split("backend-alpine-hardened-candidate:", 1)[1]
-    assert "if: github.event_name == 'pull_request'" in hardened_job.split("steps:", 1)[0]
-    assert "docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130" in hardened_job
-    assert "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f" in hardened_job
-    assert "Dockerfile.prod" in hardened_job
-    assert "evaluate_alpine_hardened_candidate_reports.py" in hardened_job
-    assert "validate_alpine_hardened_smoke.py" in hardened_job
-    assert "validate_alpine_hardened_verification_manifest.py" in hardened_job
-    assert "build_only" in hardened_job
-    assert "name: sellerai-alpine-hardened-${{ github.sha }}" in hardened_job
-    smoke_block = hardened_job.split("- name: Run amd64 hardened runtime and smoke validation", 1)[1].split("- name:", 1)[0]
-    assert "--network none" in smoke_block
-    assert "--read-only" in smoke_block
-    assert "--tmpfs /tmp:rw,noexec,nosuid,nodev" in smoke_block
-    assert "--cap-drop ALL" in smoke_block
-    assert "continue-on-error" not in hardened_job
-    assert "|| true" not in hardened_job
-    assert "docker push" not in hardened_job
-    hardened_upload = hardened_job.split("- name: Upload hardened Alpine candidate artifacts", 1)[1].split("- name:", 1)[0]
-    assert "if: always()" in hardened_upload
-    assert "if-no-files-found: error" in hardened_upload
-    assert len([name for name in hardened_upload.splitlines() if ".json" in name]) == 7
-    cleanup_block = hardened_job.split("- name: Cleanup Alpine hardened candidate workspace", 1)[1]
-    assert "if: always()" in cleanup_block.split("- name:", 1)[0]
+    assert "backend-alpine-candidate-audit:" not in content
+    assert "backend-alpine-hardened-candidate:" not in content
+    assert "sellerai-alpine-candidate-" not in content
+    assert "sellerai-alpine-hardened-" not in content
+    assert "ALPINE_CANDIDATE_" not in content
+    assert "evaluate_alpine_candidate_reports.py" not in content
+    assert "evaluate_alpine_hardened_candidate_reports.py" not in content
+    assert "validate_alpine_candidate_wheel_manifest.py" not in content
+    assert "cc19a3e1085aba7d26690cf0725d9a3e083cbea0feec34ba8133d40a8ac1d399" not in content
+    assert "df8376721de6f98515643fca8e7aac56e6a39bc178697a1d8c020ffa050b655e" not in content
+    assert "docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130" in content
+    assert "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f" in content
+    assert "validate_alpine_hardened_smoke.py" in content
+    assert "evaluate_vulnerability_report.py" in content
 
 
 BACKEND_ALPINE_SECURITY_CONTRACT_TOKENS = (
@@ -866,17 +823,15 @@ BACKEND_ALPINE_SECURITY_CONTRACT_TOKENS = (
 )
 
 
-def test_backend_alpine_candidate_dockerfile_contract() -> None:
-    candidate_content = _read(REPO_ROOT / "backend" / "Dockerfile.alpine-candidate")
+def test_backend_production_alpine_dockerfile_contract() -> None:
     prod_content = _read(BACKEND_DOCKERFILE_PROD)
     for token in BACKEND_ALPINE_SECURITY_CONTRACT_TOKENS:
-        assert token in candidate_content
         assert token in prod_content
     assert "perl" not in prod_content
     assert "util-linux" not in prod_content
     assert "3.11-slim-trixie" not in prod_content
-    assert candidate_content.count("FROM python:3.11-alpine3.24@") == 3
     assert prod_content.count("FROM python:3.11-alpine3.24@") == 3
+    assert not (REPO_ROOT / "backend" / "Dockerfile.alpine-candidate").exists()
 
 
 def test_frontend_production_dockerfile_runner_toolchain_removal() -> None:

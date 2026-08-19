@@ -4,7 +4,7 @@ This document defines SBOM generation, container vulnerability scanning, CI fail
 
 **Policy access date:** 2026-08-18
 
-**Status:** Implementation complete; remote verification pending. S3c is **not verified** until a remote `containers` job completes real build, SBOM generation, Trivy scan, and policy evaluation. Do not promote to release before verification.
+**Status:** Production `containers` job performs fail-closed SBOM + Trivy + policy evaluation on four scan targets (backend amd64, backend arm64, frontend, nginx). Temporary Alpine candidate audit jobs were retired in S3d5. Do not promote a release until the matching remote `containers` job for that commit reports `blocked=0`.
 
 ---
 
@@ -12,7 +12,8 @@ This document defines SBOM generation, container vulnerability scanning, CI fail
 
 | Image | CI tag | SBOM artifact | Vulnerability report |
 | --- | --- | --- | --- |
-| Backend production | `sellerai-backend-ci:<commit-sha>` | `backend.cdx.json` | `backend.trivy.json` |
+| Backend production amd64 | `sellerai-backend-ci:<commit-sha>` | `backend.cdx.json` | `backend.trivy.json` |
+| Backend production arm64 | `sellerai-backend-ci:<commit-sha>-arm64` | `backend-arm64.cdx.json` | `backend-arm64.trivy.json` |
 | Frontend production | `sellerai-frontend-ci:<commit-sha>` | `frontend.cdx.json` | `frontend.trivy.json` |
 | RC nginx | `sellerai-nginx-ci:<commit-sha>` | `nginx.cdx.json` | `nginx.trivy.json` |
 
@@ -43,18 +44,18 @@ Scanner env contract in CI:
 
 - Job-level `SYFT_IMAGE` / `TRIVY_IMAGE` only — static `tag@sha256:digest` values
 - No `${{ }}` interpolation, secrets, inputs, repository variables, or step-level overrides
-- Docker run steps reference only `"${SYFT_IMAGE}"` or `"${TRIVY_IMAGE}"` (six explicit invocations)
+- Docker run steps reference only `"${SYFT_IMAGE}"` or `"${TRIVY_IMAGE}"` (eight explicit invocations: four Syft + four Trivy)
 
 ---
 
 ## 3. Scan architecture (no Docker socket)
 
-1. Build three production images on the CI runner.
-2. `docker image save` each image to `$RUNNER_TEMP/sellerai-scan/input/*.tar` (never uploaded).
+1. Build production images on the CI runner (backend amd64, backend arm64 via buildx/QEMU, frontend, nginx).
+2. `docker image save` each scanned image to `$RUNNER_TEMP/sellerai-scan/input/*.tar` (never uploaded).
 3. Run **Syft** (`SYFT_CHECK_FOR_APP_UPDATE=false`) with read-only input mount; write CycloneDX JSON.
 4. Validate SBOM artifacts with `validate_sbom_artifacts.py`.
 5. Run **Trivy** with read-only input mount and dedicated `$RUNNER_TEMP/sellerai-scan/trivy-cache`; write JSON (`--exit-code 0`; policy enforced separately). Scanner command failures fail the job.
-6. Evaluate policy with `evaluate_vulnerability_report.py` (writes `scan-summary.json` even when blocked).
+6. Evaluate policy with `evaluate_vulnerability_report.py` (writes `scan-summary.json` even when blocked). Missing any of the four Trivy reports fails closed. The same CRITICAL / HIGH+fix rules apply to every architecture; findings are not deduplicated across amd64/arm64.
 7. Upload approved JSON artifacts only (`if: always()` on upload; upload does not mask job failure).
 8. Cleanup deletes only `$RUNNER_TEMP/sellerai-scan` after upload.
 
@@ -65,7 +66,7 @@ Scanner env contract in CI:
 - Uploading image tar, build context, `.env`, scanner cache, logs, or source maps
 - Mutable `latest` tags, floating `@v*` GitHub Action tags, or unapproved scanner forks
 
-`containers` job timeout: **45 minutes** (build + save + six scanner runs + DB download + validation + upload).
+`containers` job timeout: **45 minutes** (build + save + eight scanner runs + DB download + validation + upload).
 
 ---
 
@@ -135,35 +136,32 @@ S3c ships **zero** approved exceptions.
 | Name | `sellerai-supply-chain-<commit-sha>` |
 | Retention | **14 days** |
 | `if-no-files-found` | **error** |
-| Exact paths | `backend.cdx.json`, `frontend.cdx.json`, `nginx.cdx.json`, `backend.trivy.json`, `frontend.trivy.json`, `nginx.trivy.json`, `scan-summary.json` |
+| Exact paths | `backend.cdx.json`, `backend-arm64.cdx.json`, `frontend.cdx.json`, `nginx.cdx.json`, `backend.trivy.json`, `backend-arm64.trivy.json`, `frontend.trivy.json`, `nginx.trivy.json`, `scan-summary.json` (9 JSON files) |
 | Excluded | Image tar, scanner cache, logs, source, env files, hidden files |
 
 Access: GitHub Actions artifacts with repository-scoped permissions (`contents: read`, `actions: write`). Not published externally.
 
-### 8.1 Alpine backend candidate audit (non-production, S3d4c1)
+### 8.1 Historical Alpine candidate audit (completed, S3d5)
 
-The `backend-alpine-candidate-audit` job is a **temporary, pull_request-only** audit of the approved Alpine Python base candidate. It does **not** replace or modify production scan artifacts.
+S3d5 deleted the temporary PR-only jobs `backend-alpine-candidate-audit` and `backend-alpine-hardened-candidate`. Production images **are Alpine-based** (`backend/Dockerfile.prod` on `python:3.11-alpine3.24`). The designed raw-candidate failure was **not** a production policy failure: production uninstalls `jaraco.context` / `wheel` / `setuptools` from the runtime image.
 
-| Setting | Value |
+This subsection is an evidence archive only. Implementation scripts and candidate jobs are gone; GitHub Actions run history and artifacts remain.
+
+| Item | Value |
 | --- | --- |
-| Job | `backend-alpine-candidate-audit` |
-| Trigger | `pull_request` only |
-| Candidate identity | `python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1` |
-| Child digests | amd64 `cc19a3e…`, arm64 `df837672…` (job env allowlist) |
-| Artifact name | `sellerai-alpine-candidate-<commit-sha>` |
-| Retention | **14 days** |
-| Exact paths | `candidate-amd64.cdx.json`, `candidate-arm64.cdx.json`, `candidate-amd64.trivy.json`, `candidate-arm64.trivy.json`, `candidate-policy-summary.json`, `wheel-amd64.json`, `wheel-arm64.json` |
-| Excluded | Image tar, wheel files, pip/scanner cache, logs, source, env files |
+| Raw index digest | `python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1` |
+| Retired amd64 child digest | `sha256:cc19a3e1085aba7d26690cf0725d9a3e083cbea0feec34ba8133d40a8ac1d399` |
+| Retired arm64 child digest | `sha256:df8376721de6f98515643fca8e7aac56e6a39bc178697a1d8c020ffa050b655e` |
+| Wheel audit | **60** wheels, **0** sdist, **0** missing |
+| Raw blocker | HIGH+fix on unmodified official image `wheel` and `jaraco.context` |
+| Hardened candidate | `Dockerfile.prod`; policy blocked=0 |
+| Historical artifact names | `sellerai-alpine-candidate-<commit-sha>`, `sellerai-alpine-hardened-<commit-sha>` (14-day retention; not regenerated) |
+| Wheel audit / raw designed-fail Run | [32272275793](https://github.com/biforch/seller-ai-copilot/actions/runs/32272275793) job `96131809593` |
+| Hardened candidate verification Run | [32272275793](https://github.com/biforch/seller-ai-copilot/actions/runs/32272275793) job `96131809397` |
+| Production Alpine migration Run | [32243262386](https://github.com/biforch/seller-ai-copilot/actions/runs/32243262386) @ `bd36fd3` |
+| Last pre-S3d5 production blocked=0 (3 images) | [32272275793](https://github.com/biforch/seller-ai-copilot/actions/runs/32272275793) containers job `96131809502` |
 
-Policy reuse: candidate Trivy reports are evaluated through the same CRITICAL / HIGH+fix rules as production via `evaluate_alpine_candidate_reports.py`, which wraps `evaluate_vulnerability_report.evaluate_report_paths`.
-
-Wheel audit notes (PEP 656): `musllinux_1_1_*` wheels represent the minimum compatible musl ABI. Alpine 3.24 (musl 1.2.x) may install `musllinux_1_1_*` wheels when `musllinux_1_2_*` wheels are unavailable. Candidate acceptance requires amd64 real pip install/import proof and arm64 cross-resolution proof only (`NOT_EXECUTED_CROSS_ARCH`). Wheel manifest schema version 2 stores complete compatibility tags in `wheel_tags` (parsed via `packaging.utils.parse_wheel_filename`), not truncated platform fragments.
-
-Step order (S3d4c1b): SBOM/Trivy validation must finish before amd64 wheel install/import, arm64 cross-resolution, wheel manifest validation, and only then the candidate vulnerability policy evaluator. Artifact upload and cleanup still use `if: always()` so wheel evidence is retained even when candidate policy blocks on raw base-image HIGH findings (`wheel`, `jaraco.context`).
-
-Wheel install contract (S3d4c1c): amd64 audit runs as the runner UID/GID inside a read-only container with `/tmp` mounted `noexec`. Downloads use official PyPI with `python -m pip download --only-binary=:all:` into a host staging wheelhouse; offline install uses `python -m pip install --no-index --target` with `target_dependency_check` (importlib.metadata Requires-Dist validation). arm64 resolution runs independently on the host and both architectures always emit pass/fail manifests before the final wheel manifest validator fail-closes the job. Policy evaluation uses `if: !cancelled()` so `candidate-policy-summary.json` is still produced when wheel validation fails.
-
-Production images remain Debian-based until a separately authorized migration commit lands.
+Candidate jobs were archived and deleted in S3d5. Do not reintroduce a permanently failing raw-candidate job to preserve history.
 
 ---
 
@@ -184,7 +182,5 @@ Production images remain Debian-based until a separately authorized migration co
 | Image pin validator (runtime + scanner) | `backend/scripts/validate_container_image_pins.py` |
 | SBOM validator | `backend/scripts/validate_sbom_artifacts.py` |
 | Vulnerability policy evaluator | `backend/scripts/evaluate_vulnerability_report.py` |
-| Alpine candidate evaluator | `backend/scripts/evaluate_alpine_candidate_reports.py` |
-| Alpine wheel manifest validator | `backend/scripts/validate_alpine_candidate_wheel_manifest.py` |
-| CI workflow | `.github/workflows/quality.yml` (`containers`, `backend-alpine-candidate-audit`) |
+| CI workflow | `.github/workflows/quality.yml` (`backend`, `frontend`, `containers`) |
 | Runtime base image policy | `docs/runtime-image-policy.md` |
