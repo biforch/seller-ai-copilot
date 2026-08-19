@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -259,10 +260,14 @@ def validate_sbom_file(path: Path) -> list[Finding]:
 
 
 def validate_sbom_directory(directory: Path) -> tuple[list[Finding], int]:
+    return validate_sbom_files(directory, REQUIRED_FILES)
+
+
+def validate_sbom_files(directory: Path, filenames: Sequence[str]) -> tuple[list[Finding], int]:
     findings: list[Finding] = []
     checked = 0
 
-    for filename in REQUIRED_FILES:
+    for filename in filenames:
         checked += 1
         findings.extend(validate_sbom_file(directory / filename))
 
@@ -271,12 +276,23 @@ def validate_sbom_directory(directory: Path) -> tuple[list[Finding], int]:
 
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
-    if len(args) != 1:
-        print("usage: validate_sbom_artifacts.py <output-directory>", file=sys.stderr)
+    if len(args) == 1:
+        directory = Path(args[0])
+        findings, checked = validate_sbom_directory(directory)
+    elif len(args) >= 2 and args[0] == "--files":
+        directory = Path(args[1])
+        filenames = tuple(args[2:])
+        if not filenames:
+            print("usage: validate_sbom_artifacts.py --files <directory> <file>...", file=sys.stderr)
+            return 2
+        findings, checked = validate_sbom_files(directory, filenames)
+    else:
+        print(
+            "usage: validate_sbom_artifacts.py <output-directory>\n"
+            "       validate_sbom_artifacts.py --files <output-directory> <file>...",
+            file=sys.stderr,
+        )
         return 2
-
-    directory = Path(args[0])
-    findings, checked = validate_sbom_directory(directory)
     if findings:
         for finding in findings:
             print(f"{finding.filename}: {finding.reason}", file=sys.stderr)

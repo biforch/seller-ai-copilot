@@ -642,7 +642,7 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "if-no-files-found: error" in content
     assert "name: sellerai-supply-chain-${{ github.sha }}" in content
 
-    upload_block = content.split("- name: Upload supply-chain scan artifacts", 1)[1]
+    upload_block = content.split("- name: Upload supply-chain scan artifacts", 1)[1].split("- name:", 1)[0]
     assert ".tar" not in upload_block
     assert "backend.cdx.json" in upload_block
     assert "frontend.cdx.json" in upload_block
@@ -685,7 +685,20 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "continue-on-error" not in runtime_smoke_block
 
 
-def test_frontend_production_dockerfile_removes_global_npm_tooling_from_runtime() -> None:
+def test_quality_workflow_alpine_candidate_audit_job() -> None:
+    content = _read(QUALITY_WORKFLOW)
+    assert "backend-alpine-candidate-audit:" in content
+    assert "if: github.event_name == 'pull_request'" in content.split("backend-alpine-candidate-audit:", 1)[1].split("steps:", 1)[0]
+    assert "ALPINE_CANDIDATE_AMD64_REF:" in content
+    assert "candidate-amd64.cdx.json" in content
+    assert "evaluate_alpine_candidate_reports.py" in content
+    assert "validate_alpine_candidate_wheel_manifest.py" in content
+    assert "name: sellerai-alpine-candidate-${{ github.sha }}" in content
+    alpine_upload = content.split("- name: Upload Alpine candidate audit artifacts", 1)[1].split("- name:", 1)[0]
+    assert ".tar" not in alpine_upload
+    assert ".whl" not in alpine_upload
+    assert "wheel-amd64.json" in alpine_upload
+    assert "docker push" not in content.split("backend-alpine-candidate-audit:", 1)[1]
     content = _read(FRONTEND_DOCKERFILE_PROD)
     deps_block = content.split("AS deps", 1)[1].split("AS builder", 1)[0]
     runner_block = content.split("AS runner", 1)[1]

@@ -28,8 +28,8 @@ SCAN_TARGETS = (
 EXPECTED_SCAN_FILE_COUNT = len(SCAN_TARGETS)
 EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 12
 EXPECTED_INTERNAL_BUILD_REF_COUNT = 4
-EXPECTED_SCANNER_PINNED_REF_COUNT = 6
-EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT = 2
+EXPECTED_SCANNER_PINNED_REF_COUNT = 10
+EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT = 4
 
 ALLOWED_SCANNER_SHELL_VARS = frozenset(
     {
@@ -42,8 +42,26 @@ ALLOWED_SCANNER_SHELL_VARS = frozenset(
         "TRIVY_CACHE_DIR",
         "SCAN_INPUT",
         "SCAN_OUTPUT",
+        "ALPINE_CANDIDATE_INDEX_REF",
+        "ALPINE_CANDIDATE_AMD64_REF",
+        "ALPINE_CANDIDATE_ARM64_REF",
+        "ALPINE_AUDIT_INPUT",
+        "ALPINE_AUDIT_OUTPUT",
+        "ALPINE_TRIVY_CACHE_DIR",
+        "CLEANUP_TARGET",
     }
 )
+
+APPROVED_AUDIT_CANDIDATES = frozenset(
+    {
+        "python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1",
+        "python:3.11-alpine3.24@sha256:cc19a3e1085aba7d26690cf0725d9a3e083cbea0feec34ba8133d40a8ac1d399",
+        "python:3.11-alpine3.24@sha256:df8376721de6f98515643fca8e7aac56e6a39bc178697a1d8c020ffa050b655e",
+    }
+)
+
+CONTAINERS_JOB_NAME = "containers"
+ALPINE_CANDIDATE_JOB_NAME = "backend-alpine-candidate-audit"
 
 SCANNER_FORBIDDEN_WORKFLOW_PATTERNS = (
     (re.compile(r"/var/run/docker\.sock"), "workflow must not mount Docker socket into scanner containers"),
@@ -61,7 +79,11 @@ SCANNER_FORBIDDEN_CREDENTIAL_ENV = re.compile(
     re.IGNORECASE,
 )
 TRIVY_STEP_NAME = "Generate Trivy vulnerability reports"
+ALPINE_TRIVY_STEP_NAME = "Generate Alpine candidate Trivy reports"
+ALPINE_SYFT_STEP_NAME = "Generate Alpine candidate CycloneDX SBOMs"
 CLEANUP_STEP_NAME = "Cleanup supply-chain scan workspace"
+ALPINE_CLEANUP_STEP_NAME = "Cleanup Alpine candidate audit workspace"
+ALPINE_ARTIFACT_STEP_NAME = "Upload Alpine candidate audit artifacts"
 RUNTIME_SMOKE_STEP_NAME = "Validate backend production runtime environment"
 FRONTEND_RUNTIME_SMOKE_STEP_NAME = "Validate frontend production runtime environment"
 
@@ -147,6 +169,15 @@ def _validate_external_image(path: Path, line_no: int, ref: str) -> list[Finding
                 path,
                 line_no,
                 "scanner image must not be used as a runtime base image",
+            )
+        ]
+
+    if ref in APPROVED_AUDIT_CANDIDATES:
+        return [
+            Finding(
+                path,
+                line_no,
+                "approved audit candidate image must not be used as runtime base image",
             )
         ]
 
@@ -646,35 +677,137 @@ def _validate_scanner_env_line(path: Path, line_no: int, line: str, var_name: st
     return findings
 
 
+def _validate_alpine_candidate_env_line(path: Path, line_no: int, line: str, var_name: str) -> list[Finding]:
+    findings: list[Finding] = []
+    if "${{" in line:
+        findings.append(
+            Finding(path, line_no, f"{var_name} must not use workflow interpolation")
+        )
+    if re.search(r"\b(secrets|inputs|vars)\.", line):
+        findings.append(
+            Finding(path, line_no, f"{var_name} must not reference secrets, inputs, or repository variables")
+        )
+    value_match = re.match(rf"^\s+{var_name}:\s*(?P<ref>\S+)\s*(?:#.*)?$", line)
+    if not value_match:
+        findings.append(Finding(path, line_no, f"{var_name} must define a static pinned candidate reference"))
+        return findings
+    ref = value_match.group("ref")
+    if ref not in APPROVED_AUDIT_CANDIDATES:
+        findings.append(
+            Finding(path, line_no, f"{var_name} must use an approved audit candidate reference")
+        )
+    return findings
+
+
+def _validate_alpine_trivy_step(path: Path, content: str) -> list[Finding]:
+    findings: list[Finding] = []
+    block = _extract_step_run_block(content, ALPINE_TRIVY_STEP_NAME)
+    if block is None:
+        findings.append(Finding(path, 0, "Alpine candidate job must define Generate Alpine candidate Trivy reports step"))
+        return findings
+
+    user_runs = re.findall(r'--user "\$\{RUNNER_UID\}:\$\{RUNNER_GID\}"', block)
+    if len(user_runs) != 2:
+        findings.append(
+            Finding(path, 0, f"Alpine Trivy step must run two scanner containers as runner uid/gid, found {len(user_runs)}")
+        )
+    cache_mounts = re.findall(r'"\$\{ALPINE_TRIVY_CACHE_DIR\}:/trivy-cache:rw"', block)
+    if len(cache_mounts) != 2:
+        findings.append(
+            Finding(path, 0, f"Alpine Trivy step must mount ALPINE_TRIVY_CACHE_DIR twice, found {len(cache_mounts)}")
+        )
+    if "/var/run/docker.sock" in block or "sudo" in block or "chmod 777" in block:
+        findings.append(Finding(path, 0, "Alpine Trivy step must not use docker socket or privilege helpers"))
+    return findings
+
+
+def _validate_alpine_cleanup_step(path: Path, content: str) -> list[Finding]:
+    findings: list[Finding] = []
+    marker = f"- name: {ALPINE_CLEANUP_STEP_NAME}"
+    if marker not in content:
+        findings.append(Finding(path, 0, "Alpine candidate job must define cleanup step"))
+        return findings
+    cleanup_section = content.split(marker, 1)[1].split("- name:", 1)[0]
+    if "if: always()" not in cleanup_section:
+        findings.append(Finding(path, 0, "Alpine cleanup step must use if: always()"))
+    block = _extract_step_run_block(content, ALPINE_CLEANUP_STEP_NAME)
+    if block is None:
+        findings.append(Finding(path, 0, "Alpine cleanup step must define a run block"))
+        return findings
+    if 'CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-alpine-audit"' not in block:
+        findings.append(Finding(path, 0, "Alpine cleanup step must target sellerai-alpine-audit workspace"))
+    if 'rm -rf "${CLEANUP_TARGET}"' not in block:
+        findings.append(Finding(path, 0, "Alpine cleanup step must remove CLEANUP_TARGET"))
+    for token in ("sudo", "chmod 777", "|| true", "docker run"):
+        if token in block:
+            findings.append(Finding(path, 0, f"Alpine cleanup step must not use {token}"))
+    return findings
+
+
+def _validate_alpine_artifact_upload(path: Path, content: str) -> list[Finding]:
+    findings: list[Finding] = []
+    marker = f"- name: {ALPINE_ARTIFACT_STEP_NAME}"
+    if marker not in content:
+        findings.append(Finding(path, 0, "Alpine candidate job must define artifact upload step"))
+        return findings
+    section = content.split(marker, 1)[1].split("- name:", 1)[0]
+    if "if: always()" not in section:
+        findings.append(Finding(path, 0, "Alpine artifact upload must use if: always()"))
+    if "if-no-files-found: error" not in section:
+        findings.append(Finding(path, 0, "Alpine artifact upload must fail when files are missing"))
+    forbidden_artifacts = (".tar", ".whl", "trivy-cache", "pip-cache", ".env")
+    for forbidden in forbidden_artifacts:
+        if forbidden in section:
+            findings.append(Finding(path, 0, f"Alpine artifact upload must not include {forbidden}"))
+    required_files = (
+        "candidate-amd64.cdx.json",
+        "candidate-arm64.cdx.json",
+        "candidate-amd64.trivy.json",
+        "candidate-arm64.trivy.json",
+        "candidate-policy-summary.json",
+        "wheel-amd64.json",
+        "wheel-arm64.json",
+    )
+    for filename in required_files:
+        if filename not in section:
+            findings.append(Finding(path, 0, f"Alpine artifact upload must include {filename}"))
+    return findings
+
+
 def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[Path, int, str]], int, int]:
     findings: list[Finding] = []
     external_refs: list[tuple[Path, int, str]] = []
     scanner_refs = 0
     scanner_identities = 0
-    syft_env_pin: str | None = None
-    trivy_env_pin: str | None = None
+    containers_syft_pin: str | None = None
+    containers_trivy_pin: str | None = None
+    alpine_syft_pin: str | None = None
+    alpine_trivy_pin: str | None = None
+    alpine_candidate_env_count = 0
     in_services = False
-    in_containers_job = False
+    current_job: str | None = None
     in_scanner_step = False
 
     for line_no, line in enumerate(content.splitlines(), start=1):
-        if re.match(r"^  containers:\s*$", line):
-            in_containers_job = True
-            continue
-        if in_containers_job and re.match(r"^  [a-zA-Z].+:\s*$", line) and not line.startswith("    "):
-            in_containers_job = False
+        job_match = re.match(r"^  ([a-zA-Z0-9_-]+):\s*$", line)
+        if job_match and not line.startswith("    "):
+            current_job = job_match.group(1)
             in_scanner_step = False
+            continue
 
-        if in_containers_job and re.match(
-            r"^      - name: (Generate CycloneDX SBOMs|Generate Trivy vulnerability reports)\s*$",
+        in_scan_job = current_job in {CONTAINERS_JOB_NAME, ALPINE_CANDIDATE_JOB_NAME}
+
+        if in_scan_job and re.match(
+            r"^      - name: (Generate CycloneDX SBOMs|Generate Trivy vulnerability reports|"
+            r"Generate Alpine candidate CycloneDX SBOMs|Generate Alpine candidate Trivy reports)\s*$",
             line,
         ):
             in_scanner_step = True
             continue
-        if in_containers_job and re.match(r"^      - name:", line):
+        if in_scan_job and re.match(r"^      - name:", line):
             in_scanner_step = False
 
-        if in_containers_job and in_scanner_step:
+        if in_scan_job and in_scanner_step:
             for pattern, reason in SCANNER_FORBIDDEN_WORKFLOW_PATTERNS:
                 if pattern.search(line):
                     findings.append(Finding(path, line_no, reason))
@@ -683,52 +816,103 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
                     Finding(path, line_no, "scanner containers must not receive credential env vars")
                 )
 
-        if in_containers_job:
+        if current_job == CONTAINERS_JOB_NAME:
             if re.match(r"^      SYFT_IMAGE:", line):
                 scanner_identities += 1
-                syft_env_match = re.match(r"^      SYFT_IMAGE:\s*(?P<ref>\S+)", line)
-                if syft_env_match:
-                    syft_env_pin = syft_env_match.group("ref")
+                match = re.match(r"^      SYFT_IMAGE:\s*(?P<ref>\S+)", line)
+                if match:
+                    containers_syft_pin = match.group("ref")
                 findings.extend(_validate_scanner_env_line(path, line_no, line, "SYFT_IMAGE"))
             elif re.match(r"^          SYFT_IMAGE:", line):
                 findings.append(Finding(path, line_no, "step env must not override SYFT_IMAGE"))
-
             if re.match(r"^      TRIVY_IMAGE:", line):
                 scanner_identities += 1
-                trivy_env_match = re.match(r"^      TRIVY_IMAGE:\s*(?P<ref>\S+)", line)
-                if trivy_env_match:
-                    trivy_env_pin = trivy_env_match.group("ref")
+                match = re.match(r"^      TRIVY_IMAGE:\s*(?P<ref>\S+)", line)
+                if match:
+                    containers_trivy_pin = match.group("ref")
                 findings.extend(_validate_scanner_env_line(path, line_no, line, "TRIVY_IMAGE"))
             elif re.match(r"^          TRIVY_IMAGE:", line):
                 findings.append(Finding(path, line_no, "step env must not override TRIVY_IMAGE"))
 
-            if in_scanner_step and (
-                "docker run" in line or '"${SYFT_IMAGE}"' in line or '"${TRIVY_IMAGE}"' in line
+        if current_job == ALPINE_CANDIDATE_JOB_NAME:
+            if re.match(r"^      SYFT_IMAGE:", line):
+                scanner_identities += 1
+                match = re.match(r"^      SYFT_IMAGE:\s*(?P<ref>\S+)", line)
+                if match:
+                    alpine_syft_pin = match.group("ref")
+                findings.extend(_validate_scanner_env_line(path, line_no, line, "SYFT_IMAGE"))
+            elif re.match(r"^          SYFT_IMAGE:", line):
+                findings.append(Finding(path, line_no, "step env must not override SYFT_IMAGE"))
+            if re.match(r"^      TRIVY_IMAGE:", line):
+                scanner_identities += 1
+                match = re.match(r"^      TRIVY_IMAGE:\s*(?P<ref>\S+)", line)
+                if match:
+                    alpine_trivy_pin = match.group("ref")
+                findings.extend(_validate_scanner_env_line(path, line_no, line, "TRIVY_IMAGE"))
+            elif re.match(r"^          TRIVY_IMAGE:", line):
+                findings.append(Finding(path, line_no, "step env must not override TRIVY_IMAGE"))
+            for var_name in (
+                "ALPINE_CANDIDATE_INDEX_REF",
+                "ALPINE_CANDIDATE_AMD64_REF",
+                "ALPINE_CANDIDATE_ARM64_REF",
             ):
-                for match in re.finditer(r"\$\{([A-Z0-9_]+)\}", line):
-                    var_name = match.group(1)
-                    if var_name not in ALLOWED_SCANNER_SHELL_VARS:
-                        findings.append(
-                            Finding(
-                                path,
-                                line_no,
-                                "scanner execution must not use unapproved shell variable substitution",
-                            )
+                if re.match(rf"^      {var_name}:", line):
+                    alpine_candidate_env_count += 1
+                    findings.extend(_validate_alpine_candidate_env_line(path, line_no, line, var_name))
+                elif re.match(rf"^          {var_name}:", line):
+                    findings.append(Finding(path, line_no, f"step env must not override {var_name}"))
+            if "docker push" in line:
+                findings.append(Finding(path, line_no, "Alpine candidate job must not push images"))
+            if current_job == ALPINE_CANDIDATE_JOB_NAME:
+                for candidate_ref in APPROVED_AUDIT_CANDIDATES:
+                    if candidate_ref not in line:
+                        continue
+                    if re.match(r"^\s+ALPINE_CANDIDATE_(INDEX|AMD64|ARM64)_REF:", line):
+                        continue
+                    if any(
+                        token in line
+                        for token in (
+                            "docker pull",
+                            "docker image save",
+                            "docker image inspect",
+                            "docker run",
+                            "${ALPINE_CANDIDATE_",
                         )
+                    ):
+                        continue
+                    findings.append(
+                        Finding(
+                            path,
+                            line_no,
+                            "audit candidate digest must be referenced via ALPINE_CANDIDATE_* env vars",
+                        )
+                    )
 
-            if in_scanner_step and ('"${SYFT_IMAGE}"' in line or '"${TRIVY_IMAGE}"' in line):
-                if '"${SYFT_IMAGE}"' in line:
-                    scanner_refs += 1
-                if '"${TRIVY_IMAGE}"' in line:
-                    scanner_refs += 1
+        if in_scan_job and in_scanner_step and (
+            "docker run" in line or '"${SYFT_IMAGE}"' in line or '"${TRIVY_IMAGE}"' in line
+        ):
+            for match in re.finditer(r"\$\{([A-Z0-9_]+)\}", line):
+                var_name = match.group(1)
+                if var_name not in ALLOWED_SCANNER_SHELL_VARS:
+                    findings.append(
+                        Finding(
+                            path,
+                            line_no,
+                            "scanner execution must not use unapproved shell variable substitution",
+                        )
+                    )
+            if '"${SYFT_IMAGE}"' in line:
+                scanner_refs += 1
+            if '"${TRIVY_IMAGE}"' in line:
+                scanner_refs += 1
 
         for scanner_image in ALLOWED_SCANNER_IMAGES:
-            if scanner_image in line and not in_containers_job:
+            if scanner_image in line and not in_scan_job:
                 findings.append(
                     Finding(
                         path,
                         line_no,
-                        "scanner image is only allowed in the containers job scan steps",
+                        "scanner image is only allowed in approved scan jobs",
                     )
                 )
 
@@ -738,7 +922,7 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
                 findings.append(
                     Finding(path, line_no, "unapproved scanner image reference in workflow")
                 )
-            elif in_containers_job and '"${SYFT_IMAGE}"' not in line and '"${TRIVY_IMAGE}"' not in line:
+            elif in_scan_job and '"${SYFT_IMAGE}"' not in line and '"${TRIVY_IMAGE}"' not in line:
                 if not re.match(r"^\s+(SYFT_IMAGE|TRIVY_IMAGE):", line):
                     findings.append(
                         Finding(
@@ -747,6 +931,16 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
                             "scanner image digest must be referenced via SYFT_IMAGE or TRIVY_IMAGE env vars",
                         )
                     )
+
+        for candidate_ref in APPROVED_AUDIT_CANDIDATES:
+            if candidate_ref in line and current_job != ALPINE_CANDIDATE_JOB_NAME:
+                findings.append(
+                    Finding(
+                        path,
+                        line_no,
+                        "approved audit candidate image is only allowed in backend-alpine-candidate-audit job",
+                    )
+                )
 
         if re.match(r"^    services:\s*$", line):
             in_services = True
@@ -771,32 +965,57 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
         if ref in ALLOWED_SCANNER_IMAGES:
             findings.append(Finding(path, line_no, "scanner image must not be used as a service container"))
             continue
+        if ref in APPROVED_AUDIT_CANDIDATES:
+            findings.append(Finding(path, line_no, "audit candidate image must not be used as a service container"))
+            continue
         findings.extend(_validate_external_image(path, line_no, ref))
         external_refs.append((path, line_no, ref))
 
     if "containers:" in content:
-        if syft_env_pin is None:
-            findings.append(Finding(path, 0, "containers job must define SYFT_IMAGE with a pinned scanner reference"))
-        if trivy_env_pin is None:
-            findings.append(Finding(path, 0, "containers job must define TRIVY_IMAGE with a pinned scanner reference"))
-        if syft_env_pin is not None and trivy_env_pin is not None and syft_env_pin == trivy_env_pin:
-            findings.append(Finding(path, 0, "SYFT_IMAGE and TRIVY_IMAGE must reference distinct scanner identities"))
-        if scanner_identities != EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT:
-            findings.append(
-                Finding(
-                    path,
-                    0,
-                    (
-                        "expected "
-                        f"{EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT} scanner approved identities, "
-                        f"found {scanner_identities}"
-                    ),
-                )
-            )
+        if containers_syft_pin is None or containers_trivy_pin is None:
+            findings.append(Finding(path, 0, "containers job must define SYFT_IMAGE and TRIVY_IMAGE"))
+        if (
+            containers_syft_pin is not None
+            and containers_trivy_pin is not None
+            and containers_syft_pin == containers_trivy_pin
+        ):
+            findings.append(Finding(path, 0, "containers SYFT_IMAGE and TRIVY_IMAGE must be distinct"))
         findings.extend(_validate_trivy_scan_step(path, content))
         findings.extend(_validate_runtime_smoke_step(path, content))
         findings.extend(_validate_frontend_runtime_smoke_step(path, content))
         findings.extend(_validate_cleanup_step(path, content))
+
+    if f"{ALPINE_CANDIDATE_JOB_NAME}:" in content:
+        if alpine_syft_pin is None or alpine_trivy_pin is None:
+            findings.append(Finding(path, 0, "Alpine candidate job must define SYFT_IMAGE and TRIVY_IMAGE"))
+        if alpine_candidate_env_count != 3:
+            findings.append(
+                Finding(
+                    path,
+                    0,
+                    f"expected 3 Alpine candidate env identities, found {alpine_candidate_env_count}",
+                )
+            )
+        if "if: github.event_name == 'pull_request'" not in content:
+            findings.append(Finding(path, 0, "Alpine candidate job must be pull_request gated"))
+        findings.extend(_validate_alpine_trivy_step(path, content))
+        findings.extend(_validate_alpine_cleanup_step(path, content))
+        findings.extend(_validate_alpine_artifact_upload(path, content))
+
+    if ("containers:" in content or f"{ALPINE_CANDIDATE_JOB_NAME}:" in content) and (
+        scanner_identities != EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT
+    ):
+        findings.append(
+            Finding(
+                path,
+                0,
+                (
+                    "expected "
+                    f"{EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT} scanner approved identities, "
+                    f"found {scanner_identities}"
+                ),
+            )
+        )
 
     return findings, external_refs, 0, scanner_refs
 

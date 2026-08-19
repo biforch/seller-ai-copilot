@@ -140,6 +140,27 @@ S3c ships **zero** approved exceptions.
 
 Access: GitHub Actions artifacts with repository-scoped permissions (`contents: read`, `actions: write`). Not published externally.
 
+### 8.1 Alpine backend candidate audit (non-production, S3d4c1)
+
+The `backend-alpine-candidate-audit` job is a **temporary, pull_request-only** audit of the approved Alpine Python base candidate. It does **not** replace or modify production scan artifacts.
+
+| Setting | Value |
+| --- | --- |
+| Job | `backend-alpine-candidate-audit` |
+| Trigger | `pull_request` only |
+| Candidate identity | `python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1` |
+| Child digests | amd64 `cc19a3e…`, arm64 `df837672…` (job env allowlist) |
+| Artifact name | `sellerai-alpine-candidate-<commit-sha>` |
+| Retention | **14 days** |
+| Exact paths | `candidate-amd64.cdx.json`, `candidate-arm64.cdx.json`, `candidate-amd64.trivy.json`, `candidate-arm64.trivy.json`, `candidate-policy-summary.json`, `wheel-amd64.json`, `wheel-arm64.json` |
+| Excluded | Image tar, wheel files, pip/scanner cache, logs, source, env files |
+
+Policy reuse: candidate Trivy reports are evaluated through the same CRITICAL / HIGH+fix rules as production via `evaluate_alpine_candidate_reports.py`, which wraps `evaluate_vulnerability_report.evaluate_report_paths`.
+
+Wheel audit notes (PEP 656): `musllinux_1_1_*` wheels represent the minimum compatible musl ABI. Alpine 3.24 (musl 1.2.x) may install `musllinux_1_1_*` wheels when `musllinux_1_2_*` wheels are unavailable. Candidate acceptance requires amd64 real pip install/import proof and arm64 cross-resolution proof only (`NOT_EXECUTED_CROSS_ARCH`).
+
+Production images remain Debian-based until a separately authorized migration commit lands.
+
 ---
 
 ## 9. Scanner upgrade procedure
@@ -159,5 +180,7 @@ Access: GitHub Actions artifacts with repository-scoped permissions (`contents: 
 | Image pin validator (runtime + scanner) | `backend/scripts/validate_container_image_pins.py` |
 | SBOM validator | `backend/scripts/validate_sbom_artifacts.py` |
 | Vulnerability policy evaluator | `backend/scripts/evaluate_vulnerability_report.py` |
-| CI workflow | `.github/workflows/quality.yml` (`containers` job) |
+| Alpine candidate evaluator | `backend/scripts/evaluate_alpine_candidate_reports.py` |
+| Alpine wheel manifest validator | `backend/scripts/validate_alpine_candidate_wheel_manifest.py` |
+| CI workflow | `.github/workflows/quality.yml` (`containers`, `backend-alpine-candidate-audit`) |
 | Runtime base image policy | `docs/runtime-image-policy.md` |

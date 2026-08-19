@@ -18,6 +18,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from scripts.validate_container_image_pins import (  # noqa: E402
     ALLOWED_SCANNER_IMAGES,
+    APPROVED_AUDIT_CANDIDATES,
     EXPECTED_INTERNAL_BUILD_REF_COUNT,
     EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT,
     EXPECTED_SCAN_FILE_COUNT,
@@ -318,7 +319,7 @@ def test_validator_script_runs_from_repo_root() -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().startswith(SUCCESS_MESSAGE)
     assert "12 runtime external pinned references" in result.stdout
-    assert "6 scanner pinned references" in result.stdout
+    assert "10 scanner pinned references" in result.stdout
 
 
 def test_scanner_allowlist_is_explicit() -> None:
@@ -453,8 +454,8 @@ def test_scanner_container_forbidden_mounts_are_rejected() -> None:
 
 
 def test_scanner_approved_identity_count() -> None:
-    assert EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT == 2
-    assert len(ALLOWED_SCANNER_IMAGES) == EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT
+    assert EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT == 4
+    assert len(ALLOWED_SCANNER_IMAGES) == 2
 
 
 def test_repository_scanner_identity_count() -> None:
@@ -539,6 +540,33 @@ def test_cleanup_step_requires_fail_closed_target() -> None:
     )
     findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
     assert any("fail closed when RUNNER_TEMP is unset" in finding.reason for finding in findings)
+
+
+def test_audit_candidate_in_dockerfile_is_rejected() -> None:
+    candidate = next(iter(APPROVED_AUDIT_CANDIDATES))
+    content = f"FROM {candidate}\n"
+    findings, _, _ = _scan_dockerfile(Path("Dockerfile.prod"), content)
+    assert any("audit candidate" in finding.reason for finding in findings)
+
+
+def test_audit_candidate_in_compose_is_rejected() -> None:
+    candidate = next(iter(APPROVED_AUDIT_CANDIDATES))
+    content = f"services:\n  backend:\n    image: {candidate}\n"
+    findings, _, _ = _scan_compose(Path("docker-compose.rc.yml"), content)
+    assert any("audit candidate" in finding.reason for finding in findings)
+
+
+def test_audit_candidate_floating_tag_is_rejected() -> None:
+    content = textwrap.dedent(
+        """
+        jobs:
+          backend-alpine-candidate-audit:
+            env:
+              ALPINE_CANDIDATE_AMD64_REF: python:3.11-alpine3.24
+        """
+    ).strip()
+    findings, _, _, _ = _scan_workflow(Path(".github/workflows/quality.yml"), content)
+    assert any("approved audit candidate reference" in finding.reason for finding in findings)
 
 
 def test_valid_nginx_digest_example_matches_policy() -> None:

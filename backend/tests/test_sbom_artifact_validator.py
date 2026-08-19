@@ -23,6 +23,7 @@ from scripts.validate_sbom_artifacts import (  # noqa: E402
     main,
     validate_sbom_directory,
     validate_sbom_file,
+    validate_sbom_files,
 )
 
 SECRET_CANARY = "state-canary-secret-do-not-echo"
@@ -320,3 +321,28 @@ def test_external_reference_userinfo_fails(tmp_path: Path) -> None:
     (tmp_path / "backend.cdx.json").write_text(json.dumps(payload), encoding="utf-8")
     findings = validate_sbom_file(tmp_path / "backend.cdx.json")
     assert any("URL userinfo" in finding.reason for finding in findings)
+
+
+def test_candidate_sbom_files_do_not_change_production_contract(tmp_path: Path) -> None:
+    _write_sboms(tmp_path)
+    production_findings, production_checked = validate_sbom_directory(tmp_path)
+    assert production_findings == []
+    assert production_checked == len(REQUIRED_FILES)
+
+    (tmp_path / "candidate-amd64.cdx.json").write_text(
+        json.dumps(_minimal_sbom("alpine-amd64", spec_version="1.6")),
+        encoding="utf-8",
+    )
+    (tmp_path / "candidate-arm64.cdx.json").write_text(
+        json.dumps(_minimal_sbom("alpine-arm64", spec_version="1.6")),
+        encoding="utf-8",
+    )
+    candidate_findings, candidate_checked = validate_sbom_files(
+        tmp_path,
+        ("candidate-amd64.cdx.json", "candidate-arm64.cdx.json"),
+    )
+    assert candidate_findings == []
+    assert candidate_checked == 2
+
+    assert main([str(tmp_path)]) == 0
+    assert main(["--files", str(tmp_path), "candidate-amd64.cdx.json", "candidate-arm64.cdx.json"]) == 0
