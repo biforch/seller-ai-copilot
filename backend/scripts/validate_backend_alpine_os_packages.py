@@ -7,6 +7,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from enum import Enum
 
 SUCCESS_MESSAGE = "backend alpine os package validation passed"
 
@@ -49,7 +50,19 @@ CANARY_PATTERNS = (
     re.compile(r"eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}"),
 )
 
-ApkQueryRunner = Callable[[Sequence[str], int], str]
+ApkInventoryRunner = Callable[[Sequence[str], int], str]
+SubprocessRunner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+class ApkPresenceStatus(str, Enum):
+    INSTALLED = "installed"
+    ABSENT = "absent"
+    QUERY_FAILED = "query_failed"
+
+
+@dataclass(frozen=True)
+class ApkPresenceResult:
+    status: ApkPresenceStatus
 
 
 @dataclass(frozen=True)
@@ -68,16 +81,43 @@ def _fail(reason_code: str) -> None:
     raise _AlpineOsPackageValidationError(reason_code)
 
 
-def _safe_output(value: str) -> str:
-    for pattern in CANARY_PATTERNS:
-        if pattern.search(value):
-            return "[redacted]"
-    if len(value) > 256:
-        return value[:256] + "..."
-    return value
+def _probe_apk_package_presence(
+    package_name: str,
+    *,
+    timeout_seconds: int,
+    subprocess_runner: SubprocessRunner = subprocess.run,
+) -> ApkPresenceResult:
+    try:
+        completed = subprocess_runner(
+            ["apk", "info", "-e", package_name],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired:
+        return ApkPresenceResult(ApkPresenceStatus.QUERY_FAILED)
+    except FileNotFoundError:
+        return ApkPresenceResult(ApkPresenceStatus.QUERY_FAILED)
+    except OSError:
+        return ApkPresenceResult(ApkPresenceStatus.QUERY_FAILED)
+    except Exception:
+        return ApkPresenceResult(ApkPresenceStatus.QUERY_FAILED)
+
+    output = (completed.stdout or "") + (completed.stderr or "")
+    if len(output.encode("utf-8", errors="replace")) > DEFAULT_MAX_OUTPUT_BYTES:
+        return ApkPresenceResult(ApkPresenceStatus.QUERY_FAILED)
+
+    return_code = completed.returncode
+    if return_code == 0:
+        return ApkPresenceResult(ApkPresenceStatus.INSTALLED)
+    if return_code == 1:
+        return ApkPresenceResult(ApkPresenceStatus.ABSENT)
+    return ApkPresenceResult(ApkPresenceStatus.QUERY_FAILED)
 
 
-def _default_apk_runner(args: Sequence[str], timeout_seconds: int) -> str:
+def _default_apk_inventory_runner(args: Sequence[str], timeout_seconds: int) -> str:
     completed = subprocess.run(
         list(args),
         check=False,
@@ -118,12 +158,7 @@ def _read_os_release(
     return parsed
 
 
-def _apk_installed(package_name: str, runner: ApkQueryRunner, timeout_seconds: int) -> bool:
-    output = runner(("apk", "info", "-e", package_name), timeout_seconds)
-    return package_name in output
-
-
-def _installed_apk_inventory(runner: ApkQueryRunner, timeout_seconds: int) -> list[str]:
+def _installed_apk_inventory(runner: ApkInventoryRunner, timeout_seconds: int) -> list[str]:
     output = runner(("apk", "info", "-q"), timeout_seconds)
     names = sorted({line.strip() for line in output.splitlines() if line.strip()})
     return names
@@ -133,12 +168,21 @@ def validate_backend_alpine_os_packages(
     *,
     forbidden_packages: Iterable[str] = FORBIDDEN_APK_PACKAGES,
     required_packages: Iterable[str] = REQUIRED_RUNTIME_APK_PACKAGES,
-    query_runner: ApkQueryRunner | None = None,
+    inventory_runner: ApkInventoryRunner | None = None,
+    presence_probe: Callable[[str], ApkPresenceResult] | None = None,
     os_release_reader: Callable[[], str] | None = None,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     validate_python_version: bool = True,
 ) -> list[str]:
-    runner = query_runner or _default_apk_runner
+    inventory = inventory_runner or _default_apk_inventory_runner
+
+    def probe(package_name: str) -> ApkPresenceResult:
+        if presence_probe is not None:
+            return presence_probe(package_name)
+        return _probe_apk_package_presence(
+            package_name,
+            timeout_seconds=timeout_seconds,
+        )
 
     os_release = _read_os_release(os_release_reader)
     if os_release.get("ID") != ALPINE_ID:
@@ -154,41 +198,27 @@ def validate_backend_alpine_os_packages(
             _fail("PYTHON_MINOR_INVALID")
 
     for package_name in sorted(forbidden_packages):
-        try:
-            installed = _apk_installed(package_name, runner, timeout_seconds)
-        except subprocess.TimeoutExpired:
-            _fail("APK_QUERY_TIMEOUT")
-        except _AlpineOsPackageValidationError:
-            raise
-        except AlpineOsPackageValidationError:
-            raise
-        except Exception:
+        result = probe(package_name)
+        if result.status is ApkPresenceStatus.QUERY_FAILED:
             _fail("APK_QUERY_FAILED")
-        if installed:
-            _fail(f"FORBIDDEN_APK_PRESENT:{package_name}")
+        if result.status is ApkPresenceStatus.INSTALLED:
+            _fail("FORBIDDEN_APK_INSTALLED")
 
     for package_name in sorted(required_packages):
-        try:
-            installed = _apk_installed(package_name, runner, timeout_seconds)
-        except subprocess.TimeoutExpired:
-            _fail("APK_QUERY_TIMEOUT")
-        except _AlpineOsPackageValidationError:
-            raise
-        except AlpineOsPackageValidationError:
-            raise
-        except Exception:
+        result = probe(package_name)
+        if result.status is ApkPresenceStatus.QUERY_FAILED:
             _fail("APK_QUERY_FAILED")
-        if not installed:
-            _fail(f"REQUIRED_APK_MISSING:{package_name}")
+        if result.status is ApkPresenceStatus.ABSENT:
+            _fail("REQUIRED_APK_MISSING")
 
     try:
-        return _installed_apk_inventory(runner, timeout_seconds)
-    except subprocess.TimeoutExpired:
-        _fail("APK_QUERY_TIMEOUT")
+        return _installed_apk_inventory(inventory, timeout_seconds)
     except _AlpineOsPackageValidationError:
         raise
     except AlpineOsPackageValidationError:
         raise
+    except subprocess.TimeoutExpired:
+        _fail("APK_QUERY_FAILED")
     except Exception:
         _fail("APK_INVENTORY_FAILED")
     raise _AlpineOsPackageValidationError("APK_INVENTORY_FAILED")
