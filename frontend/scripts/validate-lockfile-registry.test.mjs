@@ -192,7 +192,7 @@ test('validates the repository lockfile with the expected checked count', () => 
   const lockfile = JSON.parse(readFileSync(defaultLockfilePath(), 'utf8'));
   const result = validateLockfileRegistry(lockfile);
   assert.equal(result.violations.length, 0);
-  assert.equal(result.checked, 650);
+  assert.equal(result.checked, 652);
 });
 
 test('CLI validates the repository lockfile from another working directory', () => {
@@ -202,7 +202,7 @@ test('CLI validates the repository lockfile from another working directory', () 
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /Validated 650 package-lock resolved entries/);
+  assert.match(result.stdout, /Validated 652 package-lock resolved entries/);
 });
 
 test('CLI exits with code 1 for missing lockfiles without leaking home paths', () => {
