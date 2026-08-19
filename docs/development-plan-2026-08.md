@@ -1,8 +1,8 @@
 # SellerAI Copilot Development Plan
 
-**Plan version:** 2026-08-18
-**Code baseline:** `682709c` (prior); R1a-1 toolchain alignment pending commit on `main`
-**Current verdict:** Core Amazon MVP feature-complete locally; S3c remote supply-chain verification still pending; R1a local npm toolchain gate complete pending authorized branch push.
+**Plan version:** 2026-08-19
+**Code baseline:** Draft PR #1 on `codex/amazon-mvp-hardening`; R2b verified at `a73a104`
+**Current verdict:** Core Amazon MVP and deterministic production build are remotely verified. R2b security hardening is verified by Quality Gate run `32280189796`. Local RC acceptance, operational rehearsal, browser-session migration, and controlled real-Amazon acceptance remain open before public launch.
 **Source of truth:** Current code, Alembic migrations, automated tests, and this plan. Earlier A3/A4 design reviews remain historical references and are not active delivery plans.
 
 ## 1. Product objective
@@ -43,6 +43,8 @@ Publishing content back to Amazon is **not** part of the current MVP. Human revi
 - Tenant-safe Amazon account reads, marketplace refresh, listing synchronization, listing reads, and manual REST triggers.
 - Amazon listing-to-product linking, catalog snapshot/enrichment, Amazon workspace UI, and catalog-aware AI proposal generation.
 - RC configuration validation, database readiness, production Dockerfiles, pinned GitHub Actions, backend/frontend quality jobs, Compose validation, and production-image build jobs.
+- Official-registry lockfile enforcement, digest-pinned runtimes, four-image SBOM/Trivy policy, Alpine backend runtime hardening, Next.js 16 migration, ESLint 0/0 CI, and amd64/arm64 backend scan coverage.
+- RC browser response headers, OAuth start/callback rate limiting, live-environment wildcard-CORS rejection, and production API-documentation suppression.
 
 ### Partial or deliberately deferred
 
@@ -54,8 +56,8 @@ Publishing content back to Amazon is **not** part of the current MVP. Human revi
 - Encryption supports a key ring, but no bulk rotation/re-encryption operational workflow exists.
 - Celery/Redis background execution is not wired into business code.
 - Amazon online behavior for Listings and Catalog has not been revalidated against a controlled live seller account.
-- GitHub quality and image-build jobs exist locally but have not run remotely because the branch has not been pushed.
-- Production images and RC smoke have not been built locally because the Docker daemon is unavailable.
+- GitHub backend, frontend, production image, SBOM, and vulnerability jobs pass remotely on Draft PR #1.
+- A full disposable RC lifecycle (start, smoke, restart, backup/restore, rollback, and cleanup) has not yet been rehearsed locally.
 
 ### Out of scope until explicitly approved
 
@@ -77,8 +79,8 @@ Publishing content back to Amazon is **not** part of the current MVP. Human revi
 
 ### Pre-staging security work
 
-3. **Browser bearer-token storage**
-   The 24-hour JWT is JavaScript-readable in `localStorage`; RC has no Content Security Policy. A same-origin XSS or compromised dependency can exfiltrate it.
+3. **Browser bearer-token storage** — **Partially mitigated in `a73a104` (R2b), not resolved.**
+   The 24-hour JWT remains JavaScript-readable in `localStorage`. RC now emits a constrained CSP and other browser headers, but the policy retains narrowly documented inline allowances for Next.js and cannot protect a bearer token from every same-origin XSS or compromised dependency. S4 remains a public-launch gate.
 
 4. **Mutable container bases** — **Resolved in `65fdc7f` (S3b).**
    Python, Node, nginx, and PostgreSQL release/CI/dev references now use reviewed `tag@sha256:digest` pins with an offline validator and documented lifecycle policy.
@@ -137,7 +139,7 @@ Exit gate:
 ### S3 — Dependency and image supply-chain hardening
 
 **Priority:** Required before staging
-**Status:** In Progress (S3a/S3b complete; S3c implementation complete, remote verification pending)
+**Status:** Complete and remotely verified
 **Scope:** lockfile, production Dockerfiles, Compose/CI image references, release tests.
 
 #### S3a — Official npm registry
@@ -173,7 +175,7 @@ Exit gate:
 
 #### S3c — SBOM and vulnerability policy
 
-**Status:** Implementation complete; remote verification pending
+**Status:** Complete and remotely verified
 
 Deliverables:
 
@@ -187,7 +189,7 @@ Exit gate (verification):
 - Remote `containers` job completes build + SBOM + Trivy + policy evaluation with pinned scanner images.
 - S3c may be marked **Verified** only after that remote proof — not after local fixture tests alone.
 
-**S3 overall:** In progress — not fully accepted until S3c remote verification passes.
+**S3 overall:** Complete. Production policy passes for backend amd64/arm64, frontend, and nginx with `blocked=0`; evidence is retained in the Quality Gate artifacts.
 
 ### S4 — Browser authentication hardening
 
@@ -214,12 +216,12 @@ Exit gate:
 
 ### R1 — Remote quality gate and deterministic build
 
-**Status:** Not complete (release promotion blocked)
-**Entry:** S3a–S3c implementation complete; S3c remote verification pending.
+**Status:** Complete
+**Evidence:** Quality Gate run `32276998695` for the integrated baseline and run `32280189796` for R2b both passed backend, frontend, containers, SBOM, Trivy, and policy evaluation.
 
 #### R1a — Remote supply-chain verification
 
-**Status:** Local gate complete (R1a-1); remote verification pending
+**Status:** Complete
 
 **R1a-1 local npm toolchain gate (complete):**
 
@@ -230,7 +232,7 @@ Exit gate:
 - Lockfile dependency graph unchanged; only root `engines` metadata updated.
 - **Prohibited:** deleting `@emnapi/runtime` lock entries, direct dependency workaround, extraneous allowlists.
 
-Deliverables (remote, still pending):
+Deliverables (completed):
 
 - Push authorized branch and execute remote `containers` job on GitHub runners.
 - Prove real build + `docker image save` + Syft SBOM + Trivy JSON + policy evaluator on all three production images.
@@ -239,12 +241,12 @@ Deliverables (remote, still pending):
 
 Exit gate:
 
-- Remote `containers` job passes with no skipped scan step.
-- S3c marked **Verified** only after this gate passes.
-- R1a overall **not Complete/Verified** until remote proof succeeds.
+- Remote `containers` job passes with no skipped scan step. **Complete.**
+- S3c is marked **Verified** only after that remote proof. **Complete.**
 
 #### R1b — Full remote quality gate
 
+**Status:** Complete
 **Entry:** R1a complete.
 
 Deliverables:
@@ -256,20 +258,46 @@ Deliverables:
 
 Exit gate: all required remote jobs pass with no skipped job and no secret-bearing logs/artifacts.
 
-### R2 — Disposable local RC acceptance
+### R2 — Release-candidate and operational acceptance
+
+**Status:** In progress
+
+#### R2a — Final read-only readiness audit
+
+**Status:** Complete (`R2A_READY_WITH_PRECONDITIONS`)
+
+#### R2b — Browser edge and OAuth boundary hardening
+
+**Status:** Complete (`a73a104`; remote run `32280189796`)
+
+- OAuth start is limited by a one-way credential digest; callback is limited at the exact nginx path by source IP without logging its query.
+- RC nginx emits CSP, referrer, MIME-sniffing, clickjacking, and Permissions-Policy headers.
+- Staging/production reject wildcard CORS and disable FastAPI documentation/OpenAPI endpoints.
+- HSTS remains the responsibility of the future approved HTTPS termination layer; the loopback HTTP RC does not emit false HSTS.
+
+#### R2c — Operations contract and backup/restore rehearsal
+
+**Status:** In progress
+
+- Update this plan and the RC runbook to current evidence.
+- Add a credential-free health probe suitable for an external scheduler.
+- Define actionable alert thresholds, ownership, redaction, incident response, and artifact retention.
+- Rehearse custom-format backup and restore into a fresh disposable database before release promotion.
+
+#### R2d — Disposable local RC acceptance
 
 **Entry:** R1b complete and Docker available.
 **Deliverables:**
 
 - Build backend/frontend/nginx production images.
 - Start the disposable `_test` RC database and one-shot migration service.
-- Verify `/health`, `/health/ready`, frontend login, OpenAPI, migration head, non-root users, and internal-only service ports.
+- Verify `/health`, `/health/ready`, frontend login, disabled production docs, migration head, non-root users, and internal-only service ports.
 - Run the documented non-LLM workflow: register, login, project/product, listing import/replay/history, proposal list, and tenant-safe error cases.
 - Capture only redacted evidence; do not call real LLM or Amazon endpoints.
 
 Exit gate: repeatable clean start, smoke pass, restart pass, rollback rehearsal, and label-verified RC cleanup.
 
-### R3 — Controlled Amazon acceptance
+#### R2e — Controlled Amazon acceptance
 
 **Entry:** R2 complete; approved Amazon Developer Console configuration and disposable seller test scope available.
 **Deliverables:**
@@ -282,9 +310,13 @@ Exit gate: repeatable clean start, smoke pass, restart pass, rollback rehearsal,
 
 Exit gate: documented, redacted evidence of the complete seller-to-proposal flow and an explicit go/no-go decision for staging.
 
+#### R2f — Review and merge decision
+
+Only after R2c–R2e evidence is complete may Draft PR #1 be marked ready for human review. Merging PR #1, pushing `main`, and public deployment remain separate explicit authorization points.
+
 ### P1 — Product selector scalability
 
-**Entry:** Security blockers closed; may run before or after R3 if it does not delay release validation.
+**Entry:** Security blockers closed; may run before or after R2e if it does not delay release validation.
 
 - Replace fixed first-page loading with server-side search and paginated selection.
 - Resolve already-linked products by ID even when outside the current result page.
@@ -342,8 +374,6 @@ For changes involving models or migrations, additionally require upgrade → dow
 
 ## 8. Decision checkpoints
 
-The next step is **authorized branch push** for R1a remote `containers` verification (S3c still **Remote verification pending**).
-
-After S3c is verified remotely, reassess whether any finding changes the S4 design. After R2, decide whether controlled Amazon acceptance is authorized. After R3, decide whether the next product investment is product search, account lifecycle, or measured scale/operations work.
+The next step is **R2c operations readiness**, followed by R2d disposable RC acceptance. Public launch remains blocked on S4 browser-session hardening, approved HTTPS/DNS and monitoring infrastructure, and R2e controlled Amazon acceptance.
 
 Automatic Amazon publishing remains outside the plan until the read/sync/proposal workflow has production evidence, an explicit publishing threat model, rollback/reconciliation semantics, and separate user authorization.

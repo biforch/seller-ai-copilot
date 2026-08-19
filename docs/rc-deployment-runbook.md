@@ -272,15 +272,55 @@ RC cleanup must use label-verified `docker compose ... down --volumes` only.
 
 ## 15. Data backup principles
 
-Before schema changes or RC teardown with data you might need:
+Before schema changes or RC teardown with data you might need, choose a backup path
+outside the repository and create a PostgreSQL custom-format dump:
 
 ```bash
+RC_BACKUP_PATH=/tmp/sellerai-rc-backup.dump
+test "${RC_BACKUP_PATH}" != "${PWD}" && test "${RC_BACKUP_PATH#${PWD}/}" = "${RC_BACKUP_PATH}"
+test ! -e "${RC_BACKUP_PATH}"
 docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml \
   exec -T postgres \
-  sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > rc-backup.sql
+  sh -c 'pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' > "${RC_BACKUP_PATH}"
+test -s "${RC_BACKUP_PATH}"
+shasum -a 256 "${RC_BACKUP_PATH}"
+docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml \
+  exec -T postgres pg_restore --list < "${RC_BACKUP_PATH}" > /dev/null
 ```
 
-Store dumps outside the repo. **Do not** commit backup files. RC databases are disposable (`*_test` naming); production backups follow separate policy.
+Store the checksum separately from the dump. **Do not** commit backup files. RC databases
+are disposable (`*_test` naming); production backups follow the policy targets in
+`docs/operations-readiness.md`.
+
+### Restore rehearsal into an isolated database
+
+Use only the exact disposable target name `sellerai_restore_test`. Never restore over the
+active RC database:
+
+```bash
+test -n "${RC_BACKUP_PATH}" && test -s "${RC_BACKUP_PATH}"
+docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml \
+  exec -T postgres sh -ec '
+    test "$POSTGRES_DB" != "sellerai_restore_test"
+    dropdb --if-exists -U "$POSTGRES_USER" sellerai_restore_test
+    createdb -U "$POSTGRES_USER" sellerai_restore_test
+  '
+docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml \
+  exec -T postgres sh -ec '
+    exec pg_restore --exit-on-error --no-owner --no-privileges \
+      -U "$POSTGRES_USER" -d sellerai_restore_test
+  ' < "${RC_BACKUP_PATH}"
+docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml \
+  exec -T postgres sh -ec '
+    exec psql -U "$POSTGRES_USER" -d sellerai_restore_test \
+      -Atc "select version_num from alembic_version;"
+  '
+```
+
+The restored Alembic head must equal `f9a0b1c2d3e4`. Compare representative table counts
+with the source and run an isolated application readiness check before recording the
+rehearsal as successful. Cleanup may drop only the exact `sellerai_restore_test` target
+after the evidence is recorded; never use a wildcard database name.
 
 ## 16. Migration rollback principles
 
@@ -335,7 +375,22 @@ This script **detects only** — it does not retry LLM calls.
 - Do **not** embed secrets in `NEXT_PUBLIC_*` build args
 - Rotate JWT and DB password if `.env.rc` was ever exposed
 
-## 21. Local debug (optional)
+## 21. Monitoring and incident readiness
+
+From an external scheduler, run:
+
+```bash
+cd backend
+python scripts/check_service_health.py http://127.0.0.1:8080
+```
+
+The probe is credential-free, rejects redirects and credential-bearing URLs, and validates
+both liveness and database readiness. Alert thresholds, privacy rules, backup retention,
+incident response, and the release evidence record are defined in
+`docs/operations-readiness.md`. Public deployment remains blocked until an external
+monitoring/notification system and a successful restore rehearsal satisfy that contract.
+
+## 22. Local debug (optional)
 
 To attach a debugger to backend temporarily, publish backend on localhost only by adding under `backend` in a **local override file** (not committed):
 

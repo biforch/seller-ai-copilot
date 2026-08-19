@@ -944,7 +944,10 @@ def test_runbook_documents_403_and_container_pg_dump() -> None:
     runbook = _read(RUNBOOK)
     assert "403" in runbook
     assert "401" not in runbook.split("Non-LLM smoke test")[1].split("## 11.")[0]
-    assert "sh -c 'pg_dump -U \"$POSTGRES_USER\" \"$POSTGRES_DB\"'" in runbook
+    assert "pg_dump -Fc -U \"$POSTGRES_USER\" \"$POSTGRES_DB\"" in runbook
+    assert "pg_restore --list" in runbook
+    assert "sellerai_restore_test" in runbook
+    assert "--exit-on-error --no-owner --no-privileges" in runbook
     assert 'docker volume inspect sellerai_rc_postgres_data' in runbook
     assert "com.docker.compose.project=sellerai_rc" in runbook
     assert "com.docker.compose.volume=postgres_data" in runbook
@@ -952,6 +955,20 @@ def test_runbook_documents_403_and_container_pg_dump() -> None:
     assert "POSTGRES_USER" in runbook.split("## 3.")[1].split("## 4.")[0]
     assert "must match POSTGRES_USER" in runbook or "must match `POSTGRES_USER`" in runbook
     assert "32 characters" in runbook
+
+
+def test_operations_contract_includes_fail_closed_health_and_restore_gates() -> None:
+    operations = _read(REPO_ROOT / "docs" / "operations-readiness.md")
+    health_script = _read(BACKEND_ROOT / "scripts" / "check_service_health.py")
+    assert "scripts/check_service_health.py" in operations
+    assert "2 consecutive failures" in operations
+    assert "OAuth callback 429" in operations
+    assert "RPO <=24 hours" in operations
+    assert "RTO <=4 hours" in operations
+    assert "quarterly restore rehearsal" in operations
+    assert "SERVICE_HEALTH_CHECK_FAILED" in health_script
+    assert "HTTPRedirectHandler" in health_script
+    assert "Authorization" not in health_script
 
 
 def test_nginx_rc_sets_browser_security_headers_without_false_hsts() -> None:
