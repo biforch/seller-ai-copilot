@@ -318,8 +318,8 @@ def test_validator_script_runs_from_repo_root() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().startswith(SUCCESS_MESSAGE)
-    assert "12 runtime external pinned references" in result.stdout
-    assert "10 scanner pinned references" in result.stdout
+    assert "15 runtime external pinned references" in result.stdout
+    assert "14 scanner pinned references" in result.stdout
 
 
 def test_scanner_allowlist_is_explicit() -> None:
@@ -454,7 +454,7 @@ def test_scanner_container_forbidden_mounts_are_rejected() -> None:
 
 
 def test_scanner_approved_identity_count() -> None:
-    assert EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT == 4
+    assert EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT == 6
     assert len(ALLOWED_SCANNER_IMAGES) == 2
 
 

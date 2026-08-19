@@ -1,0 +1,60 @@
+# Hardened Alpine backend candidate (S3d4c2 audit only — not production).
+# Multi-stage: binary-only wheelhouse -> offline install -> minimal runtime.
+FROM python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1 AS wheels
+
+WORKDIR /wheelhouse
+
+COPY requirements.txt .
+
+RUN pip download --only-binary=:all: --no-cache-dir -d /wheelhouse -r requirements.txt
+
+FROM python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1 AS install
+
+WORKDIR /install-stage
+
+COPY requirements.txt .
+COPY --from=wheels /wheelhouse /wheelhouse
+
+RUN pip install --no-index --find-links=/wheelhouse --prefix=/install -r requirements.txt \
+    && PYTHONPATH=/install/lib/python3.11/site-packages python -m pip check
+
+FROM python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1 AS runtime
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+RUN apk add --no-cache \
+        ca-certificates \
+        libstdc++ \
+        postgresql-libs \
+    && addgroup -S -g 1001 app \
+    && adduser -S -u 1001 -G app app
+
+COPY --from=install /install /usr/local
+
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY app ./app
+COPY scripts ./scripts
+
+RUN python3.11 -m pip uninstall -y jaraco.context wheel setuptools \
+    && python3.11 -m pip uninstall -y pip \
+    && ENVIRONMENT=testing AMAZON_SP_API_ENDPOINT_MODE=mock \
+        DATABASE_URL=postgresql://localhost:5432/sellerai_test \
+        OPENAI_API_KEY=runtime-smoke-not-used \
+        python3.11 scripts/validate_backend_runtime_environment.py \
+    && ENVIRONMENT=testing AMAZON_SP_API_ENDPOINT_MODE=mock \
+        DATABASE_URL=postgresql://localhost:5432/sellerai_test \
+        OPENAI_API_KEY=runtime-smoke-not-used \
+        python3.11 scripts/validate_backend_alpine_os_packages.py
+
+RUN chown -R app:app /app
+
+USER app
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

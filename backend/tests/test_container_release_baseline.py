@@ -694,7 +694,7 @@ def test_quality_workflow_alpine_candidate_audit_job() -> None:
     assert "evaluate_alpine_candidate_reports.py" in content
     assert "validate_alpine_candidate_wheel_manifest.py" in content
     assert "name: sellerai-alpine-candidate-${{ github.sha }}" in content
-    alpine_job = content.split("backend-alpine-candidate-audit:", 1)[1].split("\n  backend", 1)[0]
+    alpine_job = content.split("backend-alpine-candidate-audit:", 1)[1].split("\n  backend-alpine-hardened-candidate:", 1)[0]
     step_names = [
         line.split("- name:", 1)[1].strip()
         for line in alpine_job.splitlines()
@@ -742,7 +742,56 @@ def test_quality_workflow_alpine_candidate_audit_job() -> None:
     assert "wheel-arm64.json" in alpine_upload
     assert "candidate-policy-summary.json" in alpine_upload
     assert len([name for name in alpine_upload.splitlines() if ".json" in name]) == 7
-    assert "docker push" not in content.split("backend-alpine-candidate-audit:", 1)[1]
+    assert "docker push" not in content.split("backend-alpine-candidate-audit:", 1)[1].split("backend-alpine-hardened-candidate:", 1)[0]
+
+
+def test_quality_workflow_alpine_hardened_candidate_job() -> None:
+    content = _read(QUALITY_WORKFLOW)
+    assert "backend-alpine-hardened-candidate:" in content
+    hardened_job = content.split("backend-alpine-hardened-candidate:", 1)[1]
+    assert "if: github.event_name == 'pull_request'" in hardened_job.split("steps:", 1)[0]
+    assert "docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130" in hardened_job
+    assert "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f" in hardened_job
+    assert "Dockerfile.alpine-candidate" in hardened_job
+    assert "evaluate_alpine_hardened_candidate_reports.py" in hardened_job
+    assert "validate_alpine_hardened_smoke.py" in hardened_job
+    assert "validate_alpine_hardened_verification_manifest.py" in hardened_job
+    assert "build_only" in hardened_job
+    assert "name: sellerai-alpine-hardened-${{ github.sha }}" in hardened_job
+    smoke_block = hardened_job.split("- name: Run amd64 hardened runtime and smoke validation", 1)[1].split("- name:", 1)[0]
+    assert "--network none" in smoke_block
+    assert "--read-only" in smoke_block
+    assert "--tmpfs /tmp:rw,noexec,nosuid,nodev" in smoke_block
+    assert "--cap-drop ALL" in smoke_block
+    assert "continue-on-error" not in hardened_job
+    assert "|| true" not in hardened_job
+    assert "docker push" not in hardened_job
+    hardened_upload = hardened_job.split("- name: Upload hardened Alpine candidate artifacts", 1)[1].split("- name:", 1)[0]
+    assert "if: always()" in hardened_upload
+    assert "if-no-files-found: error" in hardened_upload
+    assert len([name for name in hardened_upload.splitlines() if ".json" in name]) == 7
+    cleanup_block = hardened_job.split("- name: Cleanup Alpine hardened candidate workspace", 1)[1]
+    assert "if: always()" in cleanup_block.split("- name:", 1)[0]
+
+
+def test_backend_alpine_candidate_dockerfile_contract() -> None:
+    content = _read(REPO_ROOT / "backend" / "Dockerfile.alpine-candidate")
+    prod_content = _read(BACKEND_DOCKERFILE_PROD)
+    assert "AS wheels" in content
+    assert "AS install" in content
+    assert "AS runtime" in content
+    assert "pip download --only-binary=:all:" in content
+    assert "pip install --no-index" in content
+    assert "validate_backend_alpine_os_packages.py" in content
+    assert "USER app" in content
+    assert "perl" not in content
+    assert "util-linux" not in content
+    assert "python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1" in content
+    assert "alpine3.24" not in prod_content
+    assert "Dockerfile.alpine-candidate" not in prod_content
+
+
+def test_frontend_production_dockerfile_runner_toolchain_removal() -> None:
     content = _read(FRONTEND_DOCKERFILE_PROD)
     deps_block = content.split("AS deps", 1)[1].split("AS builder", 1)[0]
     runner_block = content.split("AS runner", 1)[1]

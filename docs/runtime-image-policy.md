@@ -139,6 +139,7 @@ All digests below are **OCI image index / Docker manifest list** digests (multi-
 | `postgres:16-alpine` | `sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
 | `nginx:1.30-alpine` | `sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
 | `redis:7-alpine` | `sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
+| `python:3.11-alpine3.24` | `sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1` | amd64, arm64 (audit candidate only; not production) | S3d4c1 wheel audit |
 
 **Canonical pin format:**
 
@@ -162,11 +163,12 @@ The same `repository:tag` must map to the same digest in every tracked file.
 | CI — containers job | validator before Compose validation and Docker builds |
 | CI — postgres service | pinned digest in workflow file (services start before steps) |
 
-Validator inventory contract (2026-08-18):
+Validator inventory contract (2026-08-19):
 
-- **8** scanned files
-- **12** runtime external pinned references (S3d4b: prod Dockerfile shares one python-base pin)
-- **6** scanner pinned references (3× Syft + 3× Trivy in `containers` job)
+- **9** scanned files (includes `backend/Dockerfile.alpine-candidate` audit-only Dockerfile)
+- **15** runtime external pinned references (S3d4c2: Alpine candidate Dockerfile adds three identical index digests)
+- **14** scanner pinned references (containers + Alpine audit + hardened candidate jobs)
+- **6** scanner approved identities (SYFT_IMAGE + TRIVY_IMAGE per scan job)
 - **4** internal build references
 
 ---
