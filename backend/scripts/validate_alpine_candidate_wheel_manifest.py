@@ -35,7 +35,7 @@ SECRET_PATTERNS = (
 )
 URL_USERINFO_PATTERN = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")
 HOST_PATH_PATTERN = re.compile(
-    r"(^/Users/|^/home/runner/work/|^[A-Za-z]:\\Users\\|^\$\{RUNNER_TEMP\}|^/input/|^/output/)"
+    r"(^/Users/|^/home/runner/work/|^[A-Za-z]:\\Users\\|^\$\{RUNNER_TEMP\}|^/input/|^/output/|^/wheelhouse/|^/target/)"
 )
 SENSITIVE_KEY_PATTERN = re.compile(
     r"(?i)(password|secret|token|api[_-]?key|authorization|credential|oauth|jwt|private[_-]?key)$"
@@ -173,6 +173,15 @@ def _validate_common_fields(payload: dict[str, object], filename: str) -> list[F
     reason_code = payload.get("reason_code")
     if not isinstance(reason_code, str) or not REASON_CODE_PATTERN.fullmatch(reason_code):
         findings.append(Finding(filename, "reason_code must be uppercase token"))
+    status = payload.get("status")
+    if status != "passed":
+        findings.append(Finding(filename, "manifest status must be passed"))
+    dep_method = payload.get("dependency_validation_method")
+    if not isinstance(dep_method, str) or not dep_method.strip():
+        findings.append(Finding(filename, "dependency_validation_method must be present"))
+    missing_count = payload.get("missing_binary_package_count")
+    if missing_count != 0:
+        findings.append(Finding(filename, "missing_binary_package_count must be 0"))
     return findings
 
 
@@ -222,13 +231,16 @@ def _validate_manifest_file(path: Path) -> list[Finding]:
             packages_present.add(entry["package"].lower())
 
     if filename == "wheel-amd64.json":
+        if payload.get("mode") != "install_and_import":
+            findings.append(Finding(filename, "mode must be install_and_import"))
         if payload.get("download_status") != "ok":
             findings.append(Finding(filename, "download_status must be ok"))
         if payload.get("install_status") != "ok":
             findings.append(Finding(filename, "install_status must be ok"))
-        pip_check_status = payload.get("pip_check_status")
-        if pip_check_status != "ok":
-            findings.append(Finding(filename, "pip_check_status must be ok"))
+        if payload.get("dependency_check_status") != "ok":
+            findings.append(Finding(filename, "dependency_check_status must be ok"))
+        if payload.get("dependency_validation_method") != "target_dependency_check":
+            findings.append(Finding(filename, "dependency_validation_method must be target_dependency_check"))
         if payload.get("import_status") != "ok":
             findings.append(Finding(filename, "import_status must be ok"))
         if payload.get("smoke_status") != "ok":
@@ -254,8 +266,12 @@ def _validate_manifest_file(path: Path) -> list[Finding]:
     if filename == "wheel-arm64.json":
         if payload.get("mode") != "resolution_only":
             findings.append(Finding(filename, "mode must be resolution_only"))
+        if payload.get("download_status") != "ok":
+            findings.append(Finding(filename, "download_status must be ok"))
         if payload.get("resolution_status") != "ok":
             findings.append(Finding(filename, "resolution_status must be ok"))
+        if payload.get("dependency_validation_method") != "wheel_resolution_only":
+            findings.append(Finding(filename, "dependency_validation_method must be wheel_resolution_only"))
         missing = payload.get("missing_packages")
         if not isinstance(missing, list) or missing:
             findings.append(Finding(filename, "missing_packages must be an empty list"))

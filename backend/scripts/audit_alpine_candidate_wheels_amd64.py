@@ -3,34 +3,38 @@
 from __future__ import annotations
 
 import hashlib
-import json
+import os
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from alpine_wheel_audit_common import parse_direct_requirements, requirements_sha256
+from alpine_wheel_audit_common import (
+    finalize_manifest_exit,
+    parse_direct_requirements,
+    requirements_sha256,
+    write_output_probe,
+)
+from validate_target_site_packages import validate_target_site_packages
 
 REQUIREMENTS_PATH = Path("/input/requirements.txt")
 OUTPUT_PATH = Path("/output/wheel-amd64.json")
+OUTPUT_DIR = Path("/output")
+WHEELHOUSE = Path("/wheelhouse")
+TARGET_SITE_PACKAGES = Path("/target")
+TARGET_ROOT = "/target"
 PYTHON_VERSION = "3.11"
 
 IMPORT_CHECKS = (
-    ("fastapi", "fastapi", None),
-    ("starlette", "starlette", None),
-    ("pydantic", "pydantic", None),
-    ("uvicorn", "uvicorn", None),
-    ("sqlalchemy", "sqlalchemy", None),
-    ("alembic", "alembic", None),
-    ("psycopg2", "psycopg2", None),
-    ("jose", "jose", None),
-    ("cryptography", "cryptography.hazmat.primitives.ciphers.aead", "AESGCM"),
-    ("pydantic_core", "pydantic_core", None),
-    ("bcrypt", "bcrypt", None),
-    ("uvloop", "uvloop", None),
-    ("httptools", "httptools", None),
-    ("watchfiles", "watchfiles", None),
+    ("fastapi", "fastapi"),
+    ("starlette", "starlette"),
+    ("pydantic", "pydantic"),
+    ("uvicorn", "uvicorn"),
+    ("sqlalchemy", "sqlalchemy"),
+    ("alembic", "alembic"),
+    ("psycopg2", "psycopg2"),
+    ("jose", "jose"),
+    ("cryptography", "cryptography"),
 )
 
 
@@ -52,17 +56,39 @@ class WheelRecord:
         }
 
 
-def _run(command: list[str], *, cwd: Path | None = None) -> None:
-    completed = subprocess.run(
-        command,
-        check=False,
-        capture_output=True,
-        text=True,
-        cwd=str(cwd) if cwd else None,
-    )
+def _base_payload(req_sha: str, direct_count: int) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "architecture": "amd64",
+        "platform": "linux/amd64",
+        "python_version": PYTHON_VERSION,
+        "musl": True,
+        "mode": "install_and_import",
+        "requirements_sha256": req_sha,
+        "resolved_package_count": direct_count,
+        "wheel_count": 0,
+        "sdist_count": 0,
+        "missing_binary_package_count": 0,
+        "missing_packages": [],
+        "dependency_validation_method": "target_dependency_check",
+        "download_status": "failed",
+        "install_status": "failed",
+        "dependency_check_status": "failed",
+        "import_status": "failed",
+        "smoke_status": "failed",
+        "status": "failed",
+        "reason_code": "WHEEL_AUDIT_FAILED",
+        "wheels": [],
+        "imports": [],
+        "smoke": {},
+    }
+
+
+def _run_pip(args: list[str], *, env: dict[str, str] | None = None) -> None:
+    command = [sys.executable, "-m", "pip", *args]
+    completed = subprocess.run(command, check=False, capture_output=True, text=True, env=env)
     if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "").strip()
-        raise RuntimeError(f"command failed ({detail[:256]})")
+        raise RuntimeError("pip command failed")
 
 
 def _sha256_file(path: Path) -> str:
@@ -76,8 +102,7 @@ def _sha256_file(path: Path) -> str:
 def _wheel_records(wheel_dir: Path) -> list[WheelRecord]:
     records: list[WheelRecord] = []
     for wheel_path in sorted(wheel_dir.glob("*.whl")):
-        name = wheel_path.name
-        stem = name[: -len(".whl")]
+        stem = wheel_path.name[: -len(".whl")]
         parts = stem.split("-")
         if len(parts) < 5:
             raise RuntimeError("unexpected wheel filename")
@@ -92,20 +117,28 @@ def _wheel_records(wheel_dir: Path) -> list[WheelRecord]:
     return records
 
 
-def _import_check(module_path: str, attr: str | None) -> dict[str, str]:
-    script = f"import {module_path}"
-    if attr:
-        script += f"; getattr({module_path}, {attr!r})"
+def _target_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(TARGET_SITE_PACKAGES)
+    env["PYTHONNOUSERSITE"] = "1"
+    return env
+
+
+def _import_check(module_name: str) -> dict[str, str]:
+    script = (
+        "import importlib.util, inspect, sys; "
+        f"mod = importlib.import_module({module_name!r}); "
+        f"origin = inspect.getfile(mod); "
+        f"assert origin.replace('\\\\', '/').startswith({TARGET_ROOT!r}), 'import origin outside target'"
+    )
     completed = subprocess.run(
         [sys.executable, "-c", script],
         check=False,
         capture_output=True,
         text=True,
+        env=_target_env(),
     )
-    return {
-        "module": module_path,
-        "status": "ok" if completed.returncode == 0 else "failed",
-    }
+    return {"module": module_name, "status": "ok" if completed.returncode == 0 else "failed"}
 
 
 def _smoke_checks() -> dict[str, str]:
@@ -125,110 +158,146 @@ def _smoke_checks() -> dict[str, str]:
     )
     results: dict[str, str] = {}
     for name, script in (("aesgcm_roundtrip", aes_script), ("jwt_hs256_roundtrip", jwt_script)):
-        completed = subprocess.run([sys.executable, "-c", script], check=False, capture_output=True, text=True)
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=_target_env(),
+        )
         results[name] = "ok" if completed.returncode == 0 else "failed"
     return results
 
 
-def main() -> int:
+def _count_sdist(wheel_dir: Path) -> int:
+    count = 0
+    for path in wheel_dir.iterdir():
+        if path.suffix in {".gz", ".zip"} or (path.suffix == ".tar" and path.name.endswith(".tar.gz")):
+            count += 1
+        elif path.suffix != ".whl":
+            count += 1
+    return count
+
+
+def run_probe() -> int:
+    write_output_probe(OUTPUT_DIR)
+    print("amd64 output probe passed")
+    return 0
+
+
+def run_download(payload: dict[str, object]) -> None:
+    WHEELHOUSE.mkdir(parents=True, exist_ok=True)
+    _run_pip(
+        [
+            "download",
+            "--only-binary=:all:",
+            "-r",
+            str(REQUIREMENTS_PATH),
+            "-d",
+            str(WHEELHOUSE),
+        ]
+    )
+    sdist_count = _count_sdist(WHEELHOUSE)
+    if sdist_count:
+        payload["sdist_count"] = sdist_count
+        payload["reason_code"] = "SDIST_PRESENT"
+        raise RuntimeError("sdist present")
+
+    wheels = _wheel_records(WHEELHOUSE)
+    payload["download_status"] = "ok"
+    payload["wheel_count"] = len(wheels)
+    payload["wheels"] = [record.as_dict() for record in wheels]
+
+
+def run_install(payload: dict[str, object]) -> None:
+    if not WHEELHOUSE.is_dir() or not any(WHEELHOUSE.glob("*.whl")):
+        payload["reason_code"] = "WHEELHOUSE_EMPTY"
+        raise RuntimeError("wheelhouse empty")
+
+    if TARGET_SITE_PACKAGES.exists():
+        for child in TARGET_SITE_PACKAGES.iterdir():
+            if child.is_dir():
+                for nested in child.rglob("*"):
+                    if nested.is_file():
+                        nested.unlink(missing_ok=True)
+                child.rmdir()
+            else:
+                child.unlink(missing_ok=True)
+    TARGET_SITE_PACKAGES.mkdir(parents=True, exist_ok=True)
+
+    _run_pip(
+        [
+            "install",
+            "--no-index",
+            f"--find-links={WHEELHOUSE}",
+            "--target",
+            str(TARGET_SITE_PACKAGES),
+            "--no-compile",
+            "-r",
+            str(REQUIREMENTS_PATH),
+        ],
+        env=_target_env(),
+    )
+    payload["install_status"] = "ok"
+
+    dep_status, _issues = validate_target_site_packages(TARGET_SITE_PACKAGES)
+    payload["dependency_check_status"] = dep_status
+    if dep_status != "ok":
+        payload["reason_code"] = "TARGET_DEPENDENCY_CHECK_FAILED"
+        raise RuntimeError("target dependency check failed")
+
+    imports = [_import_check(module) for _, module in IMPORT_CHECKS]
+    payload["imports"] = imports
+    payload["import_status"] = "ok" if all(item["status"] == "ok" for item in imports) else "failed"
+
+    smoke = _smoke_checks()
+    payload["smoke"] = smoke
+    payload["smoke_status"] = "ok" if all(value == "ok" for value in smoke.values()) else "failed"
+
+    if payload["import_status"] != "ok" or payload["smoke_status"] != "ok":
+        payload["reason_code"] = "IMPORT_OR_SMOKE_FAILED"
+        raise RuntimeError("import or smoke failed")
+
+    payload["status"] = "passed"
+    payload["reason_code"] = "WHEEL_AUDIT_OK"
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = argv if argv is not None else sys.argv[1:]
+    phase = args[0] if args else "install"
     if not REQUIREMENTS_PATH.is_file():
         print("requirements input missing", file=sys.stderr)
         return 2
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
     req_sha = requirements_sha256(REQUIREMENTS_PATH)
     direct_requirements = parse_direct_requirements(REQUIREMENTS_PATH)
-
-    payload: dict[str, object] = {
-        "schema_version": 1,
-        "architecture": "amd64",
-        "platform": "linux/amd64",
-        "python_version": PYTHON_VERSION,
-        "musl": True,
-        "requirements_sha256": req_sha,
-        "download_status": "failed",
-        "install_status": "failed",
-        "pip_check_status": "failed",
-        "import_status": "failed",
-        "smoke_status": "failed",
-        "reason_code": "WHEEL_AUDIT_FAILED",
-        "wheel_count": 0,
-        "sdist_count": 0,
-        "resolved_package_count": len(direct_requirements),
-        "wheels": [],
-        "imports": [],
-        "smoke": {},
-    }
+    payload = _base_payload(req_sha, len(direct_requirements))
 
     try:
-        with tempfile.TemporaryDirectory(prefix="alpine-wheel-audit-") as tmp:
-            tmp_path = Path(tmp)
-            venv_dir = tmp_path / "venv"
-            wheel_dir = tmp_path / "wheels"
-            wheel_dir.mkdir()
-            _run([sys.executable, "-m", "venv", str(venv_dir)])
-            pip = venv_dir / "bin" / "pip"
-            _run([str(pip), "install", "--upgrade", "pip"])
-            _run(
-                [
-                    str(pip),
-                    "download",
-                    "--only-binary=:all:",
-                    "-r",
-                    str(REQUIREMENTS_PATH),
-                    "-d",
-                    str(wheel_dir),
-                ]
-            )
-            sdist_count = len(list(wheel_dir.glob("*.tar.gz"))) + len(list(wheel_dir.glob("*.zip")))
-            non_wheel = [path.name for path in wheel_dir.iterdir() if path.suffix != ".whl"]
-            if sdist_count or any(path.suffix != ".whl" for path in wheel_dir.iterdir()):
-                payload["sdist_count"] = sdist_count + len(non_wheel)
-                payload["reason_code"] = "SDIST_PRESENT"
-                OUTPUT_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-                return 1
+        if phase == "probe":
+            return run_probe()
+        if phase == "download":
+            run_download(payload)
+        elif phase == "install":
+            if payload["download_status"] == "failed" and WHEELHOUSE.is_dir() and any(WHEELHOUSE.glob("*.whl")):
+                wheels = _wheel_records(WHEELHOUSE)
+                payload["download_status"] = "ok"
+                payload["wheel_count"] = len(wheels)
+                payload["wheels"] = [record.as_dict() for record in wheels]
+            run_install(payload)
+        else:
+            print("unknown audit phase", file=sys.stderr)
+            return 2
+    except RuntimeError:
+        payload["status"] = "failed"
 
-            payload["download_status"] = "ok"
-            wheels = _wheel_records(wheel_dir)
-            payload["wheel_count"] = len(wheels)
-            payload["wheels"] = [record.as_dict() for record in wheels]
-
-            _run(
-                [
-                    str(pip),
-                    "install",
-                    "--no-index",
-                    f"--find-links={wheel_dir}",
-                    "-r",
-                    str(REQUIREMENTS_PATH),
-                ]
-            )
-            payload["install_status"] = "ok"
-
-            pip_check = subprocess.run([str(pip), "check"], check=False, capture_output=True, text=True)
-            payload["pip_check_status"] = "ok" if pip_check.returncode == 0 else "failed"
-
-            imports = [_import_check(module, attr) for _, module, attr in IMPORT_CHECKS]
-            payload["imports"] = imports
-            payload["import_status"] = "ok" if all(item["status"] == "ok" for item in imports) else "failed"
-
-            smoke = _smoke_checks()
-            payload["smoke"] = smoke
-            payload["smoke_status"] = "ok" if all(status == "ok" for status in smoke.values()) else "failed"
-
-            if (
-                payload["pip_check_status"] == "ok"
-                and payload["import_status"] == "ok"
-                and payload["smoke_status"] == "ok"
-            ):
-                payload["reason_code"] = "WHEEL_AUDIT_OK"
-            OUTPUT_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    except Exception:
-        OUTPUT_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        raise
-
-    print("wheel-amd64 manifest written")
-    if payload["reason_code"] != "WHEEL_AUDIT_OK":
-        return 1
+    if phase in {"download", "install"}:
+        exit_code = finalize_manifest_exit(OUTPUT_PATH, payload)
+        if payload["status"] == "passed":
+            print("wheel-amd64 manifest written")
+        else:
+            print("wheel-amd64 manifest recorded failure", file=sys.stderr)
+        return exit_code
     return 0
 
 

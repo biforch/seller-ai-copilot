@@ -797,9 +797,29 @@ def _validate_alpine_wheel_steps(path: Path, content: str) -> list[Finding]:
                 findings.append(Finding(path, 0, "amd64 wheel audit must invoke audit_alpine_candidate_wheels_amd64.py"))
             if "alpine_wheel_audit_common.py" not in block:
                 findings.append(Finding(path, 0, "amd64 wheel audit must mount alpine_wheel_audit_common.py"))
+            if "validate_target_site_packages.py" not in block:
+                findings.append(Finding(path, 0, "amd64 wheel audit must mount validate_target_site_packages.py"))
+            if "/audit/ro/" not in block:
+                findings.append(Finding(path, 0, "amd64 wheel audit must mount scripts under /audit/ro"))
+            if '--user "${RUNNER_UID}:${RUNNER_GID}"' not in block:
+                findings.append(Finding(path, 0, "amd64 wheel audit must run as runner uid/gid"))
+            for phase in (" probe", " download", " install"):
+                if phase not in block:
+                    findings.append(Finding(path, 0, f"amd64 wheel audit must invoke{phase} phase"))
+            if "docker_run_amd64 none" not in block and "--network none" not in block:
+                findings.append(Finding(path, 0, "amd64 wheel install phase must disable network"))
+            if "staging-amd64/wheelhouse" not in block:
+                findings.append(Finding(path, 0, "amd64 wheel audit must use staging-amd64 wheelhouse"))
         if step_name == ALPINE_WHEEL_ARM64_STEP:
             if "audit_alpine_candidate_wheels_arm64.py" not in block:
                 findings.append(Finding(path, 0, "arm64 wheel audit must invoke audit_alpine_candidate_wheels_arm64.py"))
+            if "if: ${{ !cancelled() }}" not in content.split(f"- name: {ALPINE_WHEEL_ARM64_STEP}", 1)[1].split("- name:", 1)[0]:
+                findings.append(Finding(path, 0, "arm64 wheel audit must use if not cancelled"))
+    policy_marker = f"- name: {ALPINE_POLICY_STEP}"
+    if policy_marker in content:
+        policy_section = content.split(policy_marker, 1)[1].split("- name:", 1)[0]
+        if "if: ${{ !cancelled() }}" not in policy_section:
+            findings.append(Finding(path, 0, "Alpine policy step must use if not cancelled"))
     return findings
 
 

@@ -161,6 +161,8 @@ Wheel audit notes (PEP 656): `musllinux_1_1_*` wheels represent the minimum comp
 
 Step order (S3d4c1b): SBOM/Trivy validation must finish before amd64 wheel install/import, arm64 cross-resolution, wheel manifest validation, and only then the candidate vulnerability policy evaluator. Artifact upload and cleanup still use `if: always()` so wheel evidence is retained even when candidate policy blocks on raw base-image HIGH findings (`wheel`, `jaraco.context`).
 
+Wheel install contract (S3d4c1c): amd64 audit runs as the runner UID/GID inside a read-only container with `/tmp` mounted `noexec`. Downloads use official PyPI with `python -m pip download --only-binary=:all:` into a host staging wheelhouse; offline install uses `python -m pip install --no-index --target` with `target_dependency_check` (importlib.metadata Requires-Dist validation). arm64 resolution runs independently on the host and both architectures always emit pass/fail manifests before the final wheel manifest validator fail-closes the job. Policy evaluation uses `if: !cancelled()` so `candidate-policy-summary.json` is still produced when wheel validation fails.
+
 Production images remain Debian-based until a separately authorized migration commit lands.
 
 ---

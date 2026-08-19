@@ -45,16 +45,21 @@ def _amd64_manifest() -> dict[str, object]:
         "platform": "linux/amd64",
         "python_version": "3.11",
         "musl": True,
+        "mode": "install_and_import",
+        "status": "passed",
         "requirements_sha256": REQ_SHA,
+        "dependency_validation_method": "target_dependency_check",
         "download_status": "ok",
         "install_status": "ok",
-        "pip_check_status": "ok",
+        "dependency_check_status": "ok",
         "import_status": "ok",
         "smoke_status": "ok",
         "reason_code": "WHEEL_AUDIT_OK",
         "wheel_count": len(wheels),
         "sdist_count": 0,
         "resolved_package_count": 8,
+        "missing_binary_package_count": 0,
+        "missing_packages": [],
         "imports": [{"module": "cryptography", "status": "ok"}],
         "smoke": {"aesgcm_roundtrip": "ok", "jwt_hs256_roundtrip": "ok"},
         "wheels": wheels,
@@ -85,12 +90,16 @@ def _arm64_manifest() -> dict[str, object]:
         "python_version": "3.11",
         "musl": True,
         "mode": "resolution_only",
+        "status": "passed",
         "requirements_sha256": REQ_SHA,
+        "dependency_validation_method": "wheel_resolution_only",
+        "download_status": "ok",
         "resolution_status": "ok",
         "reason_code": "WHEEL_RESOLUTION_OK",
         "wheel_count": len(wheels),
         "sdist_count": 0,
         "resolved_package_count": 8,
+        "missing_binary_package_count": 0,
         "missing_packages": [],
         "wheels": wheels,
     }
@@ -100,6 +109,16 @@ def test_valid_wheel_manifests_pass(tmp_path: Path) -> None:
     (tmp_path / "wheel-amd64.json").write_text(json.dumps(_amd64_manifest()), encoding="utf-8")
     (tmp_path / "wheel-arm64.json").write_text(json.dumps(_arm64_manifest()), encoding="utf-8")
     assert validate_wheel_manifests(tmp_path) == []
+
+
+def test_failed_status_manifest_fails(tmp_path: Path) -> None:
+    manifest = _amd64_manifest()
+    manifest["status"] = "failed"
+    manifest["reason_code"] = "WHEEL_AUDIT_FAILED"
+    (tmp_path / "wheel-amd64.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (tmp_path / "wheel-arm64.json").write_text(json.dumps(_arm64_manifest()), encoding="utf-8")
+    findings = validate_wheel_manifests(tmp_path)
+    assert any("status must be passed" in finding.reason for finding in findings)
 
 
 def test_missing_native_package_fails(tmp_path: Path) -> None:

@@ -718,6 +718,22 @@ def test_quality_workflow_alpine_candidate_audit_job() -> None:
     assert "continue-on-error" not in wheel_arm64_block
     assert "|| true" not in wheel_arm64_block
     assert "/var/run/docker.sock" not in wheel_amd64_block
+    assert '--user "${RUNNER_UID}:${RUNNER_GID}"' in wheel_amd64_block
+    assert "/audit/ro/" in wheel_amd64_block
+    assert " probe" in wheel_amd64_block
+    assert " download" in wheel_amd64_block
+    assert " install" in wheel_amd64_block
+    assert "docker_run_amd64 none" in wheel_amd64_block
+    assert "staging-amd64/wheelhouse" in alpine_job
+    assert "validate_target_site_packages.py" in wheel_amd64_block
+    assert "if: ${{ !cancelled() }}" in wheel_arm64_block
+    policy_block = alpine_job.split("- name: Evaluate Alpine candidate vulnerability policy", 1)[1].split("- name:", 1)[0]
+    assert "if: ${{ !cancelled() }}" in policy_block
+    amd64_script = _read(REPO_ROOT / "backend" / "scripts" / "audit_alpine_candidate_wheels_amd64.py")
+    assert "venv" not in amd64_script
+    assert "--target" in amd64_script
+    assert "python -m pip" not in amd64_script
+    assert '"-m", "pip"' in amd64_script or "'-m', 'pip'" in amd64_script
     alpine_upload = content.split("- name: Upload Alpine candidate audit artifacts", 1)[1].split("- name:", 1)[0]
     assert "if: always()" in alpine_upload
     assert ".tar" not in alpine_upload
