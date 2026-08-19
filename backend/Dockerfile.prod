@@ -1,35 +1,24 @@
 # Production backend image (RC / staging). Dev workflow uses backend/Dockerfile.
-FROM python:3.11-slim-trixie@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7 AS python-base
+# Multi-stage Alpine: binary-only wheelhouse -> offline install -> minimal runtime.
+FROM python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1 AS wheels
 
-COPY scripts/validate_backend_os_packages.py /tmp/validate_backend_os_packages.py
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        bsdutils=1:2.41.5-0+deb13u1 \
-        libblkid1=2.41.5-0+deb13u1 \
-        liblastlog2-2=2.41.5-0+deb13u1 \
-        libmount1=2.41.5-0+deb13u1 \
-        libsmartcols1=2.41.5-0+deb13u1 \
-        libuuid1=2.41.5-0+deb13u1 \
-        login=1:4.16.0-2+really2.41.5-0+deb13u1 \
-        mount=2.41.5-0+deb13u1 \
-        util-linux=2.41.5-0+deb13u1 \
-    && python3.11 /tmp/validate_backend_os_packages.py \
-    && rm -rf /var/lib/apt/lists/* /tmp/validate_backend_os_packages.py
-
-FROM python-base AS builder
-
-WORKDIR /build
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /wheelhouse
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt \
-    && PYTHONPATH=/install/lib/python3.11/site-packages python3.11 -m pip check
 
-FROM python-base AS runner
+RUN pip download --only-binary=:all: --no-cache-dir -d /wheelhouse -r requirements.txt
+
+FROM python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1 AS install
+
+WORKDIR /install-stage
+
+COPY requirements.txt .
+COPY --from=wheels /wheelhouse /wheelhouse
+
+RUN pip install --no-index --find-links=/wheelhouse --prefix=/install -r requirements.txt \
+    && PYTHONPATH=/install/lib/python3.11/site-packages python -m pip check
+
+FROM python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1 AS runtime
 
 WORKDIR /app
 
@@ -37,13 +26,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system --gid 1001 app \
-    && useradd --system --uid 1001 --gid app app
+RUN apk add --no-cache \
+        ca-certificates \
+        libstdc++ \
+        postgresql-libs \
+    && addgroup -S -g 1001 app \
+    && adduser -S -u 1001 -G app app
 
-COPY --from=builder /install /usr/local
+COPY --from=install /install /usr/local
 
 COPY alembic.ini ./
 COPY alembic ./alembic
@@ -56,7 +46,10 @@ RUN python3.11 -m pip uninstall -y jaraco.context wheel setuptools \
         DATABASE_URL=postgresql://localhost:5432/sellerai_test \
         OPENAI_API_KEY=runtime-smoke-not-used \
         python3.11 scripts/validate_backend_runtime_environment.py \
-    && python3.11 scripts/validate_backend_os_packages.py
+    && ENVIRONMENT=testing AMAZON_SP_API_ENDPOINT_MODE=mock \
+        DATABASE_URL=postgresql://localhost:5432/sellerai_test \
+        OPENAI_API_KEY=runtime-smoke-not-used \
+        python3.11 scripts/validate_backend_alpine_os_packages.py
 
 RUN chown -R app:app /app
 
@@ -65,6 +58,6 @@ USER app
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8000/health/ready || exit 1
+    CMD ["python3.11", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"]
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

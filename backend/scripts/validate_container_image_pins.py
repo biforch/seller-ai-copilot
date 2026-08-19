@@ -27,7 +27,7 @@ SCAN_TARGETS = (
 )
 
 EXPECTED_SCAN_FILE_COUNT = len(SCAN_TARGETS)
-EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 15
+EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 17
 EXPECTED_INTERNAL_BUILD_REF_COUNT = 4
 EXPECTED_SCANNER_PINNED_REF_COUNT = 14
 EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT = 6
@@ -75,7 +75,12 @@ APPROVED_BUILD_ACTIONS = frozenset(
     }
 )
 
-ALPINE_CANDIDATE_DOCKERFILE = REPO_ROOT / "backend" / "Dockerfile.alpine-candidate"
+BACKEND_ALPINE_DOCKERFILES = frozenset(
+    {
+        REPO_ROOT / "backend" / "Dockerfile.prod",
+        REPO_ROOT / "backend" / "Dockerfile.alpine-candidate",
+    }
+)
 
 SCANNER_FORBIDDEN_WORKFLOW_PATTERNS = (
     (re.compile(r"/var/run/docker\.sock"), "workflow must not mount Docker socket into scanner containers"),
@@ -258,7 +263,7 @@ def _validate_external_image(path: Path, line_no: int, ref: str) -> list[Finding
     return findings
 
 
-def _validate_alpine_candidate_dockerfile_content(path: Path, content: str) -> list[Finding]:
+def _validate_alpine_backend_dockerfile_content(path: Path, content: str) -> list[Finding]:
     findings: list[Finding] = []
     required_tokens = (
         "AS wheels",
@@ -279,7 +284,7 @@ def _validate_alpine_candidate_dockerfile_content(path: Path, content: str) -> l
     )
     for token in required_tokens:
         if token not in content:
-            findings.append(Finding(path, 0, f"Alpine candidate Dockerfile must include {token!r}"))
+            findings.append(Finding(path, 0, f"Alpine backend Dockerfile must include {token!r}"))
 
     forbidden_apk_packages = (
         "perl",
@@ -296,12 +301,20 @@ def _validate_alpine_candidate_dockerfile_content(path: Path, content: str) -> l
         for pkg in forbidden_apk_packages:
             if pkg in line:
                 findings.append(
-                    Finding(path, line_no, f"Alpine candidate Dockerfile must not apk add {pkg!r}")
+                    Finding(path, line_no, f"Alpine backend Dockerfile must not apk add {pkg!r}")
                 )
 
     for token in ("--trusted-host", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL"):
         if token in content:
-            findings.append(Finding(path, 0, f"Alpine candidate Dockerfile must not include {token!r}"))
+            findings.append(Finding(path, 0, f"Alpine backend Dockerfile must not include {token!r}"))
+
+    if path.name == "Dockerfile.prod" and path in BACKEND_ALPINE_DOCKERFILES:
+        if "HEALTHCHECK" not in content:
+            findings.append(Finding(path, 0, "production backend Dockerfile must define HEALTHCHECK"))
+        if "/health/ready" not in content:
+            findings.append(Finding(path, 0, "production backend HEALTHCHECK must target /health/ready"))
+        if "curl" in content.lower():
+            findings.append(Finding(path, 0, "production backend Dockerfile must not depend on curl"))
 
     if "DATABASE_URL=" in content:
         db_fragment = content.split("DATABASE_URL=", 1)[-1].split("\n", 1)[0]
@@ -318,8 +331,11 @@ def _scan_dockerfile(path: Path, content: str) -> tuple[list[Finding], list[tupl
     external_refs: list[tuple[Path, int, str]] = []
     known_stages: set[str] = set()
 
-    if path.name == "Dockerfile.alpine-candidate":
-        findings.extend(_validate_alpine_candidate_dockerfile_content(path, content))
+    if path in BACKEND_ALPINE_DOCKERFILES:
+        findings.extend(_validate_alpine_backend_dockerfile_content(path, content))
+
+    if path == REPO_ROOT / "backend" / "Dockerfile.prod" and "3.11-slim-trixie" in content:
+        findings.append(Finding(path, 0, "production backend Dockerfile must not use Debian slim runtime"))
 
     for line_no, line in enumerate(content.splitlines(), start=1):
         match = FROM_LINE.match(line)
@@ -342,7 +358,7 @@ def _scan_dockerfile(path: Path, content: str) -> tuple[list[Finding], list[tupl
             findings.append(Finding(path, line_no, f"unknown stage alias {ref!r}"))
             continue
 
-        if path.name == "Dockerfile.alpine-candidate" and ref in APPROVED_AUDIT_CANDIDATES:
+        if path in BACKEND_ALPINE_DOCKERFILES and ref in APPROVED_AUDIT_CANDIDATES:
             external_refs.append((path, line_no, ref))
             if alias:
                 known_stages.add(alias)
@@ -574,15 +590,15 @@ def _validate_runtime_smoke_step(path: Path, content: str) -> list[Finding]:
 
     required_tokens = (
         "docker run --rm",
-        "--network none",
         "--read-only",
         "--tmpfs /tmp:rw,noexec,nosuid,nodev",
         "--cap-drop ALL",
         "--security-opt no-new-privileges",
         "sellerai-backend-ci:${IMAGE_TAG}",
         "python scripts/validate_backend_runtime_environment.py",
-        "python scripts/validate_backend_os_packages.py",
+        "python scripts/validate_backend_alpine_os_packages.py",
         "python scripts/validate_backend_production_smoke.py",
+        "python scripts/validate_alpine_hardened_smoke.py",
         "-e ENVIRONMENT=testing",
         "-e AMAZON_SP_API_ENDPOINT_MODE=mock",
     )
@@ -1129,8 +1145,8 @@ def _validate_alpine_hardened_build_actions(path: Path, content: str) -> list[Fi
         if "docker push" in line:
             findings.append(Finding(path, line_no_offset, "Alpine hardened job must not push images"))
     build_block = _extract_step_run_block(content, ALPINE_HARDENED_AMD64_BUILD_STEP)
-    if build_block is None or "Dockerfile.alpine-candidate" not in build_block:
-        findings.append(Finding(path, 0, "Alpine hardened job must build from Dockerfile.alpine-candidate"))
+    if build_block is None or "Dockerfile.prod" not in build_block:
+        findings.append(Finding(path, 0, "Alpine hardened job must build from Dockerfile.prod"))
     arm64_build = _extract_step_run_block(content, ALPINE_HARDENED_ARM64_BUILD_STEP)
     if arm64_build is None or "--platform linux/arm64" not in arm64_build:
         findings.append(Finding(path, 0, "Alpine hardened job must build arm64 with buildx platform flag"))
@@ -1343,6 +1359,8 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
                 if candidate_ref not in line:
                     continue
                 if re.match(r"^\s+ALPINE_CANDIDATE_INDEX_REF:", line):
+                    continue
+                if "Dockerfile.prod" in line:
                     continue
                 if "Dockerfile.alpine-candidate" in line:
                     continue

@@ -136,7 +136,6 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm \
-            --network none \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev \
             --cap-drop ALL \
@@ -148,15 +147,17 @@ jobs:
             "sellerai-backend-ci:${IMAGE_TAG}" \
             python scripts/validate_backend_runtime_environment.py
           docker run --rm \
-            --network none \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev \
             --cap-drop ALL \
             --security-opt no-new-privileges \
+            -e ENVIRONMENT=testing \
+            -e AMAZON_SP_API_ENDPOINT_MODE=mock \
+            -e DATABASE_URL=postgresql://localhost:5432/sellerai_test \
+            -e OPENAI_API_KEY=runtime-smoke-not-used \
             "sellerai-backend-ci:${IMAGE_TAG}" \
-            python scripts/validate_backend_os_packages.py
+            python scripts/validate_backend_alpine_os_packages.py
           docker run --rm \
-            --network none \
             --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev \
             --cap-drop ALL \
@@ -167,6 +168,60 @@ jobs:
             -e OPENAI_API_KEY=runtime-smoke-not-used \
             "sellerai-backend-ci:${IMAGE_TAG}" \
             python scripts/validate_backend_production_smoke.py
+          docker run --rm \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            -e ENVIRONMENT=testing \
+            -e AMAZON_SP_API_ENDPOINT_MODE=mock \
+            -e DATABASE_URL=postgresql://localhost:5432/sellerai_test \
+            -e OPENAI_API_KEY=runtime-smoke-not-used \
+            "sellerai-backend-ci:${IMAGE_TAG}" \
+            python scripts/validate_alpine_hardened_smoke.py
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.6.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.10.0
+      - name: Build production backend arm64 image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/arm64 \
+            --file backend/Dockerfile.prod \
+            --tag "sellerai-backend-ci:${IMAGE_TAG}-arm64" \
+            --load \
+            backend
+          docker image inspect "sellerai-backend-ci:${IMAGE_TAG}-arm64" --format '{{.Architecture}}' | grep -q '^arm64$'
+      - name: Validate production backend arm64 build
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE="sellerai-backend-ci:${IMAGE_TAG}-arm64"
+          docker run --rm --platform linux/arm64 \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            -e ENVIRONMENT=testing \
+            -e AMAZON_SP_API_ENDPOINT_MODE=mock \
+            -e DATABASE_URL=postgresql://localhost:5432/sellerai_test \
+            -e OPENAI_API_KEY=runtime-smoke-not-used \
+            "${IMAGE}" \
+            python scripts/validate_backend_runtime_environment.py
+          docker run --rm --platform linux/arm64 \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            -e ENVIRONMENT=testing \
+            -e AMAZON_SP_API_ENDPOINT_MODE=mock \
+            -e DATABASE_URL=postgresql://localhost:5432/sellerai_test \
+            -e OPENAI_API_KEY=runtime-smoke-not-used \
+            "${IMAGE}" \
+            python scripts/validate_backend_alpine_os_packages.py
+          docker run --rm --platform linux/arm64 "${IMAGE}" sh -c 'test "$(id -u)" -eq 1001'
       - name: Build production frontend image
         run: >-
           docker build --file frontend/Dockerfile.prod
@@ -574,7 +629,7 @@ jobs:
           IMAGE="sellerai-backend-alpine-hardened:${IMAGE_TAG}-amd64"
           docker buildx build \
             --platform linux/amd64 \
-            --file backend/Dockerfile.alpine-candidate \
+            --file backend/Dockerfile.prod \
             --tag "${IMAGE}" \
             --load \
             backend
@@ -618,7 +673,7 @@ jobs:
           IMAGE="sellerai-backend-alpine-hardened:${IMAGE_TAG}-arm64"
           docker buildx build \
             --platform linux/arm64 \
-            --file backend/Dockerfile.alpine-candidate \
+            --file backend/Dockerfile.prod \
             --tag "${IMAGE}" \
             --load \
             backend

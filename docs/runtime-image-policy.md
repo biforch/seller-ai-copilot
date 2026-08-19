@@ -11,11 +11,11 @@ Vulnerability scanning, SBOM generation, and supply-chain enforcement are docume
 
 ## 1. Image inventory
 
-Expected external pinned references: **12** (validated by `validate_container_image_pins.py`).
+Expected external pinned references: **12** (validated by `validate_container_image_pins.py`; production backend Alpine adds duplicate digest lines in audit alias Dockerfile).
 
 | File | Line | Repository | Tag | Environment | Architectures required |
 | --- | --- | --- | --- | --- | --- |
-| `backend/Dockerfile.prod` | 2 | `python` | `3.11-slim-trixie` | RC / production | linux/amd64; linux/arm64 |
+| `backend/Dockerfile.prod` | 2, 11, 21 | `python` | `3.11-alpine3.24` | RC / production | linux/amd64; linux/arm64 |
 | `backend/Dockerfile` | 1 | `python` | `3.11-slim-trixie` | development | linux/amd64; linux/arm64 |
 | `frontend/Dockerfile.prod` | 2, 11, 26 | `node` | `24-alpine` | RC / production | linux/amd64; linux/arm64 |
 | `frontend/Dockerfile` | 1 | `node` | `24-alpine` | development | linux/amd64; linux/arm64 |
@@ -130,16 +130,16 @@ All digests below are **OCI image index / Docker manifest list** digests (multi-
 | linux/arm64 child digest | `sha256:c3030eb5af86633f87e538de534dd455ca0cf2b4eceee87069b713f33d2d03f6` |
 | Hub vs Registry | Registry v2 HEAD unavailable from audit host (connection reset); Hub tag API digest matches prior dual-source pin |
 
-**Backend OS security pins (DSA-6442 / CVE-2026-53615):** production `backend/Dockerfile.prod` pins util-linux source `2.41.5-0+deb13u1` binary versions from `deb.debian.org` trixie-security Packages indexes (amd64/arm64 identical). Validated at build and CI by `validate_backend_os_packages.py`. Perl-base CRITICAL findings remain outside this scope.
+**Backend production runtime (S3d4c3):** `backend/Dockerfile.prod` uses the verified Alpine 3.24 musllinux wheel pipeline with minimal runtime APK (`ca-certificates`, `libstdc++`, `postgresql-libs`). Build-time and CI validation use `validate_backend_alpine_os_packages.py`. Perl/util-linux and Python build toolchains are excluded from the production runtime image.
 
 | Image reference | Multi-arch digest | Platforms verified (linux) | Digest sources |
 | --- | --- | --- | --- |
 | `node:24-alpine` | `sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
-| `python:3.11-slim-trixie` | `sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7` | amd64, arm64 | Hub tag API + official-images GitCommit `fe89472bda6128fef7e964d1f1991534e32dcfb7` |
+| `python:3.11-slim-trixie` | `sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7` | amd64, arm64 | Hub tag API + official-images GitCommit `fe89472bda6128fef7e964d1f1991534e32dcfb7` (development backend only) |
+| `python:3.11-alpine3.24` | `sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1` | amd64, arm64 (production backend + audit) | S3d4c2 hardened candidate verification |
 | `postgres:16-alpine` | `sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
 | `nginx:1.30-alpine` | `sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
 | `redis:7-alpine` | `sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
-| `python:3.11-alpine3.24` | `sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1` | amd64, arm64 (audit candidate only; not production) | S3d4c1 wheel audit |
 
 **Canonical pin format:**
 
@@ -166,7 +166,7 @@ The same `repository:tag` must map to the same digest in every tracked file.
 Validator inventory contract (2026-08-19):
 
 - **9** scanned files (includes `backend/Dockerfile.alpine-candidate` audit-only Dockerfile)
-- **15** runtime external pinned references (S3d4c2: Alpine candidate Dockerfile adds three identical index digests)
+- **17** runtime external pinned references (production backend Alpine + audit alias + development Debian backend)
 - **14** scanner pinned references (containers + Alpine audit + hardened candidate jobs)
 - **6** scanner approved identities (SYFT_IMAGE + TRIVY_IMAGE per scan job)
 - **4** internal build references

@@ -192,8 +192,9 @@ def test_production_dockerfile_runs_as_non_root(
 def test_backend_production_dockerfile_exposes_healthcheck_and_workers() -> None:
     content = _read(BACKEND_DOCKERFILE_PROD)
     assert "HEALTHCHECK" in content
-    assert "/health" in content
     assert "/health/ready" in content
+    assert "urllib.request" in content
+    assert "curl" not in content.lower()
     assert "--workers" in content
     assert "8000" in content
     assert "scripts" in content
@@ -673,14 +674,18 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "--env-file" not in content.split("Generate Trivy", 1)[1].split("Evaluate vulnerability", 1)[0]
 
     runtime_smoke_block = content.split("- name: Validate backend production runtime environment", 1)[1].split("- name:", 1)[0]
-    assert "--network none" in runtime_smoke_block
+    containers_block = content.split("containers:", 1)[1].split("\n  backend-alpine-candidate-audit:", 1)[0]
     assert "--read-only" in runtime_smoke_block
     assert "--tmpfs /tmp:rw,noexec,nosuid,nodev" in runtime_smoke_block
     assert "--cap-drop ALL" in runtime_smoke_block
     assert "--security-opt no-new-privileges" in runtime_smoke_block
     assert "python scripts/validate_backend_runtime_environment.py" in runtime_smoke_block
-    assert "python scripts/validate_backend_os_packages.py" in runtime_smoke_block
+    assert "python scripts/validate_backend_alpine_os_packages.py" in runtime_smoke_block
     assert "python scripts/validate_backend_production_smoke.py" in runtime_smoke_block
+    assert "python scripts/validate_alpine_hardened_smoke.py" in runtime_smoke_block
+    assert "docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130" in containers_block
+    assert "Build production backend arm64 image" in containers_block
+    assert "Validate production backend arm64 build" in containers_block
     assert "|| true" not in runtime_smoke_block
     assert "continue-on-error" not in runtime_smoke_block
 
@@ -752,7 +757,7 @@ def test_quality_workflow_alpine_hardened_candidate_job() -> None:
     assert "if: github.event_name == 'pull_request'" in hardened_job.split("steps:", 1)[0]
     assert "docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130" in hardened_job
     assert "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f" in hardened_job
-    assert "Dockerfile.alpine-candidate" in hardened_job
+    assert "Dockerfile.prod" in hardened_job
     assert "evaluate_alpine_hardened_candidate_reports.py" in hardened_job
     assert "validate_alpine_hardened_smoke.py" in hardened_job
     assert "validate_alpine_hardened_verification_manifest.py" in hardened_job
@@ -774,21 +779,32 @@ def test_quality_workflow_alpine_hardened_candidate_job() -> None:
     assert "if: always()" in cleanup_block.split("- name:", 1)[0]
 
 
+BACKEND_ALPINE_SECURITY_CONTRACT_TOKENS = (
+    "AS wheels",
+    "AS install",
+    "AS runtime",
+    "pip download --only-binary=:all:",
+    "pip install --no-index",
+    "validate_backend_alpine_os_packages.py",
+    "ca-certificates",
+    "libstdc++",
+    "postgresql-libs",
+    "USER app",
+    "python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1",
+)
+
+
 def test_backend_alpine_candidate_dockerfile_contract() -> None:
-    content = _read(REPO_ROOT / "backend" / "Dockerfile.alpine-candidate")
+    candidate_content = _read(REPO_ROOT / "backend" / "Dockerfile.alpine-candidate")
     prod_content = _read(BACKEND_DOCKERFILE_PROD)
-    assert "AS wheels" in content
-    assert "AS install" in content
-    assert "AS runtime" in content
-    assert "pip download --only-binary=:all:" in content
-    assert "pip install --no-index" in content
-    assert "validate_backend_alpine_os_packages.py" in content
-    assert "USER app" in content
-    assert "perl" not in content
-    assert "util-linux" not in content
-    assert "python:3.11-alpine3.24@sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1" in content
-    assert "alpine3.24" not in prod_content
-    assert "Dockerfile.alpine-candidate" not in prod_content
+    for token in BACKEND_ALPINE_SECURITY_CONTRACT_TOKENS:
+        assert token in candidate_content
+        assert token in prod_content
+    assert "perl" not in prod_content
+    assert "util-linux" not in prod_content
+    assert "3.11-slim-trixie" not in prod_content
+    assert candidate_content.count("FROM python:3.11-alpine3.24@") == 3
+    assert prod_content.count("FROM python:3.11-alpine3.24@") == 3
 
 
 def test_frontend_production_dockerfile_runner_toolchain_removal() -> None:
@@ -827,28 +843,33 @@ def test_quality_workflow_frontend_runtime_smoke_contract() -> None:
 
 def test_backend_production_dockerfile_removes_build_tooling_from_runtime() -> None:
     content = _read(BACKEND_DOCKERFILE_PROD)
-    builder_block = content.split("AS builder", 1)[1].split("AS runner", 1)[0]
-    runner_block = content.split("AS runner", 1)[1]
+    install_block = content.split("AS install", 1)[1].split("AS runtime", 1)[0]
+    runtime_block = content.split("AS runtime", 1)[1]
 
-    assert "python:3.11-slim-trixie@sha256:" in content
-    assert "AS python-base" in content
-    assert "bsdutils=1:2.41.5-0+deb13u1" in content
-    assert "util-linux=2.41.5-0+deb13u1" in content
-    assert "apt-get upgrade" not in content
-    assert "dist-upgrade" not in content
-    assert "validate_backend_os_packages.py" in content
-    assert "pip install --no-cache-dir --prefix=/install -r requirements.txt" in builder_block
-    assert "python3.11 -m pip check" in builder_block
-    assert "python3.11 -m pip uninstall -y jaraco.context wheel setuptools" in runner_block
-    assert "python3.11 -m pip uninstall -y pip" in runner_block
-    uninstall_block = runner_block.split("pip uninstall", 1)[1].split("validate_backend_runtime_environment", 1)[0]
+    assert "python:3.11-alpine3.24@sha256:" in content
+    assert "AS wheels" in content
+    assert "AS install" in content
+    assert "AS runtime" in content
+    assert "ca-certificates" in runtime_block
+    assert "libstdc++" in runtime_block
+    assert "postgresql-libs" in runtime_block
+    assert "util-linux" not in content
+    assert "perl" not in content
+    assert "apt-get" not in content
+    assert "apk upgrade" not in content
+    assert "pip download --only-binary=:all:" in content
+    assert "pip install --no-index" in install_block
+    assert "python -m pip check" in content
+    assert "python3.11 -m pip uninstall -y jaraco.context wheel setuptools" in runtime_block
+    assert "python3.11 -m pip uninstall -y pip" in runtime_block
+    uninstall_block = runtime_block.split("pip uninstall", 1)[1].split("validate_backend_runtime_environment", 1)[0]
     assert "setuptools" in uninstall_block
-    assert "scripts/validate_backend_runtime_environment.py" in runner_block
-    assert "scripts/validate_backend_os_packages.py" in runner_block
-    assert "PYTHONPATH=/app" in runner_block
-    assert "USER app" in runner_block
-    assert runner_block.index("pip uninstall") < runner_block.index("USER app")
-    assert "rm -rf /usr/local/lib/python" not in runner_block
+    assert "scripts/validate_backend_runtime_environment.py" in runtime_block
+    assert "scripts/validate_backend_alpine_os_packages.py" in runtime_block
+    assert "PYTHONPATH=/app" in runtime_block
+    assert "USER app" in runtime_block
+    assert runtime_block.index("pip uninstall") < runtime_block.index("USER app")
+    assert "rm -rf /usr/local/lib/python" not in runtime_block
 
 
 def test_api_client_uses_relative_base_without_double_api_prefix() -> None:
