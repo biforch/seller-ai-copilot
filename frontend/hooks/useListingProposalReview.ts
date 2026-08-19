@@ -20,7 +20,7 @@ import type {
 export function useListingProposalReview(productId: string, proposalId: string) {
   const [detail, setDetail] = useState<ListingProposalDetail | null>(null);
   const [decisions, setDecisions] = useState<FieldDecisions | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
@@ -32,6 +32,17 @@ export function useListingProposalReview(productId: string, proposalId: string) 
   const [rejectResult, setRejectResult] = useState<RejectProposalResponse | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const requestSeq = useRef(0);
+  const paramKey = `${productId}:${proposalId}`;
+  const [seenKey, setSeenKey] = useState(paramKey);
+
+  if (paramKey !== seenKey) {
+    setSeenKey(paramKey);
+    setIsLoading(true);
+    setError(null);
+    setNotFound(false);
+    setActionNotice(null);
+  }
 
   const applyDetail = useCallback((next: ListingProposalDetail) => {
     setDetail(next);
@@ -43,6 +54,7 @@ export function useListingProposalReview(productId: string, proposalId: string) 
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const seq = ++requestSeq.current;
 
     setIsLoading(true);
     setError(null);
@@ -51,13 +63,13 @@ export function useListingProposalReview(productId: string, proposalId: string) 
 
     try {
       const data = await getListingProposal(productId, proposalId, controller.signal);
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted || seq !== requestSeq.current) {
         return null;
       }
       applyDetail(data);
       return data;
     } catch (err) {
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted || seq !== requestSeq.current) {
         return null;
       }
       if (isApiClientError(err) && err.httpStatus === 404) {
@@ -70,18 +82,50 @@ export function useListingProposalReview(productId: string, proposalId: string) 
       }
       return null;
     } finally {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && seq === requestSeq.current) {
         setIsLoading(false);
       }
     }
   }, [applyDetail, productId, proposalId]);
 
   useEffect(() => {
-    void load();
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const seq = ++requestSeq.current;
+    const requestedProductId = productId;
+    const requestedProposalId = proposalId;
+
+    void getListingProposal(requestedProductId, requestedProposalId, controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted || seq !== requestSeq.current) {
+          return;
+        }
+        applyDetail(data);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted || seq !== requestSeq.current) {
+          return;
+        }
+        if (isApiClientError(err) && err.httpStatus === 404) {
+          setNotFound(true);
+          setDetail(null);
+          setDecisions(null);
+          setError('Proposal not found or you do not have access.');
+        } else {
+          setError(err instanceof Error ? err.message : 'Failed to load proposal');
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted && seq === requestSeq.current) {
+          setIsLoading(false);
+        }
+      });
+
     return () => {
       abortRef.current?.abort();
     };
-  }, [load]);
+  }, [applyDetail, productId, proposalId]);
 
   const handleMutationError = useCallback((err: unknown) => {
     if (isProposalRefreshRequiredError(err)) {

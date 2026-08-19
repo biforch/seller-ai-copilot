@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -9,8 +9,17 @@ import type { ProjectDetail } from '@/types';
 
 export default function ProjectDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params.id as string;
+
+  if (!id) {
+    return <div className="p-8 text-red-600">Project not found.</div>;
+  }
+
+  return <ProjectDetailSession key={id} id={id} />;
+}
+
+function ProjectDetailSession({ id }: { id: string }) {
+  const router = useRouter();
 
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,49 +28,45 @@ export default function ProjectDetailPage() {
   const requestSeq = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
-  const loadProject = useCallback(
-    async (nextPage: number) => {
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-      const seq = ++requestSeq.current;
-
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        const data = await apiClient.get<ProjectDetail>(`/projects/${id}`, {
-          params: { page: nextPage, page_size: 10 },
-          signal: controller.signal,
-        });
-
-        if (seq !== requestSeq.current || controller.signal.aborted) {
-          return;
-        }
-
-        setProject(data);
-      } catch (err) {
-        if (controller.signal.aborted) {
-          return;
-        }
-        setError(err instanceof Error ? err.message : 'Failed to load project');
-      } finally {
-        if (seq === requestSeq.current) {
-          setIsLoading(false);
-        }
-      }
-    },
-    [id]
-  );
-
   useEffect(() => {
-    if (id) {
-      void loadProject(page);
-    }
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const seq = ++requestSeq.current;
+    const requestedPage = page;
+
+    void apiClient.get<ProjectDetail>(`/projects/${id}`, {
+      params: { page: requestedPage, page_size: 10 },
+      signal: controller.signal,
+    }).then((data) => {
+      if (seq !== requestSeq.current || controller.signal.aborted) {
+        return;
+      }
+      setProject(data);
+    }).catch((err) => {
+      if (controller.signal.aborted) {
+        return;
+      }
+      if (seq !== requestSeq.current) {
+        return;
+      }
+      setError(err instanceof Error ? err.message : 'Failed to load project');
+    }).finally(() => {
+      if (seq === requestSeq.current) {
+        setIsLoading(false);
+      }
+    });
+
     return () => {
       abortRef.current?.abort();
     };
-  }, [id, page, loadProject]);
+  }, [id, page]);
+
+  const goToPage = (nextPage: number) => {
+    setPage(nextPage);
+    setIsLoading(true);
+    setError(null);
+  };
 
   if (isLoading && !project) {
     return <div className="p-8">Loading...</div>;
@@ -139,7 +144,7 @@ export default function ProjectDetailPage() {
                   <button
                     type="button"
                     disabled={isLoading || !productPagination.has_previous}
-                    onClick={() => setPage((current) => current - 1)}
+                    onClick={() => goToPage(page - 1)}
                     className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
                   >
                     <ChevronLeft className="h-4 w-4" />
@@ -148,7 +153,7 @@ export default function ProjectDetailPage() {
                   <button
                     type="button"
                     disabled={isLoading || !productPagination.has_next}
-                    onClick={() => setPage((current) => current + 1)}
+                    onClick={() => goToPage(page + 1)}
                     className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
                   >
                     Next

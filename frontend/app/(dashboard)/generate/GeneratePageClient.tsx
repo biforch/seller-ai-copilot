@@ -41,6 +41,28 @@ type Tab =
 export function GeneratePageClient(){
 
 
+  const searchParams =
+    useSearchParams();
+
+  const productId =
+    searchParams.get(
+      'product_id'
+    );
+
+  const amazonListingId = searchParams.get('amazon_listing_id');
+
+  const sessionKey = productId
+    ? `product:${productId}:${amazonListingId ?? ''}`
+    : 'blank';
+
+  return <GeneratePageClientSession key={sessionKey} />;
+
+}
+
+
+function GeneratePageClientSession(){
+
+
   const router = useRouter();
 
   const searchParams =
@@ -94,20 +116,23 @@ export function GeneratePageClient(){
   const [
     formData,
     setFormData
-  ] = useState<GenerateFormData>({
-
-    project_id:
-      projectId || undefined,
-
-    name:'',
-
-    category:'',
-
-    market:'USA',
-
-    platform:'Amazon'
-
-  });
+  ] = useState<GenerateFormData>(() => (
+    productId
+      ? {
+          name:'',
+          category:'',
+          market:'USA',
+          platform:'Amazon'
+        }
+      : {
+          project_id:
+            projectId || undefined,
+          name:'',
+          category:'',
+          market:'USA',
+          platform:'Amazon'
+        }
+  ));
 
 
 
@@ -135,53 +160,26 @@ export function GeneratePageClient(){
 
 
 
-  /*
-   * URL project_id变化时同步
-   */
+  const visibleFormData: GenerateFormData = productId
+    ? formData
+    : {
+        ...formData,
+        project_id: projectId || undefined,
+      };
 
-  useEffect(()=>{
-
-    if (productId) return;
-
-
-    setFormData(prev=>({
-
-      ...prev,
-
-      project_id:
-        projectId || undefined
-
-    }));
-
-
-    setAnalyzeData(prev=>({
-
-      ...prev,
-
-      project_id:
-        projectId || undefined
-
-    }));
-
-
-  },[productId, projectId]);
+  const visibleAnalyzeData: AnalyzeFormData = productId
+    ? analyzeData
+    : {
+        ...analyzeData,
+        project_id: projectId || undefined,
+      };
 
   useEffect(()=>{
     if (!productId) {
-      setProductLoading(false);
-      setLoadedProductId(null);
       return;
     }
     const controller = new AbortController();
-    setProductLoadError(null);
-    setProductLoading(true);
-    setLoadedProductId(null);
-    setFormData({
-      name: '',
-      category: '',
-      market: 'USA',
-      platform: 'Amazon',
-    });
+    const listingId = amazonListingId;
 
     void apiClient.get<ProductDetail>(`/products/${encodeURIComponent(productId)}`, {
       signal: controller.signal,
@@ -190,7 +188,7 @@ export function GeneratePageClient(){
       setFormData({
         project_id: product.project?.id ?? undefined,
         product_id: product.id,
-        amazon_listing_id: amazonListingId || undefined,
+        amazon_listing_id: listingId || undefined,
         name: product.name,
         category: product.category ?? 'General',
         market: product.market,
@@ -205,7 +203,7 @@ export function GeneratePageClient(){
           product_id: product.id,
           project_id: product.project.id,
         });
-        if (amazonListingId) canonicalParams.set('amazon_listing_id', amazonListingId);
+        if (listingId) canonicalParams.set('amazon_listing_id', listingId);
         router.replace(`/generate?${canonicalParams.toString()}`);
       }
     }).catch(() => {
@@ -257,7 +255,7 @@ export function GeneratePageClient(){
 
 
       await generateListing(
-        formData
+        visibleFormData
       );
 
 
@@ -274,7 +272,7 @@ export function GeneratePageClient(){
 
 
       await analyzeListing(
-        analyzeData
+        visibleAnalyzeData
       );
 
 
@@ -350,7 +348,7 @@ export function GeneratePageClient(){
 
           <select
 
-            value={formData.project_id || ''}
+            value={visibleFormData.project_id || ''}
 
             onChange={(e)=>{
 
@@ -595,10 +593,10 @@ export function GeneratePageClient(){
 
           <ProductForm
 
-            key={formData.product_id ?? 'new-product'}
+            key={visibleFormData.product_id ?? 'new-product'}
 
 
-            data={formData}
+            data={visibleFormData}
 
 
             onChange={setFormData}
