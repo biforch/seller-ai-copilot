@@ -98,12 +98,15 @@ jobs:
       - name: Validate installed dependency tree
         working-directory: frontend
         run: node scripts/validate-installed-dependency-tree.mjs
+      - name: Run frontend lint
+        working-directory: frontend
+        run: npm run lint -- --max-warnings=0
       - name: Frontend unit tests
         working-directory: frontend
         run: npm test -- --run
-      - name: TypeScript check
+      - name: Run frontend type check
         working-directory: frontend
-        run: npx tsc --noEmit
+        run: ./node_modules/.bin/tsc --noEmit
       - name: Production build
         working-directory: frontend
         run: npm run build

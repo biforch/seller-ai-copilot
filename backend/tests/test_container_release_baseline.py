@@ -68,6 +68,25 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _quality_job_block(content: str, job_name: str, next_job_name: str) -> str:
+    start = content.index(f"  {job_name}:")
+    end = content.index(f"  {next_job_name}:")
+    return content[start:end]
+
+
+def _named_step_block(job_block: str, step_name: str) -> str:
+    marker = f"- name: {step_name}\n"
+    start = job_block.index(marker)
+    remainder = job_block[start + len(marker) :]
+    next_offset: int | None = None
+    for token in ("\n      - name:", "\n      - uses:"):
+        found = remainder.find(token)
+        if found != -1 and (next_offset is None or found < next_offset):
+            next_offset = found
+    end = start + len(marker) + (len(remainder) if next_offset is None else next_offset)
+    return job_block[start:end]
+
+
 def _dockerignore_patterns(path: Path) -> set[str]:
     patterns: set[str] = set()
     for line in _read(path).splitlines():
@@ -429,13 +448,17 @@ def test_nginx_runtime_uses_current_stable_branch() -> None:
 
 def test_quality_workflow_runs_backend_and_frontend_release_gates() -> None:
     content = _read(QUALITY_WORKFLOW)
+    frontend_block = _quality_job_block(content, "frontend", "containers")
     assert "permissions:\n  contents: read" in content
     assert "postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685" in content
     assert "sellerai_migration_test" in content
     assert "ruff check app tests scripts" in content
     assert "mypy app scripts" in content
     assert "pytest -q" in content
-    assert "npx tsc --noEmit" in content
+    assert "run: npm run lint -- --max-warnings=0" in frontend_block
+    assert "run: ./node_modules/.bin/tsc --noEmit" in frontend_block
+    assert "npx tsc" not in frontend_block
+    assert "npm exec tsc" not in frontend_block
     assert "npm run build" in content
     assert "pull_request:" in content
     assert "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683" in content
@@ -448,9 +471,7 @@ def test_quality_workflow_runs_backend_and_frontend_release_gates() -> None:
 
 def test_quality_workflow_runs_frontend_unit_tests_before_build() -> None:
     content = _read(QUALITY_WORKFLOW)
-    frontend_start = content.index("  frontend:")
-    containers_start = content.index("  containers:")
-    frontend_block = content[frontend_start:containers_start]
+    frontend_block = _quality_job_block(content, "frontend", "containers")
 
     toolchain_index = frontend_block.index("node scripts/validate-node-toolchain.mjs")
     validate_index = frontend_block.index("node scripts/validate-lockfile-registry.mjs")
@@ -461,8 +482,9 @@ def test_quality_workflow_runs_frontend_unit_tests_before_build() -> None:
     )
     npm_ci_index = frontend_block.index("run: npm ci")
     installed_tree_index = frontend_block.index("node scripts/validate-installed-dependency-tree.mjs")
+    lint_index = frontend_block.index("run: npm run lint -- --max-warnings=0")
     test_index = frontend_block.index("run: npm test -- --run")
-    tsc_index = frontend_block.index("run: npx tsc --noEmit")
+    tsc_index = frontend_block.index("run: ./node_modules/.bin/tsc --noEmit")
     build_index = frontend_block.index("run: npm run build")
 
     assert (
@@ -473,6 +495,7 @@ def test_quality_workflow_runs_frontend_unit_tests_before_build() -> None:
         < installed_tree_test_index
         < npm_ci_index
         < installed_tree_index
+        < lint_index
         < test_index
         < tsc_index
         < build_index
@@ -481,6 +504,55 @@ def test_quality_workflow_runs_frontend_unit_tests_before_build() -> None:
     assert "continue-on-error" not in frontend_block
     assert "|| true" not in frontend_block
     assert "vitest watch" not in frontend_block
+
+
+def test_quality_workflow_frontend_eslint_gate_blocks_errors_and_warnings() -> None:
+    content = _read(QUALITY_WORKFLOW)
+    frontend_block = _quality_job_block(content, "frontend", "containers")
+    lint_step = _named_step_block(frontend_block, "Run frontend lint")
+    test_step = _named_step_block(frontend_block, "Frontend unit tests")
+    typecheck_step = _named_step_block(frontend_block, "Run frontend type check")
+    build_step = _named_step_block(frontend_block, "Production build")
+    installed_tree_step = _named_step_block(frontend_block, "Validate installed dependency tree")
+
+    lint_run_lines = [line.strip() for line in lint_step.splitlines() if line.strip().startswith("run:")]
+    typecheck_run_lines = [
+        line.strip() for line in typecheck_step.splitlines() if line.strip().startswith("run:")
+    ]
+    assert lint_run_lines == ["run: npm run lint -- --max-warnings=0"]
+    assert typecheck_run_lines == ["run: ./node_modules/.bin/tsc --noEmit"]
+    assert "--quiet" not in lint_step
+    assert "--fix" not in lint_step
+    assert "continue-on-error" not in lint_step
+    assert "|| true" not in lint_step
+    assert "if:" not in lint_step
+    assert "npx" not in lint_step
+    assert "eslint-disable" not in lint_step
+
+    assert frontend_block.index(installed_tree_step) < frontend_block.index(lint_step)
+    assert frontend_block.index(lint_step) < frontend_block.index(test_step)
+    assert frontend_block.index(lint_step) < frontend_block.index(typecheck_step)
+    assert frontend_block.index(lint_step) < frontend_block.index(build_step)
+    assert frontend_block.index(typecheck_step) < frontend_block.index(build_step)
+    assert frontend_block.index(test_step) < frontend_block.index(typecheck_step)
+
+    assert "npx tsc" not in typecheck_step
+    assert "npm exec" not in typecheck_step
+    assert "continue-on-error" not in typecheck_step
+    assert "|| true" not in typecheck_step
+    assert "if:" not in typecheck_step
+    assert "command -v" not in typecheck_step
+    assert "npx tsc" not in frontend_block
+    assert "npm exec tsc" not in frontend_block
+
+    containers_onward = content[content.index("  containers:") :]
+    assert "npm run lint" not in containers_onward
+    assert "./node_modules/.bin/tsc --noEmit" not in containers_onward
+    assert "npx tsc" not in containers_onward
+    assert "needs: [backend, frontend]" in containers_onward
+    assert "Evaluate vulnerability policy" in containers_onward
+    assert "Evaluate Alpine candidate vulnerability policy" in containers_onward
+    assert "Evaluate hardened Alpine candidate vulnerability policy" in containers_onward
 
 
 def _assert_official_npm_registry_resolved(resolved: str) -> None:
