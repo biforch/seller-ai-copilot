@@ -1,5 +1,8 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import AmazonConnectionsPage from '@/app/(dashboard)/amazon/page';
@@ -539,5 +542,385 @@ describe('AmazonConnectionsPage async races', () => {
 
     expect(screen.queryByText('Listing linked to a SellerAI product.')).not.toBeInTheDocument();
     expect(screen.getByText('SKU-M-B1')).toBeInTheDocument();
+  });
+
+  it('rejects stale listing success after account switch before a new listings fetch', async () => {
+    const staleListings = createDeferred<PaginatedResponse<AmazonListing>>();
+    const nextMarketplaces = createDeferred<{ items: AmazonMarketplace[]; total: number }>();
+
+    vi.spyOn(amazonApi, 'listMarketplaces').mockImplementation((accountId: string) => {
+      if (accountId === 'acc-a') {
+        return Promise.resolve({ items: [marketplace('a', 'M1', 'United States')], total: 1 });
+      }
+      return nextMarketplaces.promise;
+    });
+    vi.spyOn(amazonApi, 'listListings').mockImplementation((_accountId, marketplaceId) => {
+      if (marketplaceId === 'M1') return staleListings.promise;
+      throw new Error(`Unexpected marketplace ${marketplaceId}`);
+    });
+
+    const user = userEvent.setup();
+    await renderAndWaitForAccounts();
+    await waitFor(() => {
+      expect(amazonApi.listListings).toHaveBeenCalled();
+    });
+    const listingCalls = vi.mocked(amazonApi.listListings).mock.calls.length;
+
+    await user.click(screen.getByRole('button', { name: /EU account/i }));
+    expect(vi.mocked(amazonApi.listListings).mock.calls.length).toBe(listingCalls);
+
+    staleListings.resolve(paginatedListings([listing('l-us', 'SKU-STALE', 'M1')]));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.queryByText('SKU-STALE')).not.toBeInTheDocument();
+    expect(screen.queryByText('United States')).not.toBeInTheDocument();
+  });
+
+  it('rejects stale listing failure after account switch before a new listings fetch', async () => {
+    const staleListings = createDeferred<PaginatedResponse<AmazonListing>>();
+    const nextMarketplaces = createDeferred<{ items: AmazonMarketplace[]; total: number }>();
+
+    vi.spyOn(amazonApi, 'listMarketplaces').mockImplementation((accountId: string) => {
+      if (accountId === 'acc-a') {
+        return Promise.resolve({ items: [marketplace('a', 'M1', 'United States')], total: 1 });
+      }
+      return nextMarketplaces.promise;
+    });
+    vi.spyOn(amazonApi, 'listListings').mockImplementation((_accountId, marketplaceId) => {
+      if (marketplaceId === 'M1') return staleListings.promise;
+      throw new Error(`Unexpected marketplace ${marketplaceId}`);
+    });
+
+    const user = userEvent.setup();
+    await renderAndWaitForAccounts();
+    await waitFor(() => {
+      expect(amazonApi.listListings).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByRole('button', { name: /EU account/i }));
+    staleListings.reject(new ApiClientError('Stale listing failure', 500));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.queryByText('Stale listing failure')).not.toBeInTheDocument();
+    expect(screen.queryByText('SKU-STALE')).not.toBeInTheDocument();
+  });
+
+  it('rejects a stale marketplace listing response after marketplace switch before the new result', async () => {
+    const m1Deferred = createDeferred<PaginatedResponse<AmazonListing>>();
+    const m2Deferred = createDeferred<PaginatedResponse<AmazonListing>>();
+
+    vi.spyOn(amazonApi, 'listMarketplaces').mockResolvedValue({
+      items: [
+        marketplace('a', 'M1', 'United States'),
+        marketplace('a', 'M2', 'Canada'),
+      ],
+      total: 2,
+    });
+    vi.spyOn(amazonApi, 'listListings').mockImplementation((_accountId, marketplaceId) => {
+      if (marketplaceId === 'M1') return m1Deferred.promise;
+      if (marketplaceId === 'M2') return m2Deferred.promise;
+      throw new Error(`Unexpected marketplace ${marketplaceId}`);
+    });
+
+    const user = userEvent.setup();
+    await renderAndWaitForAccounts();
+    await waitFor(() => {
+      expect(screen.getByText('United States')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(amazonApi.listListings).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Canada/i }));
+    m1Deferred.resolve(paginatedListings([listing('l-us', 'SKU-US-STALE', 'M1')]));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.queryByText('SKU-US-STALE')).not.toBeInTheDocument();
+    const listingsPanel = screen.getByRole('heading', { name: 'Synced listings' }).closest('.overflow-hidden')!;
+    expect(listingsPanel.querySelector('.animate-spin')).toBeTruthy();
+  });
+
+  it('rejects a stale includeInactive response before the new listings result', async () => {
+    const activeDeferred = createDeferred<PaginatedResponse<AmazonListing>>();
+    const inactiveDeferred = createDeferred<PaginatedResponse<AmazonListing>>();
+
+    vi.spyOn(amazonApi, 'listMarketplaces').mockResolvedValue({
+      items: [marketplace('a', 'M1', 'United States')],
+      total: 1,
+    });
+    vi.spyOn(amazonApi, 'listListings').mockImplementation((_accountId, _marketplaceId, options) => {
+      if (options.includeInactive) return inactiveDeferred.promise;
+      return activeDeferred.promise;
+    });
+
+    const user = userEvent.setup();
+    await renderAndWaitForAccounts();
+    await waitFor(() => {
+      expect(screen.getByText('United States')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(amazonApi.listListings).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByRole('checkbox', { name: /Include inactive/i }));
+    activeDeferred.resolve(paginatedListings([listing('l-active', 'SKU-ACTIVE-STALE', 'M1')]));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.queryByText('SKU-ACTIVE-STALE')).not.toBeInTheDocument();
+  });
+
+  it('writes the auto-selected account ref so clicking it does not retrigger marketplaces', async () => {
+    vi.spyOn(amazonApi, 'listMarketplaces').mockResolvedValue({
+      items: [marketplace('a', 'M1', 'United States')],
+      total: 1,
+    });
+    vi.spyOn(amazonApi, 'listListings').mockResolvedValue(paginatedListings([]));
+
+    const user = userEvent.setup();
+    await renderAndWaitForAccounts();
+    await waitFor(() => {
+      expect(screen.getByText('United States')).toBeInTheDocument();
+    });
+    const marketplaceCalls = vi.mocked(amazonApi.listMarketplaces).mock.calls.length;
+
+    await user.click(screen.getByRole('button', { name: /NA account/i }));
+    expect(vi.mocked(amazonApi.listMarketplaces).mock.calls.length).toBe(marketplaceCalls);
+  });
+
+  it('writes the auto-selected marketplace ref so clicking it does not retrigger listings', async () => {
+    vi.spyOn(amazonApi, 'listMarketplaces').mockResolvedValue({
+      items: [marketplace('a', 'M1', 'United States')],
+      total: 1,
+    });
+    vi.spyOn(amazonApi, 'listListings').mockResolvedValue(
+      paginatedListings([listing('l-us', 'SKU-US', 'M1')]),
+    );
+
+    const user = userEvent.setup();
+    await renderAndWaitForAccounts();
+    await waitFor(() => {
+      expect(screen.getByText('SKU-US')).toBeInTheDocument();
+    });
+    const listingCalls = vi.mocked(amazonApi.listListings).mock.calls.length;
+
+    await user.click(screen.getByRole('button', { name: /United States/i }));
+    expect(vi.mocked(amazonApi.listListings).mock.calls.length).toBe(listingCalls);
+  });
+
+  it('selects the remaining account when a refresh removes the current account', async () => {
+    let accountItems = [baseAccount('acc-a'), baseAccount('acc-b', 'eu')];
+    vi.mocked(amazonApi.listAccounts).mockImplementation(async () => ({
+      items: accountItems,
+      total: accountItems.length,
+    }));
+    vi.spyOn(amazonApi, 'listMarketplaces').mockImplementation(async (accountId: string) => {
+      if (accountId === 'acc-a') {
+        return { items: [marketplace('a', 'M1', 'United States')], total: 1 };
+      }
+      return { items: [marketplace('b', 'M-B1', 'Germany')], total: 1 };
+    });
+    vi.spyOn(amazonApi, 'listListings').mockImplementation(async (_accountId, marketplaceId) =>
+      paginatedListings([listing(`l-${marketplaceId}`, `SKU-${marketplaceId}`, marketplaceId)]),
+    );
+    vi.spyOn(amazonApi, 'refreshMarketplaces').mockResolvedValue({
+      account_id: 'acc-b',
+      sync_log_id: 'mp-1',
+      items_seen: 1,
+      items_written: 1,
+      items_deactivated: 0,
+    });
+
+    const user = userEvent.setup();
+    await renderAndWaitForAccounts();
+    await user.click(screen.getByRole('button', { name: /EU account/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Germany')).toBeInTheDocument();
+    });
+
+    accountItems = [baseAccount('acc-a')];
+    await user.click(screen.getByRole('button', { name: 'Refresh marketplaces' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /EU account/i })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /NA account/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('United States')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Germany')).not.toBeInTheDocument();
+  });
+
+  it('selects a remaining marketplace when refresh removes the current marketplace', async () => {
+    let marketplaceItems = [
+      marketplace('a', 'M1', 'United States'),
+      marketplace('a', 'M2', 'Canada'),
+    ];
+    vi.spyOn(amazonApi, 'listMarketplaces').mockImplementation(async () => ({
+      items: marketplaceItems,
+      total: marketplaceItems.length,
+    }));
+    vi.spyOn(amazonApi, 'listListings').mockImplementation(async (_accountId, marketplaceId) =>
+      paginatedListings([listing(`l-${marketplaceId}`, `SKU-${marketplaceId}`, marketplaceId)]),
+    );
+    vi.spyOn(amazonApi, 'refreshMarketplaces').mockResolvedValue({
+      account_id: 'acc-a',
+      sync_log_id: 'mp-2',
+      items_seen: 1,
+      items_written: 1,
+      items_deactivated: 0,
+    });
+
+    const user = userEvent.setup();
+    await renderAndWaitForAccounts();
+    await waitFor(() => {
+      expect(screen.getByText('United States')).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /Canada/i }));
+    await waitFor(() => {
+      expect(screen.getByText('SKU-M2')).toBeInTheDocument();
+    });
+
+    marketplaceItems = [marketplace('a', 'M1', 'United States')];
+    await user.click(screen.getByRole('button', { name: 'Refresh marketplaces' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Canada/i })).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('SKU-M1')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('SKU-M2')).not.toBeInTheDocument();
+  });
+
+  it('clears listings after a failed load so later actions cannot use stale rows', async () => {
+    vi.spyOn(amazonApi, 'listMarketplaces').mockResolvedValue({
+      items: [marketplace('a', 'M1', 'United States')],
+      total: 1,
+    });
+    vi.spyOn(amazonApi, 'listListings').mockRejectedValue(new ApiClientError('Listing load failed', 500));
+
+    await renderAndWaitForAccounts();
+    await waitFor(() => {
+      expect(screen.getByText('Listing load failed')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/SKU-/)).not.toBeInTheDocument();
+    expect(screen.getByText(/No synced listings/i)).toBeInTheDocument();
+  });
+
+  it('updates the latest listings snapshot when linking a product', async () => {
+    vi.spyOn(amazonApi, 'listMarketplaces').mockResolvedValue({
+      items: [marketplace('a', 'M1', 'United States')],
+      total: 1,
+    });
+    vi.spyOn(amazonApi, 'listListings').mockResolvedValue(
+      paginatedListings([listing('l-M1', 'SKU-M1', 'M1')]),
+    );
+    vi.spyOn(amazonApi, 'listLinkableProducts').mockResolvedValue({
+      items: [{ id: 'prod-1', project_id: 'proj-1', name: 'Product One', category: null, platform: 'amazon', market: 'US' }],
+      pagination: {
+        page: 1,
+        page_size: 100,
+        total: 1,
+        total_pages: 1,
+        has_next: false,
+        has_previous: false,
+      },
+    });
+    vi.spyOn(amazonApi, 'linkListingProduct').mockResolvedValue({
+      ...listing('l-M1', 'SKU-M1', 'M1'),
+      product_id: 'prod-1',
+    });
+
+    const user = userEvent.setup();
+    await renderAndWaitForAccounts();
+    await waitFor(() => {
+      expect(screen.getByText('SKU-M1')).toBeInTheDocument();
+    });
+
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: /SellerAI product for SKU-M1/i }),
+      'prod-1',
+    );
+    await waitFor(() => {
+      expect(screen.getByText('Listing linked to a SellerAI product.')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('combobox', { name: /SellerAI product for SKU-M1/i })).toHaveValue('prod-1');
+  });
+
+  it('aborts the first StrictMode accounts request and keeps loading until the latest lease finishes', async () => {
+    const accountsDeferred = createDeferred<{ items: AmazonAccount[]; total: number }>();
+    vi.mocked(amazonApi.listAccounts).mockImplementation(() => accountsDeferred.promise);
+    vi.spyOn(amazonApi, 'listMarketplaces').mockResolvedValue({ items: [], total: 0 });
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    render(
+      <StrictMode>
+        <AmazonConnectionsPage />
+      </StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(amazonApi.listAccounts).mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+    expect(document.querySelector('.animate-spin')).toBeTruthy();
+
+    accountsDeferred.resolve({
+      items: [baseAccount('acc-a'), baseAccount('acc-b', 'eu')],
+      total: 2,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /NA account/i })).toBeInTheDocument();
+    });
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('does not start OAuth twice for a single connect click in StrictMode', async () => {
+    vi.spyOn(amazonApi, 'listAccounts').mockResolvedValue({ items: [], total: 0 });
+    const startDeferred = createDeferred<{
+      authorization_url: string;
+      marketplace_code: string;
+      region: string;
+      expires_at: string;
+    }>();
+    vi.spyOn(amazonApi, 'startAuthorization').mockReturnValue(startDeferred.promise);
+
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <AmazonConnectionsPage />
+      </StrictMode>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Connect Amazon/i })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Connect Amazon/i }));
+    expect(amazonApi.startAuthorization).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AmazonConnectionsPage listing write paths', () => {
+  it('routes every listings state write through commitListings', () => {
+    const source = readFileSync(
+      path.join(process.cwd(), 'app/(dashboard)/amazon/page.tsx'),
+      'utf8',
+    );
+    const helperStart = source.indexOf('function commitListings(');
+    const helperEnd = source.indexOf('function statusStyle(');
+    expect(helperStart).toBeGreaterThan(-1);
+    expect(helperEnd).toBeGreaterThan(helperStart);
+
+    const helper = source.slice(helperStart, helperEnd);
+    const rest = `${source.slice(0, helperStart)}${source.slice(helperEnd)}`;
+    expect(helper).toContain('listingsRef.current = next');
+    expect(helper).toContain('setListings(next)');
+    expect(rest).not.toMatch(/setListings\(/);
+    expect(rest).not.toMatch(/listingsRef\.current\s*=/);
   });
 });

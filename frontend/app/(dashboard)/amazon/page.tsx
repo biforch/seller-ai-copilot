@@ -27,7 +27,8 @@ import {
 } from '@/app/api/amazon';
 import { isAbortError } from '@/lib/abort-error';
 import { ApiClientError } from '@/lib/api-client-error';
-import { LatestRequestGate } from '@/lib/latest-request';
+import { LatestRequestGate, type RequestLease } from '@/lib/latest-request';
+import type { PaginatedResponse } from '@/types';
 
 const MARKETPLACE_CODES = ['US', 'CA', 'MX', 'BR', 'UK', 'DE', 'FR', 'IT', 'ES', 'JP', 'AU'];
 const PAGE_SIZE = 20;
@@ -63,6 +64,15 @@ function pickDefaultMarketplaceId(
 ): string | null {
   if (current && items.some((item) => item.marketplace_id === current)) return current;
   return items.find((item) => item.sync_eligible)?.marketplace_id ?? items[0]?.marketplace_id ?? null;
+}
+
+function commitListings(
+  listingsRef: { current: AmazonListing[] },
+  setListings: (items: AmazonListing[]) => void,
+  next: AmazonListing[],
+) {
+  listingsRef.current = next;
+  setListings(next);
 }
 
 function statusStyle(status: AmazonAccount['status']) {
@@ -101,13 +111,8 @@ export default function AmazonConnectionsPage() {
   const actionGenerationRef = useRef(0);
   const selectedAccountIdRef = useRef<string | null>(null);
   const selectedMarketplaceIdRef = useRef<string | null>(null);
-  const includeInactiveRef = useRef(includeInactive);
-  const listingsRef = useRef(listings);
-
-  selectedAccountIdRef.current = selectedAccountId;
-  selectedMarketplaceIdRef.current = selectedMarketplaceId;
-  includeInactiveRef.current = includeInactive;
-  listingsRef.current = listings;
+  const includeInactiveRef = useRef(false);
+  const listingsRef = useRef<AmazonListing[]>([]);
 
   const bumpActionScope = useCallback(() => {
     actionGenerationRef.current += 1;
@@ -127,8 +132,7 @@ export default function AmazonConnectionsPage() {
   );
 
   const clearListingScopeState = useCallback(() => {
-    listingsRef.current = [];
-    setListings([]);
+    commitListings(listingsRef, setListings, []);
     setCatalogByListing({});
     setPage(1);
     setTotalPages(0);
@@ -155,16 +159,12 @@ export default function AmazonConnectionsPage() {
     listingGateRef.current.invalidate();
     bumpActionScope();
     selectedMarketplaceIdRef.current = null;
-    listingsRef.current = [];
+    clearListingScopeState();
     setMarketplaces([]);
     setSelectedMarketplaceId(null);
-    setListings([]);
-    setCatalogByListing({});
-    setPage(1);
-    setTotalPages(0);
-    setTotalListings(0);
+    setLoadingListings(false);
     setAction(null);
-  }, [bumpActionScope]);
+  }, [bumpActionScope, clearListingScopeState]);
 
   const invalidateMarketplaceSelection = useCallback(() => {
     listingGateRef.current.invalidate();
@@ -179,6 +179,8 @@ export default function AmazonConnectionsPage() {
       invalidateAccountSelection();
       selectedAccountIdRef.current = accountId;
       setSelectedAccountId(accountId);
+      setLoadingMarketplaces(true);
+      setError(null);
     },
     [invalidateAccountSelection],
   );
@@ -189,6 +191,8 @@ export default function AmazonConnectionsPage() {
       invalidateMarketplaceSelection();
       selectedMarketplaceIdRef.current = marketplaceId;
       setSelectedMarketplaceId(marketplaceId);
+      setLoadingListings(true);
+      setError(null);
     },
     [invalidateMarketplaceSelection],
   );
@@ -201,6 +205,8 @@ export default function AmazonConnectionsPage() {
       includeInactiveRef.current = checked;
       clearListingScopeState();
       setIncludeInactive(checked);
+      setLoadingListings(true);
+      setError(null);
     },
     [bumpActionScope, clearListingScopeState],
   );
@@ -214,13 +220,10 @@ export default function AmazonConnectionsPage() {
     [marketplaces, selectedMarketplaceId],
   );
 
-  const loadAccounts = useCallback(async () => {
-    const lease = accountsGateRef.current.begin();
-    setLoadingAccounts(true);
-    setError(null);
-    try {
-      const result = await amazonApi.listAccounts();
+  const applyLoadedAccounts = useCallback(
+    (result: { items: AmazonAccount[] }, lease: RequestLease) => {
       if (!mountedRef.current || !lease.isCurrent()) return;
+      setError(null);
       setAccounts(result.items);
 
       const currentAccountId = selectedAccountIdRef.current;
@@ -230,83 +233,141 @@ export default function AmazonConnectionsPage() {
           : result.items[0]?.id ?? null;
 
       if (nextAccountId !== currentAccountId) {
-        marketplaceGateRef.current.invalidate();
-        listingGateRef.current.invalidate();
-        bumpActionScope();
+        invalidateAccountSelection();
         selectedAccountIdRef.current = nextAccountId;
-        selectedMarketplaceIdRef.current = null;
-        listingsRef.current = [];
-        setMarketplaces([]);
-        setSelectedMarketplaceId(null);
-        clearListingScopeState();
-        setAction(null);
+        setLoadingMarketplaces(Boolean(nextAccountId));
       }
 
       setSelectedAccountId(nextAccountId);
-    } catch (requestError) {
-      if (isAbortError(requestError) || !lease.isCurrent() || !mountedRef.current) return;
-      setError(errorMessage(requestError));
-    } finally {
-      if (mountedRef.current && lease.isCurrent()) {
-        setLoadingAccounts(false);
-      }
-    }
-  }, [bumpActionScope, clearListingScopeState]);
+    },
+    [invalidateAccountSelection],
+  );
 
-  const loadProducts = useCallback(async () => {
-    const lease = productsGateRef.current.begin();
-    try {
-      const result = await amazonApi.listLinkableProducts(lease.signal);
-      if (!mountedRef.current || !lease.isCurrent()) return;
-      setProducts(result.items);
-    } catch (requestError) {
-      if (isAbortError(requestError) || !lease.isCurrent() || !mountedRef.current) return;
-      setError(errorMessage(requestError));
+  const applyAccountsRequestError = useCallback((requestError: unknown, lease: RequestLease) => {
+    if (isAbortError(requestError) || !lease.isCurrent() || !mountedRef.current) return;
+    setError(errorMessage(requestError));
+  }, []);
+
+  const finishAccountsLease = useCallback((lease: RequestLease) => {
+    if (mountedRef.current && lease.isCurrent()) {
+      setLoadingAccounts(false);
     }
   }, []);
 
-  const loadMarketplaces = useCallback(async (accountId: string) => {
-    const lease = marketplaceGateRef.current.begin();
-    setLoadingMarketplaces(true);
-    setError(null);
-    try {
-      const result = await amazonApi.listMarketplaces(accountId, lease.signal);
+  const applyLoadedMarketplaces = useCallback(
+    (accountId: string, result: { items: AmazonMarketplace[] }, lease: RequestLease) => {
       if (!mountedRef.current || !lease.isCurrent()) return;
       if (selectedAccountIdRef.current !== accountId) return;
+      setError(null);
       setMarketplaces(result.items);
 
-      const nextMarketplaceId = pickDefaultMarketplaceId(
-        result.items,
-        selectedMarketplaceIdRef.current,
-      );
-      if (nextMarketplaceId !== selectedMarketplaceIdRef.current) {
+      const currentMarketplaceId = selectedMarketplaceIdRef.current;
+      const nextMarketplaceId = pickDefaultMarketplaceId(result.items, currentMarketplaceId);
+      if (nextMarketplaceId !== currentMarketplaceId) {
         listingGateRef.current.invalidate();
         bumpActionScope();
         clearListingScopeState();
+        setLoadingListings(Boolean(nextMarketplaceId));
       }
       selectedMarketplaceIdRef.current = nextMarketplaceId;
       setSelectedMarketplaceId(nextMarketplaceId);
-    } catch (requestError) {
+    },
+    [bumpActionScope, clearListingScopeState],
+  );
+
+  const applyMarketplacesRequestError = useCallback(
+    (accountId: string, requestError: unknown, lease: RequestLease) => {
       if (isAbortError(requestError) || !lease.isCurrent() || !mountedRef.current) return;
       if (selectedAccountIdRef.current !== accountId) return;
       setMarketplaces([]);
       selectedMarketplaceIdRef.current = null;
       clearListingScopeState();
       setSelectedMarketplaceId(null);
+      setLoadingListings(false);
       setError(errorMessage(requestError));
-    } finally {
-      if (mountedRef.current && lease.isCurrent()) {
-        setLoadingMarketplaces(false);
-      }
+    },
+    [clearListingScopeState],
+  );
+
+  const finishMarketplacesLease = useCallback((lease: RequestLease) => {
+    if (mountedRef.current && lease.isCurrent()) {
+      setLoadingMarketplaces(false);
     }
-  }, [bumpActionScope, clearListingScopeState]);
+  }, []);
+
+  const applyLoadedListings = useCallback(
+    (
+      accountId: string,
+      marketplaceId: string,
+      expectedIncludeInactive: boolean,
+      result: PaginatedResponse<AmazonListing>,
+      lease: RequestLease,
+    ) => {
+      if (!mountedRef.current || !lease.isCurrent()) return;
+      if (selectedAccountIdRef.current !== accountId) return;
+      if (selectedMarketplaceIdRef.current !== marketplaceId) return;
+      if (includeInactiveRef.current !== expectedIncludeInactive) return;
+      setError(null);
+      commitListings(listingsRef, setListings, result.items);
+      setPage(result.pagination.page);
+      setTotalPages(result.pagination.total_pages);
+      setTotalListings(result.pagination.total);
+    },
+    [],
+  );
+
+  const applyListingsRequestError = useCallback(
+    (
+      accountId: string,
+      marketplaceId: string,
+      expectedIncludeInactive: boolean,
+      requestError: unknown,
+      lease: RequestLease,
+    ) => {
+      if (isAbortError(requestError) || !lease.isCurrent() || !mountedRef.current) return;
+      if (selectedAccountIdRef.current !== accountId) return;
+      if (selectedMarketplaceIdRef.current !== marketplaceId) return;
+      if (includeInactiveRef.current !== expectedIncludeInactive) return;
+      commitListings(listingsRef, setListings, []);
+      setError(errorMessage(requestError));
+    },
+    [],
+  );
+
+  const finishListingsLease = useCallback((lease: RequestLease) => {
+    if (mountedRef.current && lease.isCurrent()) {
+      setLoadingListings(false);
+    }
+  }, []);
+
+  const loadAccounts = useCallback(async () => {
+    const lease = accountsGateRef.current.begin();
+    try {
+      const result = await amazonApi.listAccounts();
+      applyLoadedAccounts(result, lease);
+    } catch (requestError) {
+      applyAccountsRequestError(requestError, lease);
+    } finally {
+      finishAccountsLease(lease);
+    }
+  }, [applyAccountsRequestError, applyLoadedAccounts, finishAccountsLease]);
+
+  const loadMarketplaces = useCallback(async (accountId: string) => {
+    const lease = marketplaceGateRef.current.begin();
+    try {
+      const result = await amazonApi.listMarketplaces(accountId, lease.signal);
+      applyLoadedMarketplaces(accountId, result, lease);
+    } catch (requestError) {
+      applyMarketplacesRequestError(accountId, requestError, lease);
+    } finally {
+      finishMarketplacesLease(lease);
+    }
+  }, [applyLoadedMarketplaces, applyMarketplacesRequestError, finishMarketplacesLease]);
 
   const loadListings = useCallback(
     async (accountId: string, marketplaceId: string, targetPage: number) => {
       const lease = listingGateRef.current.begin();
       const expectedIncludeInactive = includeInactiveRef.current;
-      setLoadingListings(true);
-      setError(null);
       try {
         const result = await amazonApi.listListings(
           accountId,
@@ -318,28 +379,20 @@ export default function AmazonConnectionsPage() {
           },
           lease.signal,
         );
-        if (!mountedRef.current || !lease.isCurrent()) return;
-        if (selectedAccountIdRef.current !== accountId) return;
-        if (selectedMarketplaceIdRef.current !== marketplaceId) return;
-        if (includeInactiveRef.current !== expectedIncludeInactive) return;
-        setListings(result.items);
-        setPage(result.pagination.page);
-        setTotalPages(result.pagination.total_pages);
-        setTotalListings(result.pagination.total);
+        applyLoadedListings(accountId, marketplaceId, expectedIncludeInactive, result, lease);
       } catch (requestError) {
-        if (isAbortError(requestError) || !lease.isCurrent() || !mountedRef.current) return;
-        if (selectedAccountIdRef.current !== accountId) return;
-        if (selectedMarketplaceIdRef.current !== marketplaceId) return;
-        if (includeInactiveRef.current !== expectedIncludeInactive) return;
-        setListings([]);
-        setError(errorMessage(requestError));
+        applyListingsRequestError(
+          accountId,
+          marketplaceId,
+          expectedIncludeInactive,
+          requestError,
+          lease,
+        );
       } finally {
-        if (mountedRef.current && lease.isCurrent()) {
-          setLoadingListings(false);
-        }
+        finishListingsLease(lease);
       }
     },
-    [],
+    [applyListingsRequestError, applyLoadedListings, finishListingsLease],
   );
 
   useEffect(() => {
@@ -358,24 +411,94 @@ export default function AmazonConnectionsPage() {
   }, []);
 
   useEffect(() => {
-    void loadAccounts();
-    void loadProducts();
-  }, [loadAccounts, loadProducts]);
+    const accountsLease = accountsGateRef.current.begin();
+    void amazonApi.listAccounts()
+      .then((result) => {
+        applyLoadedAccounts(result, accountsLease);
+      })
+      .catch((requestError) => {
+        applyAccountsRequestError(requestError, accountsLease);
+      })
+      .finally(() => {
+        finishAccountsLease(accountsLease);
+      });
+
+    const productsLease = productsGateRef.current.begin();
+    void amazonApi.listLinkableProducts(productsLease.signal)
+      .then((result) => {
+        if (!mountedRef.current || !productsLease.isCurrent()) return;
+        setProducts(result.items);
+      })
+      .catch((requestError) => {
+        if (isAbortError(requestError) || !productsLease.isCurrent() || !mountedRef.current) return;
+        setError(errorMessage(requestError));
+      });
+  }, [applyAccountsRequestError, applyLoadedAccounts, finishAccountsLease]);
 
   useEffect(() => {
     if (!selectedAccountId) {
-      setMarketplaces([]);
       return;
     }
-    void loadMarketplaces(selectedAccountId);
-  }, [loadMarketplaces, selectedAccountId]);
+    const accountId = selectedAccountId;
+    const lease = marketplaceGateRef.current.begin();
+    void amazonApi.listMarketplaces(accountId, lease.signal)
+      .then((result) => {
+        applyLoadedMarketplaces(accountId, result, lease);
+      })
+      .catch((requestError) => {
+        applyMarketplacesRequestError(accountId, requestError, lease);
+      })
+      .finally(() => {
+        finishMarketplacesLease(lease);
+      });
+  }, [
+    applyLoadedMarketplaces,
+    applyMarketplacesRequestError,
+    finishMarketplacesLease,
+    selectedAccountId,
+  ]);
 
   useEffect(() => {
     if (!selectedAccountId || !selectedMarketplaceId) {
       return;
     }
-    void loadListings(selectedAccountId, selectedMarketplaceId, 1);
-  }, [includeInactive, loadListings, selectedAccountId, selectedMarketplaceId]);
+    const accountId = selectedAccountId;
+    const marketplaceId = selectedMarketplaceId;
+    const expectedIncludeInactive = includeInactive;
+    const lease = listingGateRef.current.begin();
+    void amazonApi.listListings(
+      accountId,
+      marketplaceId,
+      {
+        page: 1,
+        pageSize: PAGE_SIZE,
+        includeInactive: expectedIncludeInactive,
+      },
+      lease.signal,
+    )
+      .then((result) => {
+        applyLoadedListings(accountId, marketplaceId, expectedIncludeInactive, result, lease);
+      })
+      .catch((requestError) => {
+        applyListingsRequestError(
+          accountId,
+          marketplaceId,
+          expectedIncludeInactive,
+          requestError,
+          lease,
+        );
+      })
+      .finally(() => {
+        finishListingsLease(lease);
+      });
+  }, [
+    applyListingsRequestError,
+    applyLoadedListings,
+    finishListingsLease,
+    includeInactive,
+    selectedAccountId,
+    selectedMarketplaceId,
+  ]);
 
   const startOAuth = async (intent: 'connect' | 'reauthorize', accountId?: string) => {
     setAction(intent === 'connect' ? 'connect' : `reauthorize:${accountId}`);
@@ -407,6 +530,8 @@ export default function AmazonConnectionsPage() {
       const result = await amazonApi.refreshMarketplaces(scope.accountId);
       if (!mountedRef.current || !isActionScopeActive(scope)) return;
       setNotice(`Marketplace refresh complete: ${result.items_written} updated.`);
+      setLoadingAccounts(true);
+      setLoadingMarketplaces(true);
       await Promise.all([loadAccounts(), loadMarketplaces(scope.accountId)]);
     } catch (requestError) {
       if (!mountedRef.current || !isActionScopeActive(scope)) return;
@@ -427,6 +552,7 @@ export default function AmazonConnectionsPage() {
       const result = await amazonApi.syncListings(scope.accountId, scope.marketplaceId!);
       if (!mountedRef.current || !isActionScopeActive(scope)) return;
       setNotice(`Listing sync complete: ${result.items_written} written, ${result.items_deactivated} deactivated.`);
+      setLoadingListings(true);
       await loadListings(scope.accountId, scope.marketplaceId!, 1);
     } catch (requestError) {
       if (!mountedRef.current || !isActionScopeActive(scope)) return;
@@ -451,9 +577,10 @@ export default function AmazonConnectionsPage() {
         productId,
       );
       if (!mountedRef.current || !isActionScopeActive(scope)) return;
-      setListings((current) =>
-        current.map((listing) => (listing.id === updated.id ? updated : listing)),
+      const nextListings = listingsRef.current.map((item) =>
+        item.id === updated.id ? updated : item,
       );
+      commitListings(listingsRef, setListings, nextListings);
       setNotice(productId ? 'Listing linked to a SellerAI product.' : 'Listing unlinked.');
     } catch (requestError) {
       if (!mountedRef.current || !isActionScopeActive(scope)) return;
@@ -771,8 +898,32 @@ export default function AmazonConnectionsPage() {
                     <div className="flex items-center justify-between border-t px-5 py-4 text-sm text-slate-600">
                       <span>Page {page} of {totalPages}</span>
                       <div className="flex gap-2">
-                        <button disabled={page <= 1 || loadingListings} onClick={() => selectedAccountId && selectedMarketplaceId && void loadListings(selectedAccountId, selectedMarketplaceId, page - 1)} className="rounded-lg border p-2 hover:bg-slate-50 disabled:opacity-40" aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></button>
-                        <button disabled={page >= totalPages || loadingListings} onClick={() => selectedAccountId && selectedMarketplaceId && void loadListings(selectedAccountId, selectedMarketplaceId, page + 1)} className="rounded-lg border p-2 hover:bg-slate-50 disabled:opacity-40" aria-label="Next page"><ChevronRight className="h-4 w-4" /></button>
+                        <button
+                          disabled={page <= 1 || loadingListings}
+                          onClick={() => {
+                            if (!selectedAccountId || !selectedMarketplaceId) return;
+                            setLoadingListings(true);
+                            setError(null);
+                            void loadListings(selectedAccountId, selectedMarketplaceId, page - 1);
+                          }}
+                          className="rounded-lg border p-2 hover:bg-slate-50 disabled:opacity-40"
+                          aria-label="Previous page"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <button
+                          disabled={page >= totalPages || loadingListings}
+                          onClick={() => {
+                            if (!selectedAccountId || !selectedMarketplaceId) return;
+                            setLoadingListings(true);
+                            setError(null);
+                            void loadListings(selectedAccountId, selectedMarketplaceId, page + 1);
+                          }}
+                          className="rounded-lg border p-2 hover:bg-slate-50 disabled:opacity-40"
+                          aria-label="Next page"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
                       </div>
                     </div>
                   )}
