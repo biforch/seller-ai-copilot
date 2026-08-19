@@ -694,10 +694,38 @@ def test_quality_workflow_alpine_candidate_audit_job() -> None:
     assert "evaluate_alpine_candidate_reports.py" in content
     assert "validate_alpine_candidate_wheel_manifest.py" in content
     assert "name: sellerai-alpine-candidate-${{ github.sha }}" in content
+    alpine_job = content.split("backend-alpine-candidate-audit:", 1)[1].split("\n  backend", 1)[0]
+    step_names = [
+        line.split("- name:", 1)[1].strip()
+        for line in alpine_job.splitlines()
+        if line.strip().startswith("- name:")
+    ]
+    policy_index = step_names.index("Evaluate Alpine candidate vulnerability policy")
+    wheel_amd64_index = step_names.index("Audit amd64 musllinux wheel install")
+    wheel_arm64_index = step_names.index("Audit arm64 musllinux wheel resolution")
+    wheel_validate_index = step_names.index("Validate Alpine candidate wheel manifests")
+    upload_index = step_names.index("Upload Alpine candidate audit artifacts")
+    cleanup_index = step_names.index("Cleanup Alpine candidate audit workspace")
+    assert wheel_amd64_index < policy_index
+    assert wheel_arm64_index < policy_index
+    assert wheel_validate_index < policy_index
+    assert policy_index < upload_index
+    assert upload_index < cleanup_index
+    wheel_amd64_block = alpine_job.split("- name: Audit amd64 musllinux wheel install", 1)[1].split("- name:", 1)[0]
+    wheel_arm64_block = alpine_job.split("- name: Audit arm64 musllinux wheel resolution", 1)[1].split("- name:", 1)[0]
+    assert "continue-on-error" not in wheel_amd64_block
+    assert "|| true" not in wheel_amd64_block
+    assert "continue-on-error" not in wheel_arm64_block
+    assert "|| true" not in wheel_arm64_block
+    assert "/var/run/docker.sock" not in wheel_amd64_block
     alpine_upload = content.split("- name: Upload Alpine candidate audit artifacts", 1)[1].split("- name:", 1)[0]
+    assert "if: always()" in alpine_upload
     assert ".tar" not in alpine_upload
     assert ".whl" not in alpine_upload
     assert "wheel-amd64.json" in alpine_upload
+    assert "wheel-arm64.json" in alpine_upload
+    assert "candidate-policy-summary.json" in alpine_upload
+    assert len([name for name in alpine_upload.splitlines() if ".json" in name]) == 7
     assert "docker push" not in content.split("backend-alpine-candidate-audit:", 1)[1]
     content = _read(FRONTEND_DOCKERFILE_PROD)
     deps_block = content.split("AS deps", 1)[1].split("AS builder", 1)[0]

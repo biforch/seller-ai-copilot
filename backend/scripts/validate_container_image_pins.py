@@ -84,6 +84,12 @@ ALPINE_SYFT_STEP_NAME = "Generate Alpine candidate CycloneDX SBOMs"
 CLEANUP_STEP_NAME = "Cleanup supply-chain scan workspace"
 ALPINE_CLEANUP_STEP_NAME = "Cleanup Alpine candidate audit workspace"
 ALPINE_ARTIFACT_STEP_NAME = "Upload Alpine candidate audit artifacts"
+ALPINE_WHEEL_AMD64_STEP = "Audit amd64 musllinux wheel install"
+ALPINE_WHEEL_ARM64_STEP = "Audit arm64 musllinux wheel resolution"
+ALPINE_WHEEL_VALIDATE_STEP = "Validate Alpine candidate wheel manifests"
+ALPINE_POLICY_STEP = "Evaluate Alpine candidate vulnerability policy"
+ALPINE_SBOM_VALIDATE_STEP = "Validate Alpine candidate SBOM artifacts"
+ALPINE_TRIVY_GENERATE_STEP = "Generate Alpine candidate Trivy reports"
 RUNTIME_SMOKE_STEP_NAME = "Validate backend production runtime environment"
 FRONTEND_RUNTIME_SMOKE_STEP_NAME = "Validate frontend production runtime environment"
 
@@ -721,6 +727,82 @@ def _validate_alpine_trivy_step(path: Path, content: str) -> list[Finding]:
     return findings
 
 
+def _extract_alpine_job_step_names(content: str) -> list[str]:
+    marker = f"{ALPINE_CANDIDATE_JOB_NAME}:"
+    if marker not in content:
+        return []
+    job_block = content.split(marker, 1)[1]
+    step_names: list[str] = []
+    for line in job_block.splitlines():
+        if re.match(r"^  [a-zA-Z0-9_-]+:\s*$", line):
+            break
+        match = re.match(r"^      - name: (.+)$", line)
+        if match:
+            step_names.append(match.group(1))
+    return step_names
+
+
+def _validate_alpine_step_order(path: Path, content: str) -> list[Finding]:
+    findings: list[Finding] = []
+    steps = _extract_alpine_job_step_names(content)
+    if not steps:
+        findings.append(Finding(path, 0, "Alpine candidate job must define ordered steps"))
+        return findings
+
+    required_order = (
+        ALPINE_SBOM_VALIDATE_STEP,
+        ALPINE_TRIVY_GENERATE_STEP,
+        ALPINE_WHEEL_AMD64_STEP,
+        ALPINE_WHEEL_ARM64_STEP,
+        ALPINE_WHEEL_VALIDATE_STEP,
+        ALPINE_POLICY_STEP,
+        ALPINE_ARTIFACT_STEP_NAME,
+        ALPINE_CLEANUP_STEP_NAME,
+    )
+    indices = {name: steps.index(name) for name in required_order if name in steps}
+    missing = [name for name in required_order if name not in indices]
+    if missing:
+        findings.append(Finding(path, 0, f"Alpine candidate job missing required steps: {', '.join(missing)}"))
+        return findings
+
+    ordered_pairs = (
+        (ALPINE_SBOM_VALIDATE_STEP, ALPINE_TRIVY_GENERATE_STEP),
+        (ALPINE_TRIVY_GENERATE_STEP, ALPINE_WHEEL_AMD64_STEP),
+        (ALPINE_WHEEL_AMD64_STEP, ALPINE_WHEEL_ARM64_STEP),
+        (ALPINE_WHEEL_ARM64_STEP, ALPINE_WHEEL_VALIDATE_STEP),
+        (ALPINE_WHEEL_VALIDATE_STEP, ALPINE_POLICY_STEP),
+        (ALPINE_POLICY_STEP, ALPINE_ARTIFACT_STEP_NAME),
+        (ALPINE_ARTIFACT_STEP_NAME, ALPINE_CLEANUP_STEP_NAME),
+    )
+    for earlier, later in ordered_pairs:
+        if indices[earlier] >= indices[later]:
+            findings.append(
+                Finding(path, 0, f"Alpine step order invalid: {earlier} must precede {later}")
+            )
+    return findings
+
+
+def _validate_alpine_wheel_steps(path: Path, content: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for step_name in (ALPINE_WHEEL_AMD64_STEP, ALPINE_WHEEL_ARM64_STEP):
+        block = _extract_step_run_block(content, step_name)
+        if block is None:
+            findings.append(Finding(path, 0, f"{step_name} must define a run block"))
+            continue
+        for token in ("continue-on-error", "|| true", "/var/run/docker.sock", "$HOME", "--env-file"):
+            if token in block:
+                findings.append(Finding(path, 0, f"{step_name} must not use {token}"))
+        if step_name == ALPINE_WHEEL_AMD64_STEP:
+            if "audit_alpine_candidate_wheels_amd64.py" not in block:
+                findings.append(Finding(path, 0, "amd64 wheel audit must invoke audit_alpine_candidate_wheels_amd64.py"))
+            if "alpine_wheel_audit_common.py" not in block:
+                findings.append(Finding(path, 0, "amd64 wheel audit must mount alpine_wheel_audit_common.py"))
+        if step_name == ALPINE_WHEEL_ARM64_STEP:
+            if "audit_alpine_candidate_wheels_arm64.py" not in block:
+                findings.append(Finding(path, 0, "arm64 wheel audit must invoke audit_alpine_candidate_wheels_arm64.py"))
+    return findings
+
+
 def _validate_alpine_cleanup_step(path: Path, content: str) -> list[Finding]:
     findings: list[Finding] = []
     marker = f"- name: {ALPINE_CLEANUP_STEP_NAME}"
@@ -999,6 +1081,8 @@ def _scan_workflow(path: Path, content: str) -> tuple[list[Finding], list[tuple[
         if "if: github.event_name == 'pull_request'" not in content:
             findings.append(Finding(path, 0, "Alpine candidate job must be pull_request gated"))
         findings.extend(_validate_alpine_trivy_step(path, content))
+        findings.extend(_validate_alpine_step_order(path, content))
+        findings.extend(_validate_alpine_wheel_steps(path, content))
         findings.extend(_validate_alpine_cleanup_step(path, content))
         findings.extend(_validate_alpine_artifact_upload(path, content))
 

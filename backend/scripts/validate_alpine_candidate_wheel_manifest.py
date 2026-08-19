@@ -11,6 +11,8 @@ from pathlib import Path
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_WHEELS = 500
 MAX_STRING_LENGTH = 512
+MAX_JSON_DEPTH = 24
+MAX_JSON_NODES = 5000
 
 REQUIRED_NATIVE_PACKAGES = frozenset(
     {
@@ -33,7 +35,7 @@ SECRET_PATTERNS = (
 )
 URL_USERINFO_PATTERN = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")
 HOST_PATH_PATTERN = re.compile(
-    r"(^/Users/|^/home/runner/work/|^[A-Za-z]:\\Users\\|^\$\{RUNNER_TEMP\})"
+    r"(^/Users/|^/home/runner/work/|^[A-Za-z]:\\Users\\|^\$\{RUNNER_TEMP\}|^/input/|^/output/)"
 )
 SENSITIVE_KEY_PATTERN = re.compile(
     r"(?i)(password|secret|token|api[_-]?key|authorization|credential|oauth|jwt|private[_-]?key)$"
@@ -41,6 +43,7 @@ SENSITIVE_KEY_PATTERN = re.compile(
 CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+$")
 
 SUCCESS_MESSAGE = "Alpine candidate wheel manifest validation passed"
 
@@ -66,6 +69,28 @@ def _inspect_string(value: str, filename: str) -> list[Finding]:
             findings.append(Finding(filename, "manifest contains forbidden secret-like content"))
             break
     return findings
+
+
+def _count_json_nodes(value: object, *, depth: int = 0) -> tuple[int, int]:
+    if depth > MAX_JSON_DEPTH:
+        return MAX_JSON_NODES + 1, depth
+    if isinstance(value, dict):
+        count = 1
+        max_depth = depth
+        for child in value.values():
+            child_count, child_depth = _count_json_nodes(child, depth=depth + 1)
+            count += child_count
+            max_depth = max(max_depth, child_depth)
+        return count, max_depth
+    if isinstance(value, list):
+        count = 1
+        max_depth = depth
+        for item in value:
+            child_count, child_depth = _count_json_nodes(item, depth=depth + 1)
+            count += child_count
+            max_depth = max(max_depth, child_depth)
+        return count, max_depth
+    return 1, depth
 
 
 def _validate_wheel_entry(entry: object, filename: str, index: int) -> list[Finding]:
@@ -108,6 +133,9 @@ def _validate_wheel_entry(entry: object, filename: str, index: int) -> list[Find
 
 def _inspect_manifest_value(value: object, filename: str, *, depth: int = 0) -> list[Finding]:
     findings: list[Finding] = []
+    if depth > MAX_JSON_DEPTH:
+        findings.append(Finding(filename, "manifest exceeds maximum JSON depth"))
+        return findings
     if isinstance(value, str):
         findings.extend(_inspect_string(value, filename))
         return findings
@@ -123,8 +151,35 @@ def _inspect_manifest_value(value: object, filename: str, *, depth: int = 0) -> 
     return findings
 
 
+def _validate_common_fields(payload: dict[str, object], filename: str) -> list[Finding]:
+    findings: list[Finding] = []
+    if payload.get("schema_version") != 1:
+        findings.append(Finding(filename, "schema_version must be 1"))
+    architecture = payload.get("architecture")
+    if filename == "wheel-amd64.json" and architecture != "amd64":
+        findings.append(Finding(filename, "architecture must be amd64"))
+    if filename == "wheel-arm64.json" and architecture != "arm64":
+        findings.append(Finding(filename, "architecture must be arm64"))
+    if payload.get("python_version") != "3.11":
+        findings.append(Finding(filename, "python_version must be 3.11"))
+    if payload.get("musl") is not True:
+        findings.append(Finding(filename, "musl must be true"))
+    req_sha = payload.get("requirements_sha256")
+    if not isinstance(req_sha, str) or not SHA256_PATTERN.fullmatch(req_sha):
+        findings.append(Finding(filename, "requirements_sha256 must be lowercase hex sha256"))
+    sdist_count = payload.get("sdist_count")
+    if sdist_count != 0:
+        findings.append(Finding(filename, "sdist_count must be 0"))
+    reason_code = payload.get("reason_code")
+    if not isinstance(reason_code, str) or not REASON_CODE_PATTERN.fullmatch(reason_code):
+        findings.append(Finding(filename, "reason_code must be uppercase token"))
+    return findings
+
+
 def _validate_manifest_file(path: Path) -> list[Finding]:
     filename = path.name
+    if path.is_symlink():
+        return [Finding(filename, "wheel manifest must not be a symlink")]
     if not path.is_file():
         return [Finding(filename, "required wheel manifest is missing")]
     raw = path.read_bytes()
@@ -138,11 +193,15 @@ def _validate_manifest_file(path: Path) -> list[Finding]:
     if not isinstance(payload, dict):
         return [Finding(filename, "manifest root must be a JSON object")]
 
+    node_count, max_depth = _count_json_nodes(payload)
     findings: list[Finding] = []
+    if node_count > MAX_JSON_NODES:
+        findings.append(Finding(filename, "manifest exceeds maximum JSON node count"))
+    if max_depth > MAX_JSON_DEPTH:
+        findings.append(Finding(filename, "manifest exceeds maximum JSON depth"))
+
     findings.extend(_inspect_manifest_value(payload, filename))
-    schema_version = payload.get("schema_version")
-    if schema_version != 1:
-        findings.append(Finding(filename, "schema_version must be 1"))
+    findings.extend(_validate_common_fields(payload, filename))
 
     wheels = payload.get("wheels")
     if not isinstance(wheels, list):
@@ -152,6 +211,10 @@ def _validate_manifest_file(path: Path) -> list[Finding]:
     if not wheels:
         findings.append(Finding(filename, "wheels must not be empty"))
 
+    wheel_count = payload.get("wheel_count")
+    if wheel_count != len(wheels):
+        findings.append(Finding(filename, "wheel_count must match wheels list length"))
+
     packages_present: set[str] = set()
     for index, entry in enumerate(wheels):
         findings.extend(_validate_wheel_entry(entry, filename, index))
@@ -159,10 +222,17 @@ def _validate_manifest_file(path: Path) -> list[Finding]:
             packages_present.add(entry["package"].lower())
 
     if filename == "wheel-amd64.json":
+        if payload.get("download_status") != "ok":
+            findings.append(Finding(filename, "download_status must be ok"))
         if payload.get("install_status") != "ok":
             findings.append(Finding(filename, "install_status must be ok"))
-        if payload.get("pip_check") != "ok":
-            findings.append(Finding(filename, "pip_check must be ok"))
+        pip_check_status = payload.get("pip_check_status")
+        if pip_check_status != "ok":
+            findings.append(Finding(filename, "pip_check_status must be ok"))
+        if payload.get("import_status") != "ok":
+            findings.append(Finding(filename, "import_status must be ok"))
+        if payload.get("smoke_status") != "ok":
+            findings.append(Finding(filename, "smoke_status must be ok"))
         imports = payload.get("imports")
         if not isinstance(imports, list) or not imports:
             findings.append(Finding(filename, "imports must be a non-empty list"))
@@ -178,8 +248,12 @@ def _validate_manifest_file(path: Path) -> list[Finding]:
             for key, value in smoke.items():
                 if value != "ok":
                     findings.append(Finding(filename, f"smoke check {key} must be ok"))
+        if payload.get("reason_code") != "WHEEL_AUDIT_OK":
+            findings.append(Finding(filename, "reason_code must be WHEEL_AUDIT_OK"))
 
     if filename == "wheel-arm64.json":
+        if payload.get("mode") != "resolution_only":
+            findings.append(Finding(filename, "mode must be resolution_only"))
         if payload.get("resolution_status") != "ok":
             findings.append(Finding(filename, "resolution_status must be ok"))
         missing = payload.get("missing_packages")
@@ -188,6 +262,8 @@ def _validate_manifest_file(path: Path) -> list[Finding]:
         for entry in wheels if isinstance(wheels, list) else []:
             if isinstance(entry, dict) and entry.get("import_status") != "NOT_EXECUTED_CROSS_ARCH":
                 findings.append(Finding(filename, "arm64 import_status must remain NOT_EXECUTED_CROSS_ARCH"))
+        if payload.get("reason_code") != "WHEEL_RESOLUTION_OK":
+            findings.append(Finding(filename, "reason_code must be WHEEL_RESOLUTION_OK"))
 
     for package in REQUIRED_NATIVE_PACKAGES:
         normalized = package.lower()
@@ -199,8 +275,23 @@ def _validate_manifest_file(path: Path) -> list[Finding]:
 
 def validate_wheel_manifests(directory: Path) -> list[Finding]:
     findings: list[Finding] = []
+    manifests: dict[str, dict[str, object]] = {}
     for filename in ("wheel-amd64.json", "wheel-arm64.json"):
-        findings.extend(_validate_manifest_file(directory / filename))
+        path = directory / filename
+        file_findings = _validate_manifest_file(path)
+        findings.extend(file_findings)
+        if path.is_file() and not path.is_symlink():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    manifests[filename] = payload
+            except json.JSONDecodeError:
+                pass
+
+    amd64_sha = manifests.get("wheel-amd64.json", {}).get("requirements_sha256")
+    arm64_sha = manifests.get("wheel-arm64.json", {}).get("requirements_sha256")
+    if isinstance(amd64_sha, str) and isinstance(arm64_sha, str) and amd64_sha != arm64_sha:
+        findings.append(Finding("wheel-arm64.json", "requirements_sha256 must match wheel-amd64 manifest"))
     return findings
 
 

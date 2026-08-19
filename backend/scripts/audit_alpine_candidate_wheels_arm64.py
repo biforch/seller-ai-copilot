@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from alpine_wheel_audit_common import (
+    normalize_package_name,
+    parse_direct_requirements,
+    requirements_sha256,
+)
 
 DEFAULT_REQUIREMENTS = Path(__file__).resolve().parents[1] / "requirements.txt"
 
@@ -20,19 +25,6 @@ PLATFORM_TAGS = (
 PYTHON_VERSION = "3.11"
 ABIS = ("cp311", "cp311-abi3", "abi3", "none")
 
-REQUIRED_NATIVE_PACKAGES = frozenset(
-    {
-        "cryptography",
-        "psycopg2-binary",
-        "bcrypt",
-        "pydantic-core",
-        "cffi",
-        "uvloop",
-        "httptools",
-        "watchfiles",
-    }
-)
-
 
 @dataclass(frozen=True)
 class WheelRecord:
@@ -40,7 +32,6 @@ class WheelRecord:
     version: str
     wheel_tag: str
     sha256: str
-    filename: str
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -68,13 +59,12 @@ def _wheel_record(path: Path) -> WheelRecord:
     stem = name[: -len(".whl")]
     parts = stem.split("-")
     if len(parts) < 5:
-        raise ValueError(f"unexpected wheel filename: {name}")
+        raise ValueError("unexpected wheel filename")
     return WheelRecord(
         package=parts[0].replace("_", "-"),
         version=parts[1],
         wheel_tag=parts[-1],
         sha256=_sha256_file(path),
-        filename=name,
     )
 
 
@@ -92,18 +82,19 @@ def _download_arm64_wheels(requirements: Path, wheel_dir: Path) -> tuple[list[Wh
         f"--python-version={PYTHON_VERSION}",
         "--implementation=cp",
     ]
-    for platform in PLATFORM_TAGS:
-        command.extend(["--platform", platform])
+    for platform_tag in PLATFORM_TAGS:
+        command.extend(["--platform", platform_tag])
     for abi in ABIS:
         command.extend(["--abi", abi])
 
     completed = subprocess.run(command, check=False, capture_output=True, text=True)
     if completed.returncode != 0:
-        raise RuntimeError((completed.stderr or completed.stdout or "pip download failed").strip())
+        raise RuntimeError("pip download failed")
 
     records = [_wheel_record(path) for path in sorted(wheel_dir.glob("*.whl"))]
-    if any(path.suffix != ".whl" for path in wheel_dir.iterdir()):
-        raise RuntimeError("non-wheel artifact downloaded")
+    sdist_count = len(list(wheel_dir.glob("*.tar.gz"))) + len(list(wheel_dir.glob("*.zip")))
+    if sdist_count or any(path.suffix != ".whl" for path in wheel_dir.iterdir()):
+        raise RuntimeError("sdist artifact present")
 
     platforms_used = list(PLATFORM_TAGS)
     if not any("musllinux_1_2_aarch64" in record.wheel_tag for record in records):
@@ -111,16 +102,13 @@ def _download_arm64_wheels(requirements: Path, wheel_dir: Path) -> tuple[list[Wh
     return records, platforms_used
 
 
-def _resolve_requirements_packages(requirements: Path) -> set[str]:
-    names: set[str] = set()
-    for line in requirements.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        token = re.split(r"[<>=!\[;]", stripped, maxsplit=1)[0].strip()
-        if token:
-            names.add(token.lower().replace("_", "-"))
-    return names
+def _missing_direct_requirements(requirements: Path, records: list[WheelRecord]) -> list[str]:
+    downloaded = {normalize_package_name(record.package) for record in records}
+    missing: list[str] = []
+    for package in parse_direct_requirements(requirements):
+        if package not in downloaded:
+            missing.append(package)
+    return sorted(missing)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -131,29 +119,52 @@ def main(argv: list[str] | None = None) -> int:
         print("requirements file missing", file=sys.stderr)
         return 2
 
-    with tempfile.TemporaryDirectory(prefix="alpine-wheel-arm64-") as tmp:
-        wheel_dir = Path(tmp)
-        records, platforms_used = _download_arm64_wheels(requirements, wheel_dir)
-        downloaded = {record.package.lower().replace("_", "-") for record in records}
-        missing = sorted(
-            pkg
-            for pkg in REQUIRED_NATIVE_PACKAGES
-            if pkg not in downloaded
-        )
-        payload = {
-            "schema_version": 1,
-            "architecture": "arm64",
-            "platform": "linux/arm64",
-            "resolution_status": "ok" if not missing else "failed",
-            "platform_tags_used": platforms_used,
-            "wheels": [record.as_dict() for record in records],
-            "missing_packages": missing,
-        }
+    req_sha = requirements_sha256(requirements)
+    direct_requirements = parse_direct_requirements(requirements)
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "architecture": "arm64",
+        "platform": "linux/arm64",
+        "python_version": PYTHON_VERSION,
+        "musl": True,
+        "mode": "resolution_only",
+        "requirements_sha256": req_sha,
+        "resolution_status": "failed",
+        "reason_code": "WHEEL_RESOLUTION_FAILED",
+        "platform_tags_used": list(PLATFORM_TAGS),
+        "wheel_count": 0,
+        "sdist_count": 0,
+        "resolved_package_count": len(direct_requirements),
+        "missing_packages": direct_requirements,
+        "wheels": [],
+    }
+
+    missing: list[str] = direct_requirements
+    try:
+        with tempfile.TemporaryDirectory(prefix="alpine-wheel-arm64-") as tmp:
+            wheel_dir = Path(tmp)
+            records, platforms_used = _download_arm64_wheels(requirements, wheel_dir)
+            missing = _missing_direct_requirements(requirements, records)
+            payload.update(
+                {
+                    "platform_tags_used": platforms_used,
+                    "wheel_count": len(records),
+                    "sdist_count": 0,
+                    "missing_packages": missing,
+                    "wheels": [record.as_dict() for record in records],
+                    "resolution_status": "ok" if not missing else "failed",
+                    "reason_code": "WHEEL_RESOLUTION_OK" if not missing else "MISSING_BINARY_WHEEL",
+                }
+            )
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        raise
 
     if missing:
-        print(f"arm64 wheel resolution missing packages: {', '.join(missing)}", file=sys.stderr)
+        print("arm64 wheel resolution missing packages", file=sys.stderr)
         return 1
     print("wheel-arm64 manifest written")
     return 0

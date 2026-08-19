@@ -430,8 +430,6 @@ jobs:
             scan_status=1
           fi
           exit "${scan_status}"
-      - name: Evaluate Alpine candidate vulnerability policy
-        run: python backend/scripts/evaluate_alpine_candidate_reports.py "${RUNNER_TEMP}/sellerai-alpine-audit/output"
       - name: Audit amd64 musllinux wheel install
         run: |
           set -euo pipefail
@@ -443,9 +441,10 @@ jobs:
             --security-opt no-new-privileges \
             -v "${GITHUB_WORKSPACE}/backend/requirements.txt:/input/requirements.txt:ro" \
             -v "${GITHUB_WORKSPACE}/backend/scripts/audit_alpine_candidate_wheels_amd64.py:/tmp/audit_alpine_candidate_wheels_amd64.py:ro" \
+            -v "${GITHUB_WORKSPACE}/backend/scripts/alpine_wheel_audit_common.py:/tmp/alpine_wheel_audit_common.py:ro" \
             -v "${ALPINE_AUDIT_OUTPUT}:/output:rw" \
             "${ALPINE_CANDIDATE_AMD64_REF}" \
-            python /tmp/audit_alpine_candidate_wheels_amd64.py
+            sh -c 'PYTHONPATH=/tmp python /tmp/audit_alpine_candidate_wheels_amd64.py'
       - name: Audit arm64 musllinux wheel resolution
         run: |
           set -euo pipefail
@@ -454,6 +453,8 @@ jobs:
             "${RUNNER_TEMP}/sellerai-alpine-audit/output/wheel-arm64.json"
       - name: Validate Alpine candidate wheel manifests
         run: python backend/scripts/validate_alpine_candidate_wheel_manifest.py "${RUNNER_TEMP}/sellerai-alpine-audit/output"
+      - name: Evaluate Alpine candidate vulnerability policy
+        run: python backend/scripts/evaluate_alpine_candidate_reports.py "${RUNNER_TEMP}/sellerai-alpine-audit/output"
       - name: Upload Alpine candidate audit artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
