@@ -1,25 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { apiClient } from '@/app/api/client';
-import { TOKEN_KEY, USER_KEY } from '@/lib/constants';
-import type { LoginResponse, User } from '@/types';
+import {
+  clearAuthSession,
+  getClientSnapshot,
+  getServerSnapshot,
+  hasAuthToken,
+  persistAuthSession,
+  subscribeAuth,
+} from '@/lib/auth-session';
+import type { LoginResponse } from '@/types';
 
 export function useAuth() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const stored = localStorage.getItem(USER_KEY);
-    if (token && stored) {
-      setUser(JSON.parse(stored));
-    }
-    setIsLoading(false);
-  }, []);
+  const snapshot = useSyncExternalStore(subscribeAuth, getClientSnapshot, getServerSnapshot);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -27,12 +24,10 @@ export function useAuth() {
         email,
         password,
       });
-      localStorage.setItem(TOKEN_KEY, data.access_token);
-      localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-      setUser(data.user);
+      persistAuthSession(data.access_token, data.user);
       router.push('/dashboard');
     },
-    [router]
+    [router],
   );
 
   const register = useCallback(async (email: string, password: string) => {
@@ -41,20 +36,24 @@ export function useAuth() {
   }, [router]);
 
   const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    setUser(null);
+    clearAuthSession();
     router.push('/');
   }, [router]);
 
   const requireAuth = useCallback(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) {
+    if (!hasAuthToken()) {
       router.push('/login');
       return false;
     }
     return true;
   }, [router]);
 
-  return { user, isLoading, login, register, logout, requireAuth };
+  return {
+    user: snapshot.user,
+    isLoading: snapshot.isLoading,
+    login,
+    register,
+    logout,
+    requireAuth,
+  };
 }
