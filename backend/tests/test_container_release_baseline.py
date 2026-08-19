@@ -922,6 +922,8 @@ def test_nginx_rc_oauth_callback_access_log_isolated() -> None:
 
     callback_block = nginx_conf[callback_block_start:api_block_start]
     assert "access_log off;" in callback_block
+    assert "limit_req zone=oauth_callback_per_ip burst=10 nodelay;" in callback_block
+    assert "limit_req_status 429;" in callback_block
     assert "proxy_pass http://rc_backend;" in callback_block
     assert "proxy_set_header Host $host;" in callback_block
     assert "proxy_set_header X-Real-IP $remote_addr;" in callback_block
@@ -932,6 +934,10 @@ def test_nginx_rc_oauth_callback_access_log_isolated() -> None:
     assert "access_log" not in callback_block.replace("access_log off;", "")
     assert "state-canary-secret" not in nginx_conf
     assert "spapi_oauth_code" not in nginx_conf
+    assert (
+        "limit_req_zone $binary_remote_addr "
+        "zone=oauth_callback_per_ip:10m rate=30r/m;"
+    ) in nginx_conf
 
 
 def test_runbook_documents_403_and_container_pg_dump() -> None:
@@ -946,6 +952,23 @@ def test_runbook_documents_403_and_container_pg_dump() -> None:
     assert "POSTGRES_USER" in runbook.split("## 3.")[1].split("## 4.")[0]
     assert "must match POSTGRES_USER" in runbook or "must match `POSTGRES_USER`" in runbook
     assert "32 characters" in runbook
+
+
+def test_nginx_rc_sets_browser_security_headers_without_false_hsts() -> None:
+    nginx_conf = _read(REPO_ROOT / "nginx" / "nginx.rc.conf")
+    assert 'add_header Content-Security-Policy "' in nginx_conf
+    assert "default-src 'self'" in nginx_conf
+    assert "object-src 'none'" in nginx_conf
+    assert "frame-ancestors 'none'" in nginx_conf
+    assert 'add_header Referrer-Policy "strict-origin-when-cross-origin" always;' in nginx_conf
+    assert 'add_header X-Content-Type-Options "nosniff" always;' in nginx_conf
+    assert 'add_header X-Frame-Options "DENY" always;' in nginx_conf
+    assert 'add_header Permissions-Policy "' in nginx_conf
+    assert "Strict-Transport-Security" not in nginx_conf
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        location = nginx_conf.split(f"location {path} {{", 1)[1].split("}", 1)[0]
+        assert "return 404;" in location
+        assert "proxy_pass" not in location
 
 
 def test_alembic_head_unchanged() -> None:

@@ -58,8 +58,9 @@ app = FastAPI(
     title="SellerAI Copilot API",
     description="AI-powered eCommerce Assistant for Global Sellers",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if settings.api_docs_enabled else None,
+    redoc_url="/redoc" if settings.api_docs_enabled else None,
+    openapi_url="/openapi.json" if settings.api_docs_enabled else None,
 )
 
 
@@ -249,12 +250,14 @@ def readiness_check(db: Session = Depends(get_db)):
 
 @app.get("/")
 async def root():
+    data = {
+        "name": settings.APP_NAME,
+        "version": "1.0.0",
+    }
+    if settings.api_docs_enabled:
+        data["docs"] = "/docs"
     return success_response(
-        data={
-            "name": settings.APP_NAME,
-            "docs": "/docs",
-            "version": "1.0.0",
-        },
+        data=data,
         message="Welcome to SellerAI Copilot API",
     )
 

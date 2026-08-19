@@ -16,6 +16,7 @@ from app.core.exceptions import (
     AMAZON_OAUTH_MARKETPLACE_PUBLIC_MESSAGE,
     public_message_for_amazon_error_code,
 )
+from app.core.rate_limit import limiter
 from app.integrations.amazon.config import AmazonEndpointMode, AmazonSettings
 from app.integrations.amazon.exceptions import (
     AMAZON_ACCOUNT_NOT_FOUND,
@@ -60,6 +61,13 @@ FIXED_START_URL = (
     "https://sellercentral.amazon.com/apps/authorize/consent"
     f"?application_id=app-id&state={CANARY_STATE}&version=beta"
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_oauth_rate_limit_storage():
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 class FakeOAuthService:
@@ -243,6 +251,24 @@ def test_start_connect_success(client, user_factory, auth_header, fake_oauth_ser
     _assert_start_cache_headers(response)
     assert len(fake_oauth_service.start_calls) == 1
     assert fake_oauth_service.start_calls[0]["user_id"] == user.id
+
+
+def test_start_rate_limit_rejects_before_additional_service_call(
+    client,
+    user_factory,
+    auth_header,
+    fake_oauth_service: FakeOAuthService,
+):
+    user = user_factory("oauth-api-start-limit@example.com")
+    headers = auth_header(user)
+    responses = [
+        client.post(START_URL, headers=headers, json=_start_body()) for _ in range(6)
+    ]
+
+    assert [response.status_code for response in responses[:5]] == [200] * 5
+    assert responses[5].status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert len(fake_oauth_service.start_calls) == 5
+    assert CANARY_STATE not in responses[5].text
 
 
 def test_start_reauthorize_success(client, user_factory, auth_header, fake_oauth_service: FakeOAuthService):

@@ -90,6 +90,10 @@ class Settings(BaseSettings):
         return self.ENVIRONMENT in {"development", "testing"}
 
     @property
+    def api_docs_enabled(self) -> bool:
+        return self.is_dev_like
+
+    @property
     def amazon_settings(self) -> AmazonSettings:
         return AmazonSettings(
             enabled=self.AMAZON_SP_API_ENABLED,
@@ -152,6 +156,10 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_API_KEY is required")
         if self.DEBUG:
             raise ValueError("DEBUG must remain false outside development/testing")
+        if "*" in self.cors_origins_list:
+            raise ValueError(
+                "CORS_ORIGINS must not contain a wildcard outside development/testing"
+            )
         _ = self.amazon_settings
         return self
 

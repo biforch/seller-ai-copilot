@@ -134,7 +134,7 @@ docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml logs m
 | Nginx (public) | `curl -fsS http://127.0.0.1:8080/health` |
 | Backend liveness | `curl -fsS http://127.0.0.1:8080/health` |
 | Backend DB readiness | `curl -fsS http://127.0.0.1:8080/health/ready` |
-| OpenAPI | `curl -fsS http://127.0.0.1:8080/openapi.json` |
+| OpenAPI | Expected `404` in staging/production (`/docs`, `/redoc`, and `/openapi.json` are disabled) |
 | Frontend login | `curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/login` |
 
 Container health:
@@ -184,7 +184,10 @@ parameters (`state`, `spapi_oauth_code`, `selling_partner_id`, `error`,
 RC nginx (`nginx/nginx.rc.conf`) defines an exact-match callback location with
 `access_log off;` before the generic `/api/` proxy block. The request is still
 proxied to `rc_backend` with the original query string; only the nginx access log
-line is suppressed.
+line is suppressed. The same exact location enforces a per-source-IP callback
+rate limit before proxying. OAuth start has a separate authenticated application
+limit keyed by a one-way digest of the bearer credential; neither limiter logs or
+stores the credential or callback query.
 
 The backend installs a Uvicorn `uvicorn.access` filter at startup
 (`app/core/access_log_safety.py`) that drops access-log records for the exact
@@ -198,6 +201,24 @@ logging that prints full request URLs for OAuth traffic.
 Log acceptance for callback isolation must use fake canary values in tests only.
 Never paste real OAuth codes, refresh tokens, raw state tokens, or seller IDs
 into runbooks, tickets, or CI artifacts.
+
+### Browser response hardening
+
+The RC nginx edge adds CSP, clickjacking, MIME-sniffing, referrer, and browser
+capability headers to all responses. The CSP intentionally permits inline scripts
+and styles required by the current Next.js production output; it limits external
+origins but does not eliminate the separate risk of keeping bearer tokens in
+browser storage. Treat a future HttpOnly-cookie migration as a public-production
+security gate, not as completed by these headers.
+
+This stack listens on loopback HTTP only. It deliberately does not emit HSTS.
+Any public deployment must terminate approved HTTPS before the application and
+set HSTS at that HTTPS edge after domain/subdomain readiness is verified. The
+external edge must preserve the callback access-log suppression and rate limit.
+
+In staging and production, backend startup rejects wildcard `CORS_ORIGINS`, and
+FastAPI does not expose `/docs`, `/redoc`, or `/openapi.json`. Use explicit HTTPS
+origins in public environments.
 
 ## 12. Stop stack
 

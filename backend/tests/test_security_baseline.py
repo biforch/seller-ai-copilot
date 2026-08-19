@@ -43,6 +43,42 @@ def test_production_rejects_debug_true():
         )
 
 
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_live_environments_reject_wildcard_cors(environment):
+    with pytest.raises(ValueError, match="CORS_ORIGINS"):
+        Settings(
+            _env_file=None,
+            ENVIRONMENT=environment,
+            DATABASE_URL="postgresql://example.com:5432/sellerai_live",
+            JWT_SECRET_KEY="x" * 32,
+            OPENAI_API_KEY="test-openai-key",
+            CORS_ORIGINS="*",
+        )
+
+
+@pytest.mark.parametrize(
+    ("environment", "enabled"),
+    [
+        ("development", True),
+        ("testing", True),
+        ("staging", False),
+        ("production", False),
+    ],
+)
+def test_api_docs_are_only_enabled_in_dev_like_environments(environment, enabled):
+    kwargs = {
+        "_env_file": None,
+        "ENVIRONMENT": environment,
+        "DATABASE_URL": "postgresql://example.com:5432/sellerai_test"
+        if environment == "testing"
+        else "postgresql://example.com:5432/sellerai_live",
+        "JWT_SECRET_KEY": "x" * 32,
+        "OPENAI_API_KEY": "test-openai-key",
+    }
+    settings = Settings(**kwargs)
+    assert settings.api_docs_enabled is enabled
+
+
 def test_invalid_environment_value_is_rejected():
     with pytest.raises(ValidationError):
         Settings(
