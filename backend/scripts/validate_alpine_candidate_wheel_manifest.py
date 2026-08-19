@@ -44,6 +44,9 @@ CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REASON_CODE_PATTERN = re.compile(r"^[A-Z0-9_]+$")
+WHEEL_FILENAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*-[0-9][A-Za-z0-9._-]*-.*\.whl$")
+WHEEL_MANIFEST_SCHEMA_VERSION = 2
+UNIVERSAL_WHEEL_TAGS = frozenset({"py3-none-any", "py311-none-any"})
 
 SUCCESS_MESSAGE = "Alpine candidate wheel manifest validation passed"
 
@@ -52,6 +55,56 @@ SUCCESS_MESSAGE = "Alpine candidate wheel manifest validation passed"
 class Finding:
     filename: str
     reason: str
+
+
+def _is_forbidden_wheel_tag(tag: str) -> bool:
+    lowered = tag.lower()
+    if lowered == "any":
+        return True
+    if "manylinux" in lowered:
+        return True
+    if lowered.startswith("win") or "_win_" in lowered:
+        return True
+    if "macosx" in lowered:
+        return True
+    return False
+
+
+def _tag_compatible_with_amd64(tag: str) -> bool:
+    if _is_forbidden_wheel_tag(tag):
+        return False
+    if tag in UNIVERSAL_WHEEL_TAGS:
+        return True
+    if "musllinux" in tag and "x86_64" in tag:
+        return True
+    if "aarch64" in tag or "arm64" in tag:
+        return False
+    return False
+
+
+def _tag_compatible_with_arm64(tag: str) -> bool:
+    if _is_forbidden_wheel_tag(tag):
+        return False
+    if tag in UNIVERSAL_WHEEL_TAGS:
+        return True
+    if "musllinux" in tag and ("aarch64" in tag or "arm64" in tag):
+        return True
+    if "x86_64" in tag:
+        return False
+    return False
+
+
+def wheel_tags_compatible_with_architecture(wheel_tags: list[str], architecture: str) -> bool:
+    if not wheel_tags:
+        return False
+    checker = _tag_compatible_with_amd64 if architecture == "amd64" else _tag_compatible_with_arm64
+    return any(checker(tag) for tag in wheel_tags)
+
+
+def _manifest_architecture(filename: str) -> str:
+    if filename.startswith("wheel-amd64"):
+        return "amd64"
+    return "arm64"
 
 
 def _inspect_string(value: str, filename: str) -> list[Finding]:
@@ -97,22 +150,44 @@ def _validate_wheel_entry(entry: object, filename: str, index: int) -> list[Find
     findings: list[Finding] = []
     if not isinstance(entry, dict):
         return [Finding(filename, f"wheels[{index}] must be an object")]
+    if "wheel_tag" in entry:
+        findings.append(Finding(filename, f"wheels[{index}] must not use legacy wheel_tag field"))
     package = entry.get("package")
     version = entry.get("version")
-    wheel_tag = entry.get("wheel_tag")
+    wheel_filename = entry.get("filename")
+    wheel_tags = entry.get("wheel_tags")
     sha256 = entry.get("sha256")
     binary = entry.get("binary")
     source = entry.get("source")
     for field_name, value in (
         ("package", package),
         ("version", version),
-        ("wheel_tag", wheel_tag),
+        ("filename", wheel_filename),
         ("sha256", sha256),
     ):
         if not isinstance(value, str) or not value.strip():
             findings.append(Finding(filename, f"wheels[{index}].{field_name} must be a non-empty string"))
         elif isinstance(value, str):
             findings.extend(_inspect_string(value, filename))
+    if isinstance(wheel_filename, str) and not WHEEL_FILENAME_PATTERN.fullmatch(wheel_filename):
+        findings.append(Finding(filename, f"wheels[{index}].filename has invalid wheel filename format"))
+    if not isinstance(wheel_tags, list) or not wheel_tags:
+        findings.append(Finding(filename, f"wheels[{index}].wheel_tags must be a non-empty list"))
+    elif isinstance(wheel_tags, list):
+        if len(wheel_tags) != len(set(wheel_tags)):
+            findings.append(Finding(filename, f"wheels[{index}].wheel_tags must be deduplicated"))
+        if wheel_tags != sorted(wheel_tags):
+            findings.append(Finding(filename, f"wheels[{index}].wheel_tags must be sorted"))
+        normalized_tags: list[str] = []
+        for tag_index, tag in enumerate(wheel_tags):
+            if not isinstance(tag, str) or not tag.strip():
+                findings.append(Finding(filename, f"wheels[{index}].wheel_tags[{tag_index}] must be a non-empty string"))
+                continue
+            findings.extend(_inspect_string(tag, filename))
+            normalized_tags.append(tag)
+        architecture = _manifest_architecture(filename)
+        if normalized_tags and not wheel_tags_compatible_with_architecture(normalized_tags, architecture):
+            findings.append(Finding(filename, f"wheels[{index}] has no architecture-compatible wheel tag"))
     if isinstance(package, str) and not PACKAGE_NAME_PATTERN.fullmatch(package):
         findings.append(Finding(filename, f"wheels[{index}].package has invalid format"))
     if isinstance(sha256, str) and not SHA256_PATTERN.fullmatch(sha256):
@@ -121,13 +196,6 @@ def _validate_wheel_entry(entry: object, filename: str, index: int) -> list[Find
         findings.append(Finding(filename, f"wheels[{index}] must be binary wheel"))
     if source is not False:
         findings.append(Finding(filename, f"wheels[{index}] must not be source distribution"))
-    if isinstance(wheel_tag, str):
-        if filename.startswith("wheel-amd64") and "x86_64" not in wheel_tag and "amd64" not in wheel_tag:
-            if "manylinux" not in wheel_tag and "py3-none-any" not in wheel_tag:
-                findings.append(Finding(filename, f"wheels[{index}] tag is not amd64-compatible"))
-        if filename.startswith("wheel-arm64") and "aarch64" not in wheel_tag and "arm64" not in wheel_tag:
-            if "py3-none-any" not in wheel_tag and "manylinux" not in wheel_tag:
-                findings.append(Finding(filename, f"wheels[{index}] tag is not arm64-compatible"))
     return findings
 
 
@@ -153,8 +221,8 @@ def _inspect_manifest_value(value: object, filename: str, *, depth: int = 0) -> 
 
 def _validate_common_fields(payload: dict[str, object], filename: str) -> list[Finding]:
     findings: list[Finding] = []
-    if payload.get("schema_version") != 1:
-        findings.append(Finding(filename, "schema_version must be 1"))
+    if payload.get("schema_version") != WHEEL_MANIFEST_SCHEMA_VERSION:
+        findings.append(Finding(filename, f"schema_version must be {WHEEL_MANIFEST_SCHEMA_VERSION}"))
     architecture = payload.get("architecture")
     if filename == "wheel-amd64.json" and architecture != "amd64":
         findings.append(Finding(filename, "architecture must be amd64"))

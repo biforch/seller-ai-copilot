@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from alpine_wheel_audit_common import (
+    WHEEL_MANIFEST_SCHEMA_VERSION,
     finalize_manifest_exit,
     normalize_package_name,
     parse_direct_requirements,
     requirements_sha256,
+    wheel_records_from_directory,
 )
 
 DEFAULT_REQUIREMENTS = Path(__file__).resolve().parents[1] / "requirements.txt"
@@ -25,48 +25,7 @@ PYTHON_VERSION = "3.11"
 ABIS = ("cp311", "cp311-abi3", "abi3", "none")
 
 
-@dataclass(frozen=True)
-class WheelRecord:
-    package: str
-    version: str
-    wheel_tag: str
-    sha256: str
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "package": self.package,
-            "version": self.version,
-            "wheel_tag": self.wheel_tag,
-            "sha256": self.sha256,
-            "binary": True,
-            "source": False,
-            "install_status": "NOT_EXECUTED_CROSS_ARCH",
-            "import_status": "NOT_EXECUTED_CROSS_ARCH",
-        }
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _wheel_record(path: Path) -> WheelRecord:
-    stem = path.name[: -len(".whl")]
-    parts = stem.split("-")
-    if len(parts) < 5:
-        raise ValueError("unexpected wheel filename")
-    return WheelRecord(
-        package=parts[0].replace("_", "-"),
-        version=parts[1],
-        wheel_tag=parts[-1],
-        sha256=_sha256_file(path),
-    )
-
-
-def _download_arm64_wheels(requirements: Path, wheel_dir: Path) -> tuple[list[WheelRecord], list[str]]:
+def _download_arm64_wheels(requirements: Path, wheel_dir: Path) -> tuple[list, list[str]]:
     command = [
         sys.executable,
         "-m",
@@ -89,18 +48,20 @@ def _download_arm64_wheels(requirements: Path, wheel_dir: Path) -> tuple[list[Wh
     if completed.returncode != 0:
         raise RuntimeError("pip download failed")
 
-    records = [_wheel_record(path) for path in sorted(wheel_dir.glob("*.whl"))]
+    records = wheel_records_from_directory(wheel_dir)
     sdist_count = sum(1 for path in wheel_dir.iterdir() if path.suffix != ".whl")
     if sdist_count:
         raise RuntimeError("sdist artifact present")
 
     platforms_used = list(PLATFORM_TAGS)
-    if records and not any("musllinux_1_2_aarch64" in record.wheel_tag for record in records):
+    if records and not any(
+        any("musllinux_1_2_aarch64" in tag for tag in record.wheel_tags) for record in records
+    ):
         platforms_used.append("musllinux_1_1_aarch64_required_for_resolution")
     return records, platforms_used
 
 
-def _missing_direct_requirements(requirements: Path, records: list[WheelRecord]) -> list[str]:
+def _missing_direct_requirements(requirements: Path, records: list) -> list[str]:
     downloaded = {normalize_package_name(record.package) for record in records}
     missing: list[str] = []
     for package in parse_direct_requirements(requirements):
@@ -111,7 +72,7 @@ def _missing_direct_requirements(requirements: Path, records: list[WheelRecord])
 
 def _base_payload(req_sha: str, direct_count: int) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": WHEEL_MANIFEST_SCHEMA_VERSION,
         "architecture": "arm64",
         "platform": "linux/arm64",
         "python_version": PYTHON_VERSION,
@@ -159,7 +120,15 @@ def main(argv: list[str] | None = None) -> int:
                 "sdist_count": 0,
                 "missing_packages": missing,
                 "missing_binary_package_count": len(missing),
-                "wheels": [record.as_dict() for record in records],
+                    "wheels": [
+                        record.as_dict(
+                            extra={
+                                "install_status": "NOT_EXECUTED_CROSS_ARCH",
+                                "import_status": "NOT_EXECUTED_CROSS_ARCH",
+                            }
+                        )
+                        for record in records
+                    ],
                 "resolution_status": "ok" if not missing else "failed",
             }
         )

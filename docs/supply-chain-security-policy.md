@@ -157,7 +157,7 @@ The `backend-alpine-candidate-audit` job is a **temporary, pull_request-only** a
 
 Policy reuse: candidate Trivy reports are evaluated through the same CRITICAL / HIGH+fix rules as production via `evaluate_alpine_candidate_reports.py`, which wraps `evaluate_vulnerability_report.evaluate_report_paths`.
 
-Wheel audit notes (PEP 656): `musllinux_1_1_*` wheels represent the minimum compatible musl ABI. Alpine 3.24 (musl 1.2.x) may install `musllinux_1_1_*` wheels when `musllinux_1_2_*` wheels are unavailable. Candidate acceptance requires amd64 real pip install/import proof and arm64 cross-resolution proof only (`NOT_EXECUTED_CROSS_ARCH`).
+Wheel audit notes (PEP 656): `musllinux_1_1_*` wheels represent the minimum compatible musl ABI. Alpine 3.24 (musl 1.2.x) may install `musllinux_1_1_*` wheels when `musllinux_1_2_*` wheels are unavailable. Candidate acceptance requires amd64 real pip install/import proof and arm64 cross-resolution proof only (`NOT_EXECUTED_CROSS_ARCH`). Wheel manifest schema version 2 stores complete compatibility tags in `wheel_tags` (parsed via `packaging.utils.parse_wheel_filename`), not truncated platform fragments.
 
 Step order (S3d4c1b): SBOM/Trivy validation must finish before amd64 wheel install/import, arm64 cross-resolution, wheel manifest validation, and only then the candidate vulnerability policy evaluator. Artifact upload and cleanup still use `if: always()` so wheel evidence is retained even when candidate policy blocks on raw base-image HIGH findings (`wheel`, `jaraco.context`).
 

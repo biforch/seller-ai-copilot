@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from alpine_wheel_audit_common import (
+    WHEEL_MANIFEST_SCHEMA_VERSION,
     finalize_manifest_exit,
     parse_direct_requirements,
     requirements_sha256,
+    wheel_records_from_directory,
     write_output_probe,
 )
 from validate_target_site_packages import validate_target_site_packages
@@ -38,27 +38,9 @@ IMPORT_CHECKS = (
 )
 
 
-@dataclass(frozen=True)
-class WheelRecord:
-    package: str
-    version: str
-    wheel_tag: str
-    sha256: str
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "package": self.package,
-            "version": self.version,
-            "wheel_tag": self.wheel_tag,
-            "sha256": self.sha256,
-            "binary": True,
-            "source": False,
-        }
-
-
 def _base_payload(req_sha: str, direct_count: int) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": WHEEL_MANIFEST_SCHEMA_VERSION,
         "architecture": "amd64",
         "platform": "linux/amd64",
         "python_version": PYTHON_VERSION,
@@ -89,32 +71,6 @@ def _run_pip(args: list[str], *, env: dict[str, str] | None = None) -> None:
     completed = subprocess.run(command, check=False, capture_output=True, text=True, env=env)
     if completed.returncode != 0:
         raise RuntimeError("pip command failed")
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _wheel_records(wheel_dir: Path) -> list[WheelRecord]:
-    records: list[WheelRecord] = []
-    for wheel_path in sorted(wheel_dir.glob("*.whl")):
-        stem = wheel_path.name[: -len(".whl")]
-        parts = stem.split("-")
-        if len(parts) < 5:
-            raise RuntimeError("unexpected wheel filename")
-        records.append(
-            WheelRecord(
-                package=parts[0].replace("_", "-"),
-                version=parts[1],
-                wheel_tag=parts[-1],
-                sha256=_sha256_file(wheel_path),
-            )
-        )
-    return records
 
 
 def _target_env() -> dict[str, str]:
@@ -203,7 +159,7 @@ def run_download(payload: dict[str, object]) -> None:
         payload["reason_code"] = "SDIST_PRESENT"
         raise RuntimeError("sdist present")
 
-    wheels = _wheel_records(WHEELHOUSE)
+    wheels = wheel_records_from_directory(WHEELHOUSE)
     payload["download_status"] = "ok"
     payload["wheel_count"] = len(wheels)
     payload["wheels"] = [record.as_dict() for record in wheels]
@@ -280,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             run_download(payload)
         elif phase == "install":
             if payload["download_status"] == "failed" and WHEELHOUSE.is_dir() and any(WHEELHOUSE.glob("*.whl")):
-                wheels = _wheel_records(WHEELHOUSE)
+                wheels = wheel_records_from_directory(WHEELHOUSE)
                 payload["download_status"] = "ok"
                 payload["wheel_count"] = len(wheels)
                 payload["wheels"] = [record.as_dict() for record in wheels]

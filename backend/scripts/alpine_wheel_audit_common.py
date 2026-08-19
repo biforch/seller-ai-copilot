@@ -7,14 +7,41 @@ import json
 import os
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+from packaging.utils import InvalidWheelFilename, parse_wheel_filename
 
 REQUIREMENTS_PACKAGE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*")
 PROBE_FILENAME = ".write-probe"
+WHEEL_MANIFEST_SCHEMA_VERSION = 2
 
 
 class ManifestWriteError(RuntimeError):
     """Raised when a wheel audit manifest cannot be written safely."""
+
+
+@dataclass(frozen=True)
+class ParsedWheelRecord:
+    package: str
+    version: str
+    filename: str
+    wheel_tags: tuple[str, ...]
+    sha256: str
+
+    def as_dict(self, *, extra: dict[str, object] | None = None) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "package": self.package,
+            "version": self.version,
+            "filename": self.filename,
+            "wheel_tags": list(self.wheel_tags),
+            "sha256": self.sha256,
+            "binary": True,
+            "source": False,
+        }
+        if extra:
+            payload.update(extra)
+        return payload
 
 
 def requirements_sha256(path: Path) -> str:
@@ -39,6 +66,38 @@ def parse_direct_requirements(path: Path) -> list[str]:
 
 def normalize_package_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name.lower())
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def parse_wheel_file(path: Path) -> ParsedWheelRecord:
+    try:
+        name, version, _build, tags = parse_wheel_filename(path.name)
+    except InvalidWheelFilename as exc:
+        raise ValueError("invalid wheel filename") from exc
+    wheel_tags = tuple(sorted({str(tag) for tag in tags}))
+    if not wheel_tags:
+        raise ValueError("wheel tags empty")
+    return ParsedWheelRecord(
+        package=str(name).replace("_", "-"),
+        version=str(version),
+        filename=path.name,
+        wheel_tags=wheel_tags,
+        sha256=sha256_file(path),
+    )
+
+
+def wheel_records_from_directory(wheel_dir: Path) -> list[ParsedWheelRecord]:
+    records: list[ParsedWheelRecord] = []
+    for wheel_path in sorted(wheel_dir.glob("*.whl")):
+        records.append(parse_wheel_file(wheel_path))
+    return records
 
 
 def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
