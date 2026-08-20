@@ -365,8 +365,8 @@ def test_listing_openapi_contract_is_authenticated_and_sensitive_free():
     sync_operation = schema["paths"][
         "/api/v1/amazon/accounts/{account_id}/marketplaces/{marketplace_id}/listings/sync"
     ]["post"]
-    assert list_operation["security"] == [{"HTTPBearer": []}]
-    assert sync_operation["security"] == [{"HTTPBearer": []}]
+    assert list_operation["security"] == [{"cookieAuth": []}]
+    assert sync_operation["security"] == [{"cookieAuth": []}]
     schemas = str(schema["components"]["schemas"])
     for forbidden in ("refresh_token", "account_key", "selling_partner_id", "sync_lease_id"):
         assert forbidden not in schemas

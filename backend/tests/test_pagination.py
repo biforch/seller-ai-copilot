@@ -466,10 +466,11 @@ def test_project_list_query_count_is_constant(
         db_session.add(project)
     db_session.commit()
 
+    headers = auth_header(user)
     query_counter["count"] = 0
     response = client.get(
         "/api/v1/projects?page=1&page_size=20",
-        headers=auth_header(user),
+        headers=headers,
     )
     assert response.status_code == 200
     baseline = query_counter["count"]
@@ -488,7 +489,7 @@ def test_project_list_query_count_is_constant(
     query_counter["count"] = 0
     response = client.get(
         "/api/v1/projects?page=1&page_size=20",
-        headers=auth_header(user),
+        headers=headers,
     )
     assert response.status_code == 200
     assert query_counter["count"] == baseline
@@ -521,10 +522,11 @@ def test_product_list_query_count_is_constant(
         db_session.commit()
 
     seed_products(25)
+    headers = auth_header(user)
     query_counter["count"] = 0
     response = client.get(
         "/api/v1/products?page=1&page_size=20",
-        headers=auth_header(user),
+        headers=headers,
     )
     assert response.status_code == 200
     baseline = query_counter["count"]
@@ -533,7 +535,7 @@ def test_product_list_query_count_is_constant(
     query_counter["count"] = 0
     response = client.get(
         "/api/v1/products?page=1&page_size=20",
-        headers=auth_header(user),
+        headers=headers,
     )
     assert response.status_code == 200
     assert query_counter["count"] == baseline

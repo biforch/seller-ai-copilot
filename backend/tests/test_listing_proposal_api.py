@@ -1259,7 +1259,7 @@ def test_proposal_detail_unauthenticated_returns_403(client, tenant_bundle, db_s
     tenant = tenant_bundle("prop-api-unauth-detail")
     proposal, _ = _create_proposal_via_service(db_session, tenant)
     response = client.get(_detail_url(tenant["product"].id, proposal.id))
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 def test_proposal_decisions_unauthenticated_returns_403(client, tenant_bundle, db_session):
@@ -1269,7 +1269,7 @@ def test_proposal_decisions_unauthenticated_returns_403(client, tenant_bundle, d
         _decisions_url(tenant["product"].id, proposal.id),
         json=_pending_decisions_body(proposal.revision, title="accept"),
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 def test_proposal_approve_unauthenticated_returns_403(client, tenant_bundle, db_session):
@@ -1279,7 +1279,7 @@ def test_proposal_approve_unauthenticated_returns_403(client, tenant_bundle, db_
         _approve_url(tenant["product"].id, proposal.id),
         json={"expected_revision": proposal.revision, "decisions": accept_all_decisions().model_dump()},
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 def test_proposal_reject_unauthenticated_returns_403(client, tenant_bundle, db_session):
@@ -1289,7 +1289,7 @@ def test_proposal_reject_unauthenticated_returns_403(client, tenant_bundle, db_s
         _reject_url(tenant["product"].id, proposal.id),
         json={"expected_revision": proposal.revision},
     )
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 def test_proposal_detail_missing_id_returns_404(client, tenant_bundle, auth_header):
@@ -1356,7 +1356,7 @@ def test_proposal_list_unauthenticated_returns_403(client, tenant_bundle, db_ses
     tenant = tenant_bundle("prop-list-unauth")
     _create_proposal_via_service(db_session, tenant)
     response = client.get(_list_url(tenant["product"].id))
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 def test_proposal_list_empty_returns_200(client, tenant_bundle, auth_header):

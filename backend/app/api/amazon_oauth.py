@@ -1,6 +1,5 @@
 """Amazon OAuth HTTP endpoints."""
 
-import hashlib
 import logging
 import uuid
 from typing import Annotated
@@ -17,7 +16,8 @@ from app.api.amazon_oauth_deps import (
 )
 from app.core.config import settings as app_settings
 from app.core.exceptions import oauth_redirect_fallback_error_response
-from app.core.rate_limit import limiter, rate_limit_key
+from app.core.oauth_rate_limit import oauth_start_rate_limit_key
+from app.core.rate_limit import limiter
 from app.core.response import success_response
 from app.core.security import get_current_user
 from app.integrations.amazon.config import AmazonSettings
@@ -58,14 +58,6 @@ _OAUTH_CALLBACK_SECURITY_HEADERS = {
 
 def _amazon_settings() -> AmazonSettings:
     return app_settings.amazon_settings
-
-
-def _oauth_start_rate_limit_key(request: Request) -> str:
-    authorization = request.headers.get("authorization", "")
-    if authorization:
-        digest = hashlib.sha256(authorization.encode("utf-8")).hexdigest()
-        return f"oauth-start:{digest}"
-    return f"oauth-start:{rate_limit_key(request)}"
 
 
 def _validate_frontend_base_url(url: str, *, environment: str) -> str:
@@ -188,7 +180,7 @@ def _callback_params_invalid(
 
 
 @router.post("/oauth/start")
-@limiter.limit("5/minute", key_func=_oauth_start_rate_limit_key)
+@limiter.limit("5/minute", key_func=oauth_start_rate_limit_key)
 def start_amazon_oauth(
     request: Request,
     start_request: Annotated[AmazonOAuthStartRequest, Body()],

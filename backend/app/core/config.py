@@ -46,9 +46,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440
 
-    COOKIE_SESSION_ENABLED: bool = False
     SESSION_TTL_MINUTES: int = 30
     SESSION_COOKIE_SECURE: bool | None = None
+    AUTH_TESTING_ALLOW_MISSING_ORIGIN: bool = False
 
     CORS_ORIGINS: str = "http://localhost:3000"
 

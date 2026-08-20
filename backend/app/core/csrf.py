@@ -42,19 +42,47 @@ def extract_request_origin(request: Request) -> str | None:
     parsed = urlparse(referer.strip())
     if not parsed.scheme or not parsed.netloc:
         return None
+    if parsed.username or parsed.password:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def normalize_origin(origin: str) -> str | None:
+    parsed = urlparse(origin.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        return None
+    if parsed.path not in {"", "/"}:
+        return None
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def origin_is_allowed(origin: str | None) -> bool:
     if not origin:
         return False
+    normalized = normalize_origin(origin)
+    if normalized is None:
+        return False
     allowed = settings.cors_origins_list
     if allowed == ["*"]:
         return True
-    return origin in allowed
+    return normalized in allowed
 
 
-def _decode_session_jti(session_cookie: str) -> str | None:
+def validate_request_origin(request: Request) -> None:
+    origin = extract_request_origin(request)
+    if origin is None:
+        if settings.ENVIRONMENT == "testing" and settings.AUTH_TESTING_ALLOW_MISSING_ORIGIN:
+            return
+        raise auth_origin_invalid_exception()
+
+    normalized = normalize_origin(origin)
+    if normalized is None or not origin_is_allowed(normalized):
+        raise auth_origin_invalid_exception()
+
+
+def decode_session_jti(session_cookie: str) -> str | None:
     try:
         payload = jwt.decode(
             session_cookie,
@@ -82,32 +110,26 @@ def validate_cookie_csrf(request: Request, db: Session) -> None:
     if not session_cookie:
         raise auth_csrf_invalid_exception()
 
-    jti = _decode_session_jti(session_cookie)
+    jti = decode_session_jti(session_cookie)
     if jti is None:
         raise auth_session_invalid_exception()
 
     auth_session_service.validate_csrf_for_session(db, jti=jti, csrf_token=csrf_header)
-
-    origin = extract_request_origin(request)
-    if not origin_is_allowed(origin):
-        raise auth_origin_invalid_exception()
+    validate_request_origin(request)
 
 
-def uses_bearer_authorization(request: Request) -> bool:
-    authorization = request.headers.get("authorization", "")
-    return authorization.lower().startswith("bearer ")
+def should_validate_origin_only(request: Request) -> bool:
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return False
+    return request.url.path in CSRF_EXEMPT_PATHS
 
 
 def should_enforce_csrf(request: Request) -> bool:
-    if not settings.COOKIE_SESSION_ENABLED:
-        return False
     if request.method in {"GET", "HEAD", "OPTIONS"}:
         return False
     if request.url.path in CSRF_EXEMPT_PATHS:
         return False
     if request.url.path == OAUTH_CALLBACK_PATH:
-        return False
-    if uses_bearer_authorization(request):
         return False
     if not request.cookies.get(SESSION_COOKIE_NAME):
         return False
@@ -147,10 +169,13 @@ class CookieCsrfMiddleware:
 
         request = StarletteRequest(scope, receive)
 
-        if should_enforce_csrf(request):
+        if should_validate_origin_only(request) or should_enforce_csrf(request):
             try:
                 with resolve_request_db(request) as db:
-                    validate_cookie_csrf(request, db)
+                    if should_validate_origin_only(request):
+                        validate_request_origin(request)
+                    if should_enforce_csrf(request):
+                        validate_cookie_csrf(request, db)
             except AppException as exc:
                 response = JSONResponse(
                     status_code=exc.code,

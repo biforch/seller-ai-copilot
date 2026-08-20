@@ -1,4 +1,4 @@
-"""JWT authentication security regressions for python-jose upgrades."""
+"""JWT authentication security regressions for cookie-internal signing only."""
 
 from __future__ import annotations
 
@@ -8,14 +8,15 @@ import logging
 from datetime import datetime, timedelta
 
 import pytest
-from fastapi import HTTPException
 from jose import jwt
 
 from app.core.config import settings
+from app.core.exceptions import AUTH_SESSION_INVALID, AppException
 from app.core.security import create_access_token, decode_token
 
 CANARY_TOKEN = "canary.jwt.token.value.must-not-leak"
 TEST_SECRET = settings.JWT_SECRET_KEY
+TEST_ORIGIN = "http://localhost:3000"
 
 
 def _b64url(data: bytes) -> str:
@@ -68,23 +69,24 @@ def test_expired_token_is_rejected() -> None:
         {"sub": "user-1"},
         expires_delta=timedelta(minutes=-1),
     )
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppException) as exc_info:
         decode_token(expired)
-    assert exc_info.value.status_code == 401
+    assert exc_info.value.code == 401
+    assert exc_info.value.error_code == AUTH_SESSION_INVALID
 
 
 def test_malformed_token_is_rejected() -> None:
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppException) as exc_info:
         decode_token("not-a-valid-jwt")
-    assert exc_info.value.status_code == 401
+    assert exc_info.value.code == 401
 
 
 def test_invalid_signature_is_rejected() -> None:
     token = create_access_token({"sub": "user-1"})
     tampered = _tamper_signature_bitflip(token)
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppException) as exc_info:
         decode_token(tampered)
-    assert exc_info.value.status_code == 401
+    assert exc_info.value.code == 401
 
 
 def test_alg_none_token_is_rejected() -> None:
@@ -92,9 +94,9 @@ def test_alg_none_token_is_rejected() -> None:
         algorithm="none",
         payload={"sub": "attacker", "exp": int((datetime.utcnow() + timedelta(hours=1)).timestamp())},
     )
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppException) as exc_info:
         decode_token(token)
-    assert exc_info.value.status_code == 401
+    assert exc_info.value.code == 401
 
 
 @pytest.mark.parametrize("algorithm", ["HS384", "HS512"])
@@ -104,48 +106,61 @@ def test_non_allowlisted_hmac_algorithm_is_rejected(algorithm: str) -> None:
         TEST_SECRET,
         algorithm=algorithm,
     )
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppException) as exc_info:
         decode_token(token)
-    assert exc_info.value.status_code == 401
+    assert exc_info.value.code == 401
 
 
 @pytest.mark.parametrize("algorithm", ["RS256", "ES256"])
 def test_non_allowlisted_asymmetric_algorithm_is_rejected(algorithm: str) -> None:
     valid = create_access_token({"sub": "user-1"})
     token = _swap_header_alg(valid, algorithm)
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppException) as exc_info:
         decode_token(token)
-    assert exc_info.value.status_code == 401
+    assert exc_info.value.code == 401
 
 
 def test_header_algorithm_cannot_override_server_allowlist() -> None:
     valid = create_access_token({"sub": "user-1"})
     token = _swap_header_alg(valid, "HS512")
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppException) as exc_info:
         decode_token(token)
-    assert exc_info.value.status_code == 401
+    assert exc_info.value.code == 401
 
 
-def test_missing_sub_claim_is_rejected_by_get_current_user(client) -> None:
-    token = create_access_token({"email": "missing-sub@example.com"})
+def test_bearer_header_does_not_authenticate(client, user_factory) -> None:
+    user = user_factory("bearer-rejected@example.com")
+    token = create_access_token({"sub": str(user.id), "email": user.email})
     response = client.get(
         "/api/v1/projects",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 401
-    assert response.json()["message"] == "Invalid authentication credentials"
+    assert response.json()["error_code"] == AUTH_SESSION_INVALID
+    assert "WWW-Authenticate" not in response.headers
+
+
+def test_valid_bearer_with_invalid_cookie_still_fails(client, user_factory) -> None:
+    user = user_factory("dual-credential@example.com")
+    token = create_access_token({"sub": str(user.id), "email": user.email})
+    client.cookies.set("sellerai_session", "not-a-valid-session")
+    response = client.get(
+        "/api/v1/projects",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401
+    assert response.json()["error_code"] == AUTH_SESSION_INVALID
 
 
 def test_decode_error_response_does_not_echo_token() -> None:
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(AppException) as exc_info:
         decode_token(CANARY_TOKEN)
-    detail = str(exc_info.value.detail)
-    assert CANARY_TOKEN not in detail
+    assert CANARY_TOKEN not in str(exc_info.value.message)
 
 
 def test_decode_error_does_not_log_token(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.ERROR):
-        with pytest.raises(HTTPException):
+        with pytest.raises(AppException):
             decode_token(CANARY_TOKEN)
     assert CANARY_TOKEN not in caplog.text
 

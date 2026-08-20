@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 
-from fastapi import Cookie, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Cookie, Depends
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
@@ -12,9 +11,7 @@ from app.core.exceptions import auth_session_invalid_exception
 from app.database.session import get_db
 from app.services.auth_session_service import auth_session_service
 
-# 使用 pbkdf2_sha256 替代 bcrypt（更兼容）
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
-security = HTTPBearer(auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -28,28 +25,22 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    """创建JWT Token"""
+    """Create a signed JWT used only inside HttpOnly session cookies."""
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
-    return encoded_jwt
+    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
 def decode_token(token: str) -> dict:
-    """解码JWT Token"""
+    """Decode a signed JWT used by internal session machinery."""
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        return payload
+        return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
     except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise auth_session_invalid_exception()
 
 
 def _decode_session_cookie(token: str) -> dict:
@@ -59,12 +50,12 @@ def _decode_session_cookie(token: str) -> dict:
         raise auth_session_invalid_exception()
 
 
-async def get_current_user_from_cookie(
-    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
-    db: Session = Depends(get_db),
-) -> dict | None:
-    if not settings.COOKIE_SESSION_ENABLED or not session_cookie:
-        return None
+async def _resolve_cookie_user(
+    session_cookie: str | None,
+    db: Session,
+) -> dict:
+    if not session_cookie:
+        raise auth_session_invalid_exception()
 
     payload = _decode_session_cookie(session_cookie)
     user_id = payload.get("sub")
@@ -83,73 +74,26 @@ async def get_current_user_from_cookie(
         "email": validated.email,
         "auth_method": "cookie",
         "jti": validated.jti,
+        "session_id": str(validated.session_id),
     }
 
 
-async def get_logout_context(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
-    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
-) -> dict:
-    if credentials is not None:
-        token = credentials.credentials
-        payload = decode_token(token)
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-            )
-        return {
-            "id": user_id,
-            "email": payload.get("email"),
-            "auth_method": "bearer",
-            "jti": None,
-        }
-
-    if settings.COOKIE_SESSION_ENABLED and session_cookie:
-        payload = _decode_session_cookie(session_cookie)
-        user_id = payload.get("sub")
-        jti = payload.get("jti")
-        if user_id is None or not isinstance(jti, str) or not jti:
-            raise auth_session_invalid_exception()
-        return {
-            "id": str(user_id),
-            "email": payload.get("email"),
-            "auth_method": "cookie",
-            "jti": jti,
-        }
-
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Not authenticated",
-    )
-
-
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
-    cookie_user: dict | None = Depends(get_current_user_from_cookie),
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    db: Session = Depends(get_db),
 ):
-    """获取当前用户（依赖注入）"""
-    if credentials is not None:
-        token = credentials.credentials
-        payload = decode_token(token)
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-            )
-        return {
-            "id": user_id,
-            "email": payload.get("email"),
-            "auth_method": "bearer",
-            "jti": None,
-        }
+    """Resolve the current user from the HttpOnly session cookie only."""
+    return await _resolve_cookie_user(session_cookie, db)
 
-    if cookie_user is not None:
-        return cookie_user
 
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Not authenticated",
-    )
+async def get_logout_context(
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Resolve logout context from the active cookie session only."""
+    return await _resolve_cookie_user(session_cookie, db)
+
+
+def decode_session_cookie(token: str) -> dict:
+    """Decode a session cookie JWT for internal server-side use."""
+    return _decode_session_cookie(token)

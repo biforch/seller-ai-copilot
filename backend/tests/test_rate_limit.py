@@ -1,11 +1,12 @@
 import uuid
 
 from app.services.openai import OpenAIService
+from tests.conftest import TEST_ORIGIN
 from tests.fixtures.ai_outputs import VALID_LISTING_OUTPUT
 
 
 def test_auth_register_rate_limit_on_real_route(client, isolated_client_ip):
-    headers = isolated_client_ip("10.20.30.40")
+    headers = {**isolated_client_ip("10.20.30.40"), "Origin": TEST_ORIGIN}
     responses = []
 
     for index in range(11):

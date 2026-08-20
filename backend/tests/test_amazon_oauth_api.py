@@ -506,7 +506,7 @@ def test_openapi_start_requires_auth_and_callback_public():
     schema = app.openapi()
     start = schema["paths"]["/api/v1/amazon/oauth/start"]["post"]
     callback = schema["paths"]["/api/v1/amazon/oauth/callback"]["get"]
-    assert start.get("security") == [{"HTTPBearer": []}]
+    assert start.get("security") == [{"cookieAuth": []}]
     assert callback.get("security") in (None, [])
     start_props = start["responses"]["200"]["content"]["application/json"]["schema"]
     serialized = str(start_props)

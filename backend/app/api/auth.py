@@ -2,22 +2,21 @@ from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from app.core.auth_session_constants import SESSION_COOKIE_NAME
 from app.core.auth_session_tokens import apply_session_cookies, clear_session_cookies
-from app.core.config import settings
+from app.core.csrf import validate_request_origin
 from app.core.exceptions import AppException
 from app.core.rate_limit import limiter
 from app.core.response import success_response
 from app.core.security import (
-    create_access_token,
+    decode_session_cookie,
     get_current_user,
-    get_logout_context,
     get_password_hash,
     verify_password,
 )
 from app.database.session import get_db
 from app.models.user import User
 from app.schemas.auth import (
-    CookieLoginResponse,
     LoginRequest,
     LoginResponse,
     RegisterRequest,
@@ -34,6 +33,7 @@ router = APIRouter()
 @limiter.limit("10/minute")
 def register(request: Request, body: RegisterRequest, db: Session = Depends(get_db)):
     """用户注册."""
+    validate_request_origin(request)
     existing_user = db.query(User).filter(User.email == body.email).first()
     if existing_user:
         raise AppException("Email already registered", status.HTTP_400_BAD_REQUEST)
@@ -61,6 +61,7 @@ def register(request: Request, body: RegisterRequest, db: Session = Depends(get_
 @limiter.limit("10/minute")
 def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
     """用户登录."""
+    validate_request_origin(request)
     user = db.query(User).filter(User.email == body.email).first()
     if not user or not verify_password(body.password, str(user.password_hash)):
         raise AppException(
@@ -69,51 +70,45 @@ def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
         )
 
     user_info = UserInfo(id=str(user.id), email=str(user.email), plan=str(user.plan))
+    try:
+        created = auth_session_service.create_session(db, user)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
-    if settings.COOKIE_SESSION_ENABLED:
-        try:
-            created = auth_session_service.create_session(db, user)
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-
-        payload = success_response(
-            data=CookieLoginResponse(token_type="cookie", user=user_info).model_dump(),
-        )
-        response = JSONResponse(content=payload)
-        apply_session_cookies(response, created)
-        return response
-
-    access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
-    data = LoginResponse(
-        access_token=access_token,
-        token_type="bearer",
-        user=user_info,
+    payload = success_response(
+        data=LoginResponse(token_type="cookie", user=user_info).model_dump(),
     )
-    return success_response(data=data.model_dump())
+    response = JSONResponse(content=payload)
+    apply_session_cookies(response, created)
+    return response
 
 
 @router.post("/logout")
 @limiter.limit("10/minute")
 def logout(
     request: Request,
-    current_user: dict = Depends(get_logout_context),
     db: Session = Depends(get_db),
 ):
     """Revoke the active cookie session and clear browser cookies."""
-    if current_user.get("auth_method") == "cookie" and current_user.get("jti"):
+    session_cookie = request.cookies.get(SESSION_COOKIE_NAME)
+    if session_cookie:
         try:
-            auth_session_service.revoke_session(db, jti=str(current_user["jti"]))
-            db.commit()
+            payload = decode_session_cookie(session_cookie)
+            jti = payload.get("jti")
+            if isinstance(jti, str) and jti:
+                auth_session_service.revoke_session(db, jti=jti)
+                db.commit()
+        except AppException:
+            db.rollback()
         except Exception:
             db.rollback()
             raise
 
     payload = success_response(message="Logged out")
     response = JSONResponse(content=payload)
-    if settings.COOKIE_SESSION_ENABLED:
-        clear_session_cookies(response)
+    clear_session_cookies(response)
     return response
 
 

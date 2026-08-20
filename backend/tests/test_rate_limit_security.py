@@ -37,6 +37,7 @@ def test_production_cannot_bypass_rate_limit_with_x_test_client_ip(
     monkeypatch,
 ):
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "SESSION_COOKIE_SECURE", False)
     monkeypatch.setattr(
         "app.core.rate_limit.get_remote_address",
         lambda request: "203.0.113.55",

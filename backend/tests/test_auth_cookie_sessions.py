@@ -47,9 +47,8 @@ def reset_rate_limits():
     limiter.reset()
 
 
-@pytest.fixture
-def enable_cookie_sessions(monkeypatch):
-    monkeypatch.setattr(settings, "COOKIE_SESSION_ENABLED", True)
+@pytest.fixture(autouse=True)
+def cookie_session_settings(monkeypatch):
     monkeypatch.setattr(settings, "SESSION_COOKIE_SECURE", False)
     monkeypatch.setattr(settings, "SESSION_TTL_MINUTES", 30)
 
@@ -65,6 +64,7 @@ def _cookie_login(client, email: str, password: str = "Password1"):
     return client.post(
         LOGIN_URL,
         json={"email": email, "password": password},
+        headers={"Origin": TEST_ORIGIN},
     )
 
 
@@ -138,7 +138,7 @@ def test_auth_session_model_repr_is_redacted(db_session: Session, user_factory):
 
 
 def test_database_stores_only_hashes(
-    db_session: Session, user_factory, enable_cookie_sessions, client
+    db_session: Session, user_factory, client
 ):
     user = user_factory("hash-only@example.com")
     response = _cookie_login(client, user.email)
@@ -155,7 +155,7 @@ def test_database_stores_only_hashes(
     assert client.cookies.get(SESSION_COOKIE_NAME) not in (row.jti_hash, row.csrf_token_hash)
 
 
-def test_login_cookie_attributes(enable_cookie_sessions, client, user_factory):
+def test_login_cookie_attributes(client, user_factory):
     user = user_factory("cookie-attrs@example.com")
     response = _cookie_login(client, user.email)
     assert response.status_code == 200
@@ -199,7 +199,7 @@ def test_production_rejects_insecure_session_cookie():
         )
 
 
-def test_session_fixation_creates_new_jti(enable_cookie_sessions, client, user_factory, db_session):
+def test_session_fixation_creates_new_jti(client, user_factory, db_session):
     user = user_factory("fixation@example.com")
     first = _cookie_login(client, user.email)
     assert first.status_code == 200
@@ -219,7 +219,7 @@ def test_session_fixation_creates_new_jti(enable_cookie_sessions, client, user_f
 
 
 def test_cookie_login_response_excludes_access_token(
-    enable_cookie_sessions, client, user_factory, caplog
+client, user_factory, caplog
 ):
     user = user_factory("no-body-token@example.com")
     with caplog.at_level(logging.ERROR):
@@ -232,7 +232,7 @@ def test_cookie_login_response_excludes_access_token(
     assert CANARY_JWT not in caplog.text
 
 
-def test_cookie_me_success(enable_cookie_sessions, client, user_factory):
+def test_cookie_me_success(client, user_factory):
     user = user_factory("me-cookie@example.com")
     login = _cookie_login(client, user.email)
     assert login.status_code == 200
@@ -241,12 +241,13 @@ def test_cookie_me_success(enable_cookie_sessions, client, user_factory):
     assert response.json()["data"]["email"] == user.email
 
 
-def test_missing_session_cookie_returns_403(enable_cookie_sessions, client):
+def test_missing_session_cookie_returns_401(client):
     response = client.get(ME_URL)
-    assert response.status_code == 403
+    assert response.status_code == 401
+    assert response.json()["error_code"] == AUTH_SESSION_INVALID
 
 
-def test_tampered_session_cookie_returns_401(enable_cookie_sessions, client, user_factory):
+def test_tampered_session_cookie_returns_401(client, user_factory):
     user = user_factory("tampered@example.com")
     _cookie_login(client, user.email)
     client.cookies.set(SESSION_COOKIE_NAME, CANARY_JWT)
@@ -255,7 +256,7 @@ def test_tampered_session_cookie_returns_401(enable_cookie_sessions, client, use
     assert response.json()["error_code"] == AUTH_SESSION_INVALID
 
 
-def test_revoked_session_returns_401(enable_cookie_sessions, client, user_factory, db_session):
+def test_revoked_session_returns_401(client, user_factory, db_session):
     user = user_factory("revoked@example.com")
     _cookie_login(client, user.email)
     row = db_session.query(AuthSession).filter(AuthSession.user_id == user.id).one()
@@ -268,7 +269,7 @@ def test_revoked_session_returns_401(enable_cookie_sessions, client, user_factor
     assert CANARY_JWT not in response.text
 
 
-def test_expired_session_returns_401(enable_cookie_sessions, client, user_factory, db_session):
+def test_expired_session_returns_401(client, user_factory, db_session):
     user = user_factory("expired@example.com")
     _cookie_login(client, user.email)
     row = db_session.query(AuthSession).filter(AuthSession.user_id == user.id).one()
@@ -280,7 +281,7 @@ def test_expired_session_returns_401(enable_cookie_sessions, client, user_factor
     assert response.json()["error_code"] == AUTH_SESSION_INVALID
 
 
-def test_logout_revokes_session(enable_cookie_sessions, client, user_factory, db_session):
+def test_logout_revokes_session(client, user_factory, db_session):
     user = user_factory("logout@example.com")
     _cookie_login(client, user.email)
     session_cookie = client.cookies.get(SESSION_COOKIE_NAME)
@@ -295,7 +296,7 @@ def test_logout_revokes_session(enable_cookie_sessions, client, user_factory, db
     assert retry.status_code == 401
 
 
-def test_logout_is_idempotent_on_repeat(enable_cookie_sessions, client, user_factory, db_session):
+def test_logout_is_idempotent_on_repeat(client, user_factory, db_session):
     user = user_factory("logout-repeat@example.com")
     _cookie_login(client, user.email)
     headers = _csrf_headers(client)
@@ -321,7 +322,7 @@ def test_origin_allowlist_rejects_foreign_origin(monkeypatch):
 
 
 def test_invalid_origin_rejected(
-    enable_cookie_sessions, client, user_factory, db_session, monkeypatch
+client, user_factory, db_session, monkeypatch
 ):
     user = user_factory("origin-invalid@example.com")
     _cookie_login(client, user.email)
@@ -335,7 +336,7 @@ def test_invalid_origin_rejected(
     assert response.json()["error_code"] == AUTH_ORIGIN_INVALID
 
 
-def test_csrf_missing_rejected(enable_cookie_sessions, client, user_factory):
+def test_csrf_missing_rejected(client, user_factory):
     user = user_factory("csrf-missing@example.com")
     _cookie_login(client, user.email)
     response = client.post(LOGOUT_URL, headers={"Origin": TEST_ORIGIN})
@@ -343,7 +344,7 @@ def test_csrf_missing_rejected(enable_cookie_sessions, client, user_factory):
     assert response.json()["error_code"] == AUTH_CSRF_INVALID
 
 
-def test_csrf_mismatch_rejected(enable_cookie_sessions, client, user_factory):
+def test_csrf_mismatch_rejected(client, user_factory):
     user = user_factory("csrf-wrong@example.com")
     _cookie_login(client, user.email)
     response = client.post(
@@ -354,7 +355,7 @@ def test_csrf_mismatch_rejected(enable_cookie_sessions, client, user_factory):
     assert response.json()["error_code"] == AUTH_CSRF_INVALID
 
 
-def test_csrf_cross_session_rejected(enable_cookie_sessions, client, user_factory):
+def test_csrf_cross_session_rejected(client, user_factory):
     first = user_factory("csrf-owner@example.com")
     second = user_factory("csrf-other@example.com")
     _cookie_login(client, first.email)
@@ -369,26 +370,7 @@ def test_csrf_cross_session_rejected(enable_cookie_sessions, client, user_factor
     assert response.json()["error_code"] == AUTH_CSRF_INVALID
 
 
-def test_bearer_path_regression_without_csrf(
-    client, user_factory, auth_header, enable_cookie_sessions
-):
-    user = user_factory("bearer-regression@example.com")
-    response = client.get("/api/v1/projects", headers=auth_header(user))
-    assert response.status_code == 200
-
-
-def test_bearer_login_still_returns_access_token_when_cookie_disabled(client, user_factory):
-    user = user_factory("bearer-login@example.com")
-    response = client.post(
-        LOGIN_URL,
-        json={"email": user.email, "password": "Password1"},
-    )
-    assert response.status_code == 200
-    assert response.json()["data"]["access_token"]
-
-
-def test_oauth_start_requires_csrf_in_cookie_mode(
-    enable_cookie_sessions,
+def test_oauth_start_requires_csrf(
     client,
     user_factory,
     oauth_service_override,
@@ -417,7 +399,7 @@ def test_oauth_start_requires_csrf_in_cookie_mode(
     assert allowed.status_code == 200, allowed.text
 
 
-def test_oauth_callback_get_unaffected_by_csrf(enable_cookie_sessions, client):
+def test_oauth_callback_get_unaffected_by_csrf(client):
     response = client.get(
         f"{OAUTH_CALLBACK_URL}?state=x&spapi_oauth_code=y&selling_partner_id=z",
     )
@@ -425,7 +407,6 @@ def test_oauth_callback_get_unaffected_by_csrf(enable_cookie_sessions, client):
 
 
 def test_tenant_isolation_with_cookie_session(
-    enable_cookie_sessions,
     client,
     user_factory,
     tenant_bundle,
@@ -440,7 +421,6 @@ def test_tenant_isolation_with_cookie_session(
 
 
 def test_amazon_accounts_list_with_cookie_session(
-    enable_cookie_sessions,
     client,
     user_factory,
 ):
@@ -450,7 +430,7 @@ def test_amazon_accounts_list_with_cookie_session(
     assert response.status_code == 200
 
 
-def test_canary_not_leaked_on_auth_failure(enable_cookie_sessions, client, user_factory, caplog):
+def test_canary_not_leaked_on_auth_failure(client, user_factory, caplog):
     user = user_factory("canary-fail@example.com")
     _cookie_login(client, user.email)
     client.cookies.set(SESSION_COOKIE_NAME, CANARY_JWT)

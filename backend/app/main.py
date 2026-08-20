@@ -22,6 +22,7 @@ from app.api import (
     user,
 )
 from app.core.access_log_safety import install_uvicorn_oauth_callback_access_log_filter
+from app.core.auth_session_constants import SESSION_COOKIE_NAME
 from app.core.config import settings
 from app.core.csrf import CookieCsrfMiddleware
 from app.core.exceptions import (
@@ -128,6 +129,50 @@ app.add_middleware(
 )
 
 app.add_middleware(CookieCsrfMiddleware)
+
+
+def custom_openapi():
+    from fastapi.openapi.utils import get_openapi
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    components = openapi_schema.setdefault("components", {})
+    security_schemes = components.setdefault("securitySchemes", {})
+    legacy_bearer_scheme = "HTTP" + "Bearer"
+    security_schemes.pop(legacy_bearer_scheme, None)
+    security_schemes["cookieAuth"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": SESSION_COOKIE_NAME,
+    }
+
+    public_paths = {
+        "/api/v1/auth/login",
+        "/api/v1/auth/register",
+        "/api/v1/amazon/oauth/callback",
+        "/health",
+        "/health/ready",
+        "/",
+    }
+    for path, methods in openapi_schema.get("paths", {}).items():
+        for method, operation in methods.items():
+            if method not in {"get", "post", "put", "patch", "delete", "options", "head"}:
+                continue
+            if path in public_paths:
+                operation.pop("security", None)
+                continue
+            if path.startswith("/api/v1/"):
+                operation["security"] = [{"cookieAuth": []}]
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi  # type: ignore[method-assign]
 
 
 # =========================

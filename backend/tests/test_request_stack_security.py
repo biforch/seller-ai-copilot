@@ -27,6 +27,7 @@ def test_json_body_validation_returns_422(api_client: TestClient) -> None:
     response = api_client.post(
         "/api/v1/auth/register",
         json={"email": "not-an-email", "password": "Password1"},
+        headers={"Origin": "http://localhost:3000"},
     )
     assert response.status_code == 422
     assert response.json()["message"] == "Validation Error"
@@ -50,10 +51,8 @@ def test_extra_fields_are_rejected() -> None:
 
 def test_unauthenticated_projects_request_uses_existing_contract(api_client: TestClient) -> None:
     response = api_client.get("/api/v1/projects")
-    assert response.status_code in {
-        status.HTTP_401_UNAUTHORIZED,
-        status.HTTP_403_FORBIDDEN,
-    }
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.json()["error_code"] == "AUTH_SESSION_INVALID"
 
 
 def test_invalid_bearer_token_does_not_echo_canary(api_client: TestClient) -> None:

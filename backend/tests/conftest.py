@@ -17,6 +17,7 @@ os.environ.setdefault(
     "MIGRATION_TEST_DATABASE_URL",
     "postgresql://sellerai:sellerai123@localhost:5432/sellerai_migration_test",
 )
+os.environ["CORS_ORIGINS"] = "http://localhost:3000"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,8 +25,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.auth_session_constants import CSRF_COOKIE_NAME, CSRF_HEADER_NAME
 from app.core.config import settings
-from app.core.security import create_access_token, get_password_hash
+from app.core.rate_limit import limiter
+from app.core.security import get_password_hash
 from app.database.session import Base, get_db
 from app.db.listing_version_immutability import (
     LISTING_VERSION_IMMUTABILITY_FUNCTION,
@@ -36,6 +39,9 @@ from app.models.product import Product
 from app.models.project import Project
 from app.models.user import User
 
+TEST_ORIGIN = "http://localhost:3000"
+LOGIN_URL = "/api/v1/auth/login"
+
 
 def _assert_test_database(url: str) -> None:
     db_name = url.rsplit("/", 1)[-1]
@@ -44,6 +50,13 @@ def _assert_test_database(url: str) -> None:
 
 
 _assert_test_database(settings.DATABASE_URL)
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limit_storage():
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 def _reset_test_schema(engine) -> None:
@@ -136,10 +149,23 @@ def user_factory(db_session: Session):
 
 
 @pytest.fixture
-def auth_header():
-    def _header(user: User) -> dict[str, str]:
-        token = create_access_token({"sub": str(user.id), "email": user.email})
-        return {"Authorization": f"Bearer {token}"}
+def auth_header(client):
+    active_email: dict[str, str | None] = {"value": None}
+
+    def _header(user: User, *, password: str = "Password1") -> dict[str, str]:
+        if active_email["value"] != user.email:
+            response = client.post(
+                LOGIN_URL,
+                json={"email": user.email, "password": password},
+                headers={"Origin": TEST_ORIGIN},
+            )
+            assert response.status_code == 200, response.text
+            active_email["value"] = user.email
+        csrf = client.cookies.get(CSRF_COOKIE_NAME)
+        headers = {"Origin": TEST_ORIGIN}
+        if csrf:
+            headers[CSRF_HEADER_NAME] = csrf
+        return headers
 
     return _header
 

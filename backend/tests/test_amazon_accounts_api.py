@@ -338,6 +338,8 @@ def test_invalid_token_rejected(client):
         headers={"Authorization": "Bearer not-a-valid-token"},
     )
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.json()["error_code"] == "AUTH_SESSION_INVALID"
+    assert "WWW-Authenticate" not in response.headers
 
 
 def test_detail_invalid_uuid_path(client, user_factory, auth_header):
@@ -388,8 +390,8 @@ def test_openapi_excludes_sensitive_account_fields():
         assert key not in serialized
     list_security = paths["/api/v1/amazon/accounts"]["get"].get("security")
     detail_security = paths["/api/v1/amazon/accounts/{account_id}"]["get"].get("security")
-    assert list_security == [{"HTTPBearer": []}]
-    assert detail_security == [{"HTTPBearer": []}]
+    assert list_security == [{"cookieAuth": []}]
+    assert detail_security == [{"cookieAuth": []}]
 
 
 def test_read_endpoints_do_not_decrypt_tokens(

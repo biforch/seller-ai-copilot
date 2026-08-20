@@ -417,8 +417,8 @@ def test_marketplace_openapi_contract_is_authenticated_and_public():
     refresh_operation = schema["paths"][
         "/api/v1/amazon/accounts/{account_id}/marketplaces/refresh"
     ]["post"]
-    assert list_operation["security"] == [{"HTTPBearer": []}]
-    assert refresh_operation["security"] == [{"HTTPBearer": []}]
+    assert list_operation["security"] == [{"cookieAuth": []}]
+    assert refresh_operation["security"] == [{"cookieAuth": []}]
     serialized = str(schema["components"]["schemas"])
     for sensitive in (
         "selling_partner_id",

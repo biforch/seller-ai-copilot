@@ -118,7 +118,7 @@ def test_import_unauthenticated_returns_403(client, tenant_bundle):
         headers={"Idempotency-Key": str(uuid.uuid4())},
         json=_import_body(),
     )
-    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 def test_import_missing_idempotency_key_returns_422(

@@ -38,12 +38,6 @@ class UserInfo(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    access_token: str
-    token_type: str
-    user: UserInfo
-
-
-class CookieLoginResponse(BaseModel):
     token_type: str = "cookie"
     user: UserInfo
 

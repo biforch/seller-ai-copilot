@@ -942,10 +942,12 @@ def test_nginx_rc_oauth_callback_access_log_isolated() -> None:
     assert "limit_req_log_level notice;" in nginx_conf
 
 
-def test_runbook_documents_403_and_container_pg_dump() -> None:
+def test_runbook_documents_401_and_container_pg_dump() -> None:
     runbook = _read(RUNBOOK)
-    assert "403" in runbook
-    assert "401" not in runbook.split("Non-LLM smoke test")[1].split("## 11.")[0]
+    assert "401" in runbook
+    smoke_section = runbook.split("Non-LLM smoke test")[1].split("## 11.")[0]
+    assert "401" in smoke_section
+    assert "AUTH_SESSION_INVALID" in runbook
     assert "pg_dump -Fc -U \"$POSTGRES_USER\" \"$POSTGRES_DB\"" in runbook
     assert "pg_restore --list" in runbook
     assert "sellerai_restore_test" in runbook

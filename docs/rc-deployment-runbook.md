@@ -159,7 +159,7 @@ Suggested checks (no Generate / LLM calls):
 8. Replay → 200
 9. Version history list
 10. Proposal list
-11. Unauthenticated protected API → **403** (FastAPI `HTTPBearer` missing-credentials behavior; RC1.1 does not change auth contract)
+11. Unauthenticated protected API → **401** (`AUTH_SESSION_INVALID`; cookie-only sessions since S4d)
 12. Invalid body → 422 with standard error shape
 
 **Do not** invoke listing Generate in RC smoke (requires real LLM).
