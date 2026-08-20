@@ -151,7 +151,7 @@ Suggested checks (no Generate / LLM calls):
 
 1. Home / login page returns 200
 2. Register a disposable test user
-3. Login and obtain JWT
+3. Login with a valid `Origin` (creates `sellerai_session` HttpOnly cookie + `sellerai_csrf`; response has no `access_token`)
 4. Create Project → Product
 5. Paginated product/list endpoints
 6. `GET .../listing/current` → 404 for new product
@@ -161,6 +161,15 @@ Suggested checks (no Generate / LLM calls):
 10. Proposal list
 11. Unauthenticated protected API → **401** (`AUTH_SESSION_INVALID`; cookie-only sessions since S4d)
 12. Invalid body → 422 with standard error shape
+
+Cookie/CSRF contract for this HTTP RC stack:
+
+- Set `SESSION_COOKIE_SECURE=false` in `.env.rc` (required by the RC safety gate). Compose passes it into `migrate` and `backend`.
+- Cookies: `sellerai_session` HttpOnly; `sellerai_csrf` readable; `SameSite=Lax`; `Path=/`; host-only (no `Domain`); `Max-Age=1800` (30 minutes). HTTP RC omits `Secure`.
+- Public staging/production must keep `SESSION_COOKIE_SECURE=true` and serve the app only behind approved HTTPS. This loopback HTTP stack does not emit HSTS.
+- There is no refresh token. After 30 minutes the session expires; the user must log in again.
+- Mutating API calls need `X-CSRF-Token` matching `sellerai_csrf` plus an Origin on the CORS allowlist. `/auth/login` and `/auth/register` skip CSRF but still require a valid Origin.
+- `Authorization: Bearer` is ignored even if the JWT is valid. Do not send bearer tokens from the browser.
 
 **Do not** invoke listing Generate in RC smoke (requires real LLM).
 
@@ -189,8 +198,8 @@ rate limit before proxying. Because nginx `limit_req` error messages include the
 complete request line, the RC server uses `error_log stderr error;` and
 `limit_req_log_level notice;` so 429s do not write callback query strings into
 container logs. OAuth start has a separate authenticated application
-limit keyed by a one-way digest of the bearer credential; neither limiter logs or
-stores the credential or callback query.
+limit keyed by a one-way digest of the validated session identifier; neither limiter logs or
+stores the cookie, JWT, CSRF token, or callback query.
 
 The backend installs a Uvicorn `uvicorn.access` filter at startup
 (`app/core/access_log_safety.py`) that drops access-log records for the exact
@@ -210,9 +219,9 @@ into runbooks, tickets, or CI artifacts.
 The RC nginx edge adds CSP, clickjacking, MIME-sniffing, referrer, and browser
 capability headers to all responses. The CSP intentionally permits inline scripts
 and styles required by the current Next.js production output; it limits external
-origins but does not eliminate the separate risk of keeping bearer tokens in
-browser storage. Treat a future HttpOnly-cookie migration as a public-production
-security gate, not as completed by these headers.
+origins. Session credentials live in HttpOnly cookies (`sellerai_session`) plus a
+readable CSRF cookie (`sellerai_csrf`); they must not be stored in `localStorage`
+or `sessionStorage`.
 
 This stack listens on loopback HTTP only. It deliberately does not emit HSTS.
 Any public deployment must terminate approved HTTPS before the application and

@@ -2,7 +2,7 @@
 
 **Plan version:** 2026-08-19
 **Code baseline:** Draft PR #1 on `codex/amazon-mvp-hardening`; R2b verified at `a73a104`
-**Current verdict:** Core Amazon MVP and deterministic production build are remotely verified. R2b security hardening is verified by Quality Gate run `32280189796`. Local RC acceptance, operational rehearsal, browser-session migration, and controlled real-Amazon acceptance remain open before public launch.
+**Current verdict:** Core Amazon MVP, deterministic production build, and cookie-only browser sessions are verified. R2b security hardening is verified by Quality Gate run `32280189796`. S4 cookie authentication is closed by S4b1/S4c/S4d/S4e. Remaining public-launch blockers are approved HTTPS/DNS and monitoring infrastructure, plus R2e controlled Amazon acceptance.
 **Source of truth:** Current code, Alembic migrations, automated tests, and this plan. Earlier A3/A4 design reviews remain historical references and are not active delivery plans.
 
 ## 1. Product objective
@@ -194,7 +194,15 @@ Exit gate (verification):
 ### S4 — Browser authentication hardening
 
 **Priority:** Required before public staging
-**Status:** Complete — **S4d complete** (cookie-only authentication; Bearer dual-track removed)
+**Status:** Complete — **S4e verified** (cookie-only RC acceptance closed)
+
+#### S4b1 — Revocable cookie sessions and CSRF (backend)
+
+**Status:** Complete
+
+- PostgreSQL `auth_sessions` stores SHA-256 hashes of `jti` and CSRF token only.
+- HttpOnly `sellerai_session` JWT (5–60 minutes, default 30) plus readable `sellerai_csrf` double-submit token.
+- `POST /auth/logout` revokes the server-side session before clearing cookies.
 
 #### S4c — Frontend cookie session migration
 
@@ -209,47 +217,24 @@ Exit gate (verification):
 - Login/register enforce strict Origin allowlist; OAuth start rate limits keyed by validated session hash.
 - Rollback requires reverting S4c+S4d together; no runtime Bearer toggle remains.
 
-**Exit gate (hard stop for public staging):** remove `Authorization: Bearer` session acceptance, delete `LoginResponse.access_token`, and forbid long-lived dual authentication. Public staging must not ship with Bearer and Cookie both enabled for user sessions.
-
 **S4d exit gate:** satisfied — cookie-only sessions enforced; Bearer path deleted.
-**Scope:** authentication contract, frontend client, CSRF, CSP, migration compatibility.
+**Evidence:** commit `a61ef34`; Quality Gate run `32412640995`.
 
-This is an isolated architecture phase and must not be mixed with S1–S3.
+#### S4e — Cookie-only RC security acceptance
 
-Deliverables:
+**Status:** Complete / Verified
 
-- Replace JavaScript-readable bearer persistence with `Secure; HttpOnly; SameSite` session/access cookies.
-- Define explicit CSRF protection for every state-changing request (origin verification plus token strategy).
-- Add login, refresh/expiry, logout/revocation, concurrent-tab, and unauthenticated contracts.
-- Shorten access-token lifetime and document renewal behavior.
-- Add a CSP compatible with the built Next.js application, including `frame-ancestors 'none'`, `object-src 'none'`, and `base-uri 'self'`; avoid `unsafe-inline` unless narrowly justified.
-- Provide a controlled compatibility window or atomic frontend/backend deployment plan so old bearer clients do not fail unpredictably.
+Local disposable Compose project `sellerai_s4e` (HTTP loopback, `SESSION_COOKIE_SECURE=false`) verified:
 
-#### S4b1 — Revocable cookie sessions and CSRF (backend)
+- Cookie attributes: `sellerai_session` HttpOnly, `sellerai_csrf` readable, `SameSite=Lax`, `Path=/`, host-only, `Max-Age=1800`, no `Secure` on HTTP RC.
+- CSRF, Origin allowlist, session fixation, logout revoke-then-clear, tenant isolation, and browser login/refresh/new-tab/logout contracts passed.
+- OAuth disabled start returns `AMAZON_OAUTH_DISABLED` without network calls; start is rate-limited by validated session hash; callback GET stays on the exact nginx location with log isolation.
+- Public staging/production still require `SESSION_COOKIE_SECURE=true`. HTTP RC may set `false` only when `CORS_ORIGINS` is loopback HTTP.
+- No refresh token: sessions last 30 minutes; users re-login after expiry. Public HTTPS must sit in front of the app before enabling `Secure` cookies.
 
-**Status:** Complete (backend only; `COOKIE_SESSION_ENABLED` defaults to false)
+**Evidence:** commit `3553406` (`fix(security): close cookie session RC gaps (S4e)`); Quality Gate run `32415940128`. S4d baseline remains run `32412640995`.
 
-- PostgreSQL `auth_sessions` stores SHA-256 hashes of `jti` and CSRF token only.
-- HttpOnly `sellerai_session` JWT (30-minute configurable TTL) plus readable `sellerai_csrf` double-submit token.
-- `POST /auth/logout` revokes server-side before clearing cookies.
-- `POST /auth/logout` revokes server-side before clearing cookies.
-- Cookie-only authentication enforced in **S4d**; Bearer dual-track removed.
-
-#### S4d — Bearer removal deadline (mandatory before public staging)
-
-**Status:** Complete
-
-**Entry:** S4c frontend migration verified in RC.
-
-**Exit gate (hard stop for public staging):** remove `Authorization: Bearer` session acceptance, delete `LoginResponse.access_token`, and forbid long-lived dual authentication. Public staging must not ship with Bearer and Cookie both enabled for user sessions.
-
-**Verified:** Backend accepts only `sellerai_session` cookies; JWT remains internal to HttpOnly cookies; fixed 30-minute session TTL with re-login on expiry (no refresh token).
-
-Exit gate:
-
-- No authentication/session credential is stored in `localStorage` or `sessionStorage`.
-- CSRF, XSS-oriented header, cookie-attribute, expiry, logout, and tenant tests pass.
-- OAuth start/callback remains functional without exposing session credentials.
+**S4 overall exit gate:** satisfied for cookie-only authentication. Public launch still requires approved HTTPS/DNS, HSTS at the TLS edge, and remaining R2/R2e operational gates.
 
 ### R1 — Remote quality gate and deterministic build
 
@@ -411,6 +396,6 @@ For changes involving models or migrations, additionally require upgrade → dow
 
 ## 8. Decision checkpoints
 
-The next step is **R2c operations readiness**, followed by R2d disposable RC acceptance. Public launch remains blocked on S4 browser-session hardening, approved HTTPS/DNS and monitoring infrastructure, and R2e controlled Amazon acceptance.
+The next step is remaining operational launch gates: approved HTTPS/DNS and monitoring infrastructure, then R2e controlled Amazon acceptance. Cookie-only browser authentication (S4b1–S4e) is closed.
 
 Automatic Amazon publishing remains outside the plan until the read/sync/proposal workflow has production evidence, an explicit publishing threat model, rollback/reconciliation semantics, and separate user authorization.
