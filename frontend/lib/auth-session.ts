@@ -1,4 +1,4 @@
-import { TOKEN_KEY, USER_KEY } from '@/lib/constants';
+import { registerSessionInvalidHandler } from '@/lib/auth-invalidation';
 import type { User } from '@/types';
 
 export type AuthSnapshot = {
@@ -6,52 +6,88 @@ export type AuthSnapshot = {
   isLoading: boolean;
 };
 
+export type AuthBroadcastType = 'authenticated' | 'logged_out' | 'session_invalid';
+
 /** Same-tab notification. Carries no token, user, or response payload. */
 export const AUTH_CHANGED_EVENT = 'sellerai-auth-changed';
 
+const AUTH_BROADCAST_CHANNEL = 'sellerai-auth';
 const SERVER_SNAPSHOT: AuthSnapshot = Object.freeze({
   user: null,
   isLoading: true,
 });
 
-const ACCESS_ERROR_KEY = '\0access-error';
+const ALLOWED_BROADCAST_TYPES = new Set<AuthBroadcastType>([
+  'authenticated',
+  'logged_out',
+  'session_invalid',
+]);
 
-let cachedKey: string | null = null;
-let cachedSnapshot: AuthSnapshot | null = null;
+let memorySnapshot: AuthSnapshot = Object.freeze({
+  user: null,
+  isLoading: true,
+});
 
-function readStoragePair(): { tokenRaw: string | null; userRaw: string | null } | 'error' {
+let bootstrapPromise: Promise<void> | null = null;
+let bootstrapGeneration = 0;
+let hasBootstrapped = false;
+let broadcastChannel: BroadcastChannel | null | undefined;
+let listeners = 0;
+
+function emitSameTabChange(): void {
   if (typeof window === 'undefined') {
-    return { tokenRaw: null, userRaw: null };
+    return;
   }
-  try {
-    return {
-      tokenRaw: window.localStorage.getItem(TOKEN_KEY),
-      userRaw: window.localStorage.getItem(USER_KEY),
-    };
-  } catch {
-    return 'error';
-  }
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
-function snapshotKey(tokenRaw: string | null, userRaw: string | null, errored: boolean): string {
-  if (errored) {
-    return ACCESS_ERROR_KEY;
-  }
-  return JSON.stringify([tokenRaw, userRaw]);
+function invalidateInFlightBootstrap(): void {
+  bootstrapGeneration += 1;
+  bootstrapPromise = null;
 }
 
-function buildSnapshot(tokenRaw: string | null, userRaw: string | null, errored: boolean): AuthSnapshot {
-  if (errored || !tokenRaw || !userRaw) {
-    return Object.freeze({ user: null, isLoading: false });
+function applySnapshot(next: AuthSnapshot): void {
+  memorySnapshot = Object.freeze({
+    user: next.user,
+    isLoading: next.isLoading,
+  });
+  emitSameTabChange();
+}
+
+function getBroadcastChannel(): BroadcastChannel | null {
+  if (typeof window === 'undefined') {
+    return null;
   }
-  try {
-    const parsed: unknown = JSON.parse(userRaw);
-    if (!parsed || typeof parsed !== 'object') {
-      return Object.freeze({ user: null, isLoading: false });
+  if (broadcastChannel === undefined) {
+    if (typeof BroadcastChannel === 'undefined') {
+      broadcastChannel = null;
+    } else {
+      broadcastChannel = new BroadcastChannel(AUTH_BROADCAST_CHANNEL);
+      broadcastChannel.onmessage = (event: MessageEvent) => {
+        const payload = event.data;
+        if (!payload || typeof payload !== 'object') {
+          return;
+        }
+        const type = (payload as { type?: unknown }).type;
+        if (typeof type !== 'string' || !ALLOWED_BROADCAST_TYPES.has(type as AuthBroadcastType)) {
+          return;
+        }
+        if (type === 'authenticated') {
+          void bootstrapAuth();
+          return;
+        }
+        applySnapshot({ user: null, isLoading: false });
+      };
     }
-    return Object.freeze({ user: parsed as User, isLoading: false });
+  }
+  return broadcastChannel;
+}
+
+function postBroadcast(type: AuthBroadcastType): void {
+  try {
+    getBroadcastChannel()?.postMessage({ type });
   } catch {
-    return Object.freeze({ user: null, isLoading: false });
+    // Ignore channel failures; same-tab state still updates.
   }
 }
 
@@ -63,64 +99,99 @@ export function getClientSnapshot(): AuthSnapshot {
   if (typeof window === 'undefined') {
     return getServerSnapshot();
   }
-  const pair = readStoragePair();
-  const errored = pair === 'error';
-  const tokenRaw = errored ? null : pair.tokenRaw;
-  const userRaw = errored ? null : pair.userRaw;
-  const key = snapshotKey(tokenRaw, userRaw, errored);
-  if (cachedKey === key && cachedSnapshot) {
-    return cachedSnapshot;
-  }
-  const snapshot = buildSnapshot(tokenRaw, userRaw, errored);
-  cachedKey = key;
-  cachedSnapshot = snapshot;
-  return snapshot;
+  return memorySnapshot;
 }
 
-export function subscribeAuth(onStoreChange: () => void): () => void {
-  const onStorage = (event: StorageEvent) => {
-    if (event.key !== null && event.key !== TOKEN_KEY && event.key !== USER_KEY) {
-      return;
-    }
-    onStoreChange();
-  };
-  const onLocal = () => {
-    onStoreChange();
-  };
-  window.addEventListener('storage', onStorage);
-  window.addEventListener(AUTH_CHANGED_EVENT, onLocal);
-  return () => {
-    window.removeEventListener('storage', onStorage);
-    window.removeEventListener(AUTH_CHANGED_EVENT, onLocal);
-  };
-}
-
-function notifySameTab(): void {
+export async function bootstrapAuth(): Promise<void> {
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
-}
+  if (bootstrapPromise) {
+    return bootstrapPromise;
+  }
 
-export function persistAuthSession(token: string, user: User): void {
-  window.localStorage.setItem(TOKEN_KEY, token);
-  window.localStorage.setItem(USER_KEY, JSON.stringify(user));
-  notifySameTab();
-}
-
-export function clearAuthSession(): void {
-  window.localStorage.removeItem(TOKEN_KEY);
-  window.localStorage.removeItem(USER_KEY);
-  notifySameTab();
-}
-
-export function hasAuthToken(): boolean {
-  try {
-    if (typeof window === 'undefined') {
-      return false;
+  const generation = ++bootstrapGeneration;
+  bootstrapPromise = (async () => {
+    applySnapshot({ user: memorySnapshot.user, isLoading: true });
+    try {
+      const { apiClient } = await import('@/app/api/client');
+      const user = await apiClient.get<User>('/auth/me');
+      if (generation !== bootstrapGeneration) {
+        return;
+      }
+      applySnapshot({ user, isLoading: false });
+    } catch {
+      if (generation !== bootstrapGeneration) {
+        return;
+      }
+      applySnapshot({ user: null, isLoading: false });
     }
-    return Boolean(window.localStorage.getItem(TOKEN_KEY));
-  } catch {
-    return false;
+  })().finally(() => {
+    bootstrapPromise = null;
+  });
+
+  return bootstrapPromise;
+}
+
+export function markAuthenticated(user: User): void {
+  invalidateInFlightBootstrap();
+  applySnapshot({ user, isLoading: false });
+  postBroadcast('authenticated');
+}
+
+export function markLoggedOut(): void {
+  invalidateInFlightBootstrap();
+  applySnapshot({ user: null, isLoading: false });
+  postBroadcast('logged_out');
+}
+
+export function markSessionInvalid(): void {
+  invalidateInFlightBootstrap();
+  applySnapshot({ user: null, isLoading: false });
+  postBroadcast('session_invalid');
+}
+
+export function subscribeAuth(onStoreChange: () => void): () => void {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  listeners += 1;
+  if (!hasBootstrapped) {
+    hasBootstrapped = true;
+    void bootstrapAuth();
+  }
+
+  const onLocal = () => {
+    onStoreChange();
+  };
+
+  window.addEventListener(AUTH_CHANGED_EVENT, onLocal);
+
+  return () => {
+    window.removeEventListener(AUTH_CHANGED_EVENT, onLocal);
+    listeners = Math.max(0, listeners - 1);
+  };
+}
+
+export function isAuthenticated(): boolean {
+  return memorySnapshot.user !== null;
+}
+
+if (typeof window !== 'undefined') {
+  registerSessionInvalidHandler(() => {
+    markSessionInvalid();
+  });
+}
+
+export function __resetAuthStoreForTests(): void {
+  memorySnapshot = Object.freeze({ user: null, isLoading: true });
+  bootstrapPromise = null;
+  bootstrapGeneration = 0;
+  hasBootstrapped = false;
+  listeners = 0;
+  if (broadcastChannel) {
+    broadcastChannel.close();
+    broadcastChannel = undefined;
   }
 }

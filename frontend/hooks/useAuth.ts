@@ -4,12 +4,12 @@ import { useCallback, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { apiClient } from '@/app/api/client';
+import { ApiClientError } from '@/lib/api-client-error';
 import {
-  clearAuthSession,
   getClientSnapshot,
   getServerSnapshot,
-  hasAuthToken,
-  persistAuthSession,
+  markAuthenticated,
+  markLoggedOut,
   subscribeAuth,
 } from '@/lib/auth-session';
 import type { LoginResponse } from '@/types';
@@ -24,7 +24,7 @@ export function useAuth() {
         email,
         password,
       });
-      persistAuthSession(data.access_token, data.user);
+      markAuthenticated(data.user);
       router.push('/dashboard');
     },
     [router],
@@ -35,18 +35,30 @@ export function useAuth() {
     router.push('/login');
   }, [router]);
 
-  const logout = useCallback(() => {
-    clearAuthSession();
-    router.push('/');
+  const logout = useCallback(async (): Promise<string | null> => {
+    try {
+      await apiClient.post('/auth/logout');
+      markLoggedOut();
+      router.push('/');
+      return null;
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        return err.message;
+      }
+      return 'Sign out failed. Please try again.';
+    }
   }, [router]);
 
   const requireAuth = useCallback(() => {
-    if (!hasAuthToken()) {
+    if (snapshot.isLoading) {
+      return false;
+    }
+    if (!snapshot.user) {
       router.push('/login');
       return false;
     }
     return true;
-  }, [router]);
+  }, [router, snapshot.isLoading, snapshot.user]);
 
   return {
     user: snapshot.user,

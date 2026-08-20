@@ -1,6 +1,12 @@
-import { API_BASE_URL, TOKEN_KEY } from '@/lib/constants';
+import {
+  API_BASE_URL,
+  CSRF_EXEMPT_API_PATHS,
+  CSRF_HEADER_NAME,
+} from '@/lib/constants';
+import { notifySessionInvalid } from '@/lib/auth-invalidation';
+import { readCsrfTokenFromCookie } from '@/lib/csrf-cookie';
 import { ApiClientError } from '@/lib/api-client-error';
-import { formatApiErrorPayload } from '@/lib/api-errors';
+import { AUTH_SESSION_INVALID, formatApiErrorPayload } from '@/lib/api-errors';
 import type { ApiError, ApiResponse } from '@/types';
 
 type RequestOptions = {
@@ -8,16 +14,20 @@ type RequestOptions = {
   signal?: AbortSignal;
 };
 
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+export class CsrfTokenMissingError extends Error {
+  constructor() {
+    super('Request rejected.');
+    this.name = 'CsrfTokenMissingError';
+  }
+}
+
 class ApiClient {
   private baseUrl: string;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
-  }
-
-  private getToken(): string | null {
-    if (typeof window === 'undefined') return null;
-    return localStorage.getItem(TOKEN_KEY);
   }
 
   private buildPath(path: string, params?: Record<string, string | number | undefined>) {
@@ -32,21 +42,37 @@ class ApiClient {
     return query ? `${path}?${query}` : path;
   }
 
+  private resolveCsrfHeader(method: string, path: string): Record<string, string> {
+    const normalizedMethod = method.toUpperCase();
+    if (!UNSAFE_METHODS.has(normalizedMethod)) {
+      return {};
+    }
+    if (CSRF_EXEMPT_API_PATHS.some((exemptPath) => path === exemptPath || path.startsWith(`${exemptPath}?`))) {
+      return {};
+    }
+    const csrfToken = readCsrfTokenFromCookie();
+    if (!csrfToken) {
+      throw new CsrfTokenMissingError();
+    }
+    return { [CSRF_HEADER_NAME]: csrfToken };
+  }
+
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
   ): Promise<T> {
-    const token = this.getToken();
+    const method = (options.method ?? 'GET').toUpperCase();
+    const csrfHeaders = this.resolveCsrfHeader(method, path);
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...(options.headers || {}),
+      ...csrfHeaders,
     };
-    if (token) {
-      (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
-    }
 
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
+      method,
+      credentials: 'include',
       headers,
     });
 
@@ -54,6 +80,9 @@ class ApiClient {
 
     if (!response.ok) {
       const err = json as ApiError;
+      if (response.status === 401 && err.error_code === AUTH_SESSION_INVALID) {
+        notifySessionInvalid();
+      }
       throw new ApiClientError(
         formatApiErrorPayload(err, response.status),
         response.status,
@@ -74,7 +103,7 @@ class ApiClient {
     options?: {
       params?: Record<string, string | number | undefined>;
       signal?: AbortSignal;
-    }
+    },
   ) {
     return this.request<T>(this.buildPath(path, options?.params), {
       signal: options?.signal,
@@ -96,6 +125,15 @@ class ApiClient {
     });
   }
 
+  put<T>(path: string, body?: unknown, options?: RequestOptions) {
+    return this.request<T>(path, {
+      method: 'PUT',
+      body: body ? JSON.stringify(body) : undefined,
+      headers: options?.headers,
+      signal: options?.signal,
+    });
+  }
+
   patch<T>(path: string, body?: unknown, options?: RequestOptions) {
     return this.request<T>(path, {
       method: 'PATCH',
@@ -109,6 +147,7 @@ class ApiClient {
     return this.request<T>(path, {
       method: 'DELETE',
       signal: options?.signal,
+      headers: options?.headers,
     });
   }
 }

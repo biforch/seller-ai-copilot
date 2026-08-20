@@ -6,17 +6,17 @@ import { Sparkles, Zap, TrendingUp, BarChart3, ArrowRight } from 'lucide-react';
 
 import { Header } from '@/components/common/Header';
 import { Footer } from '@/components/common/Footer';
-import { TOKEN_KEY } from '@/lib/constants';
+import { useAuth } from '@/hooks/useAuth';
 
 export default function Home() {
   const router = useRouter();
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) {
+    if (!isLoading && user) {
       router.push('/dashboard');
     }
-  }, [router]);
+  }, [user, isLoading, router]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col">

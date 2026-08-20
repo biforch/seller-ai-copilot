@@ -7,7 +7,9 @@ export const PLATFORMS = ['Amazon', 'Shopify', 'eBay', 'Walmart'] as const;
 
 export const MARKETS = ['USA', 'UK', 'DE', 'JP', 'CA', 'AU'] as const;
 
-export const TOKEN_KEY = 'access_token';
-export const USER_KEY = 'user';
+export const CSRF_COOKIE_NAME = 'sellerai_csrf';
+export const CSRF_HEADER_NAME = 'X-CSRF-Token';
+
+export const CSRF_EXEMPT_API_PATHS = ['/auth/login', '/auth/register'] as const;
 
 export const PASSWORD_MIN_LENGTH = 8;

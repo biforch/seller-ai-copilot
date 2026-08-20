@@ -5,16 +5,23 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiClient } from '@/app/api/client';
+import { ApiClientError } from '@/lib/api-client-error';
 import { useAuth } from '@/hooks/useAuth';
-import { AUTH_CHANGED_EVENT, getClientSnapshot, getServerSnapshot } from '@/lib/auth-session';
-import { TOKEN_KEY, USER_KEY } from '@/lib/constants';
+import {
+  AUTH_CHANGED_EVENT,
+  __resetAuthStoreForTests,
+  bootstrapAuth,
+  getClientSnapshot,
+  getServerSnapshot,
+  markAuthenticated,
+  markLoggedOut,
+  subscribeAuth,
+} from '@/lib/auth-session';
 import type { LoginResponse, User } from '@/types';
 
-const CANARY = 'canary-token-s3d3c2c2-DO-NOT-LEAK';
 const USER: User = { id: 'user-1', email: 'seller@example.com', plan: 'free' };
 const LOGIN_RESPONSE: LoginResponse = {
-  access_token: CANARY,
-  token_type: 'bearer',
+  token_type: 'cookie',
   user: USER,
 };
 
@@ -39,23 +46,29 @@ function AuthProbe() {
   );
 }
 
-function assertNoCanary(...values: unknown[]) {
+function assertNoTokenArtifacts(...values: unknown[]) {
   for (const value of values) {
     const serialized = typeof value === 'string' ? value : JSON.stringify(value);
-    expect(serialized).not.toContain(CANARY);
+    expect(serialized).not.toMatch(/access_token/i);
+    expect(serialized).not.toMatch(/Authorization:\s*Bearer/i);
   }
 }
 
 describe('useAuth', () => {
   beforeEach(() => {
+    __resetAuthStoreForTests();
     localStorage.clear();
+    sessionStorage.clear();
     navigation.push.mockReset();
+    vi.spyOn(apiClient, 'get').mockResolvedValue(USER);
     vi.spyOn(apiClient, 'post');
   });
 
   afterEach(() => {
     cleanup();
+    __resetAuthStoreForTests();
     localStorage.clear();
+    sessionStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -65,45 +78,21 @@ describe('useAuth', () => {
       ['isLoading', 'login', 'logout', 'register', 'requireAuth', 'user'].sort(),
     );
     expect(result.current).not.toHaveProperty('token');
-    assertNoCanary(result.current);
+    assertNoTokenArtifacts(result.current);
   });
 
-  it('treats empty storage as unauthenticated on the client', () => {
+  it('bootstraps from /auth/me instead of localStorage', async () => {
+    localStorage.setItem('access_token', 'legacy-token');
     const { result } = renderHook(() => useAuth());
-    expect(result.current.user).toBeNull();
-    expect(result.current.isLoading).toBe(false);
-  });
-
-  it('hydrates a valid stored user on the client', () => {
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, JSON.stringify(USER));
-    const { result } = renderHook(() => useAuth());
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(apiClient.get).toHaveBeenCalledWith('/auth/me');
     expect(result.current.user).toEqual(USER);
-    expect(result.current.isLoading).toBe(false);
-    assertNoCanary(result.current);
+    assertNoTokenArtifacts(localStorage.getItem('access_token'));
   });
 
-  it('stays unauthenticated for malformed stored JSON', () => {
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, '{broken');
-    const { result } = renderHook(() => useAuth());
-    expect(result.current.user).toBeNull();
-    expect(result.current.isLoading).toBe(false);
-  });
-
-  it('does not loop on malformed storage', async () => {
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, '{broken');
-    const { result, rerender } = renderHook(() => useAuth());
-    expect(result.current.user).toBeNull();
-    rerender();
-    rerender();
-    expect(result.current.user).toBeNull();
-    expect(result.current.isLoading).toBe(false);
-    assertNoCanary(result.current);
-  });
-
-  it('logs in, writes storage, notifies, and navigates without exposing the token', async () => {
+  it('logs in without access_token and navigates to dashboard', async () => {
     vi.mocked(apiClient.post).mockResolvedValue(LOGIN_RESPONSE);
     const { result } = renderHook(() => useAuth());
     await act(async () => {
@@ -113,29 +102,14 @@ describe('useAuth', () => {
       email: 'seller@example.com',
       password: 'secret12',
     });
-    expect(localStorage.getItem(TOKEN_KEY)).toBe(CANARY);
-    expect(JSON.parse(localStorage.getItem(USER_KEY) ?? '')).toEqual(USER);
     expect(result.current.user).toEqual(USER);
+    expect(localStorage.getItem('access_token')).toBeNull();
     expect(navigation.push).toHaveBeenCalledWith('/dashboard');
-    expect(result.current).not.toHaveProperty('token');
-    assertNoCanary(result.current);
+    assertNoTokenArtifacts(result.current);
   });
 
-  it('registers without writing storage and keeps the existing redirect', async () => {
-    vi.mocked(apiClient.post).mockResolvedValue(undefined as never);
-    const { result } = renderHook(() => useAuth());
-    await act(async () => {
-      await result.current.register('seller@example.com', 'secret12');
-    });
-    expect(apiClient.post).toHaveBeenCalledWith('/auth/register', {
-      email: 'seller@example.com',
-      password: 'secret12',
-    });
-    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(navigation.push).toHaveBeenCalledWith('/login');
-  });
-
-  it('propagates login errors and does not navigate', async () => {
+  it('does not clear other tabs when login fails', async () => {
+    markAuthenticated(USER);
     vi.mocked(apiClient.post).mockRejectedValue(new Error('invalid credentials'));
     const { result } = renderHook(() => useAuth());
     await expect(
@@ -143,181 +117,115 @@ describe('useAuth', () => {
         await result.current.login('seller@example.com', 'bad');
       }),
     ).rejects.toThrow('invalid credentials');
+    expect(result.current.user).toEqual(USER);
     expect(navigation.push).not.toHaveBeenCalled();
-    expect(result.current.user).toBeNull();
   });
 
-  it('does not emit a success event when login storage writes fail', async () => {
-    vi.mocked(apiClient.post).mockResolvedValue(LOGIN_RESPONSE);
-    const original = localStorage.setItem.bind(localStorage);
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, value) => {
-      if (key === USER_KEY) {
-        throw new Error('quota');
-      }
-      original(String(key), String(value));
-    });
-    const onAuth = vi.fn();
-    window.addEventListener(AUTH_CHANGED_EVENT, onAuth);
-    const { result } = renderHook(() => useAuth());
-    await expect(
-      act(async () => {
-        await result.current.login('seller@example.com', 'secret12');
-      }),
-    ).rejects.toThrow('quota');
-    expect(onAuth).not.toHaveBeenCalled();
-    expect(navigation.push).not.toHaveBeenCalled();
-    window.removeEventListener(AUTH_CHANGED_EVENT, onAuth);
-  });
-
-  it('logs out, clears storage, and updates every mounted hook', async () => {
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, JSON.stringify(USER));
+  it('logs out through /auth/logout and syncs hook instances', async () => {
+    markAuthenticated(USER);
+    vi.mocked(apiClient.post).mockResolvedValue(undefined as never);
+    document.cookie = 'sellerai_csrf=csrf-token; path=/';
     const first = renderHook(() => useAuth());
     const second = renderHook(() => useAuth());
-    expect(first.result.current.user).toEqual(USER);
-    act(() => {
-      first.result.current.logout();
+    await waitFor(() => {
+      expect(first.result.current.user).toEqual(USER);
     });
-    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    await act(async () => {
+      await first.result.current.logout();
+    });
+    expect(apiClient.post).toHaveBeenCalledWith('/auth/logout');
     expect(first.result.current.user).toBeNull();
     expect(second.result.current.user).toBeNull();
-    expect(first.result.current.isLoading).toBe(false);
     expect(navigation.push).toHaveBeenCalledWith('/');
   });
 
-  it('updates from a same-tab auth event', async () => {
+  it('returns a sanitized logout error without clearing a valid session', async () => {
+    markAuthenticated(USER);
+    vi.mocked(apiClient.post).mockRejectedValue(new ApiClientError('network down', 503));
+    document.cookie = 'sellerai_csrf=csrf-token; path=/';
     const { result } = renderHook(() => useAuth());
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, JSON.stringify(USER));
+    await waitFor(() => {
+      expect(result.current.user).toEqual(USER);
+    });
+    let error: string | null = null;
+    await act(async () => {
+      error = await result.current.logout();
+    });
+    expect(error).toBe('network down');
+    expect(result.current.user).toEqual(USER);
+    expect(navigation.push).not.toHaveBeenCalled();
+  });
+
+  it('requireAuth waits for bootstrap and redirects when unauthenticated', async () => {
+    vi.mocked(apiClient.get).mockRejectedValue(new Error('unauthorized'));
+    const { result } = renderHook(() => useAuth());
+    expect(result.current.requireAuth()).toBe(false);
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.requireAuth()).toBe(false);
+    expect(navigation.push).toHaveBeenCalledWith('/login');
+  });
+
+  it('updates from same-tab auth events and cross-tab broadcast messages', async () => {
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    markAuthenticated(USER);
     act(() => {
       window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
     });
     expect(result.current.user).toEqual(USER);
-    assertNoCanary(result.current);
-  });
 
-  it('updates from a cross-tab token change and ignores unrelated keys', async () => {
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, JSON.stringify(USER));
-    const { result } = renderHook(() => useAuth());
-    expect(result.current.user).toEqual(USER);
-
+    markLoggedOut();
     act(() => {
-      window.dispatchEvent(new StorageEvent('storage', { key: 'theme', newValue: 'dark' }));
-    });
-    expect(result.current.user).toEqual(USER);
-
-    localStorage.removeItem(TOKEN_KEY);
-    act(() => {
-      window.dispatchEvent(new StorageEvent('storage', { key: TOKEN_KEY, newValue: null }));
+      window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
     });
     expect(result.current.user).toBeNull();
   });
 
-  it('updates from a cross-tab user change and from storage clear', async () => {
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, JSON.stringify(USER));
-    const { result } = renderHook(() => useAuth());
-
-    localStorage.setItem(USER_KEY, JSON.stringify({ ...USER, email: 'other@example.com' }));
-    act(() => {
-      window.dispatchEvent(new StorageEvent('storage', { key: USER_KEY }));
-    });
-    expect(result.current.user?.email).toBe('other@example.com');
-
-    localStorage.clear();
-    act(() => {
-      window.dispatchEvent(new StorageEvent('storage', { key: null }));
-    });
-    expect(result.current.user).toBeNull();
-  });
-
-  it('requireAuth redirects when the token is missing or storage throws', () => {
-    const { result } = renderHook(() => useAuth());
-    expect(result.current.requireAuth()).toBe(false);
-    expect(navigation.push).toHaveBeenCalledWith('/login');
-
-    navigation.push.mockReset();
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    expect(result.current.requireAuth()).toBe(true);
-    expect(navigation.push).not.toHaveBeenCalled();
-
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new DOMException('blocked', 'SecurityError');
-    });
-    expect(result.current.requireAuth()).toBe(false);
-    expect(navigation.push).toHaveBeenCalledWith('/login');
-  });
-
-  it('pairs subscribe and cleanup under StrictMode', () => {
-    const add = vi.spyOn(window, 'addEventListener');
-    const remove = vi.spyOn(window, 'removeEventListener');
-    const { unmount } = render(
-      <StrictMode>
-        <AuthProbe />
-      </StrictMode>,
-    );
-    const addedStorage = add.mock.calls.filter(([type]) => type === 'storage').length;
-    const addedAuth = add.mock.calls.filter(([type]) => type === AUTH_CHANGED_EVENT).length;
-    expect(addedStorage).toBeGreaterThan(0);
-    expect(addedAuth).toBeGreaterThan(0);
-    unmount();
-    const removedStorage = remove.mock.calls.filter(([type]) => type === 'storage').length;
-    const removedAuth = remove.mock.calls.filter(([type]) => type === AUTH_CHANGED_EVENT).length;
-    expect(removedStorage).toBe(addedStorage);
-    expect(removedAuth).toBe(addedAuth);
-  });
-
-  it('does not warn about uncached snapshots under StrictMode', () => {
-    const errors: string[] = [];
-    vi.spyOn(console, 'error').mockImplementation((...args) => {
-      errors.push(args.map(String).join(' '));
-    });
+  it('does not duplicate bootstrap under StrictMode', async () => {
     render(
       <StrictMode>
         <AuthProbe />
       </StrictMode>,
     );
-    expect(errors.join('\n')).not.toMatch(/should be cached/i);
-    expect(errors.join('\n')).not.toContain(CANARY);
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledTimes(1);
+    });
   });
 });
 
 describe('useAuth SSR and hydration', () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetAuthStoreForTests();
     navigation.push.mockReset();
+    vi.spyOn(apiClient, 'get').mockResolvedValue(USER);
   });
 
   afterEach(() => {
-    localStorage.clear();
+    __resetAuthStoreForTests();
     vi.restoreAllMocks();
   });
 
-  it('renders the server snapshot without reading localStorage or leaking the token', () => {
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, JSON.stringify(USER));
+  it('renders the server snapshot without token, cookie, or user PII', () => {
+    localStorage.setItem('access_token', 'legacy-token');
     const getItem = vi.spyOn(Storage.prototype, 'getItem');
     const html = renderToString(<AuthProbe />);
     expect(getItem).not.toHaveBeenCalled();
     expect(html).toContain('true');
     expect(html).not.toContain(USER.email);
-    expect(html).not.toContain(CANARY);
+    expect(html).not.toMatch(/access_token|sellerai_session|sellerai_csrf/i);
     expect(Object.is(getServerSnapshot(), getServerSnapshot())).toBe(true);
   });
 
-  it('hydrates from the server snapshot then shows the stored user', async () => {
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, JSON.stringify(USER));
+  it('hydrates from the server snapshot then settles from /auth/me', async () => {
     const html = renderToString(<AuthProbe />);
-    expect(html).not.toContain(CANARY);
     expect(html).not.toContain(USER.email);
 
     const errors: string[] = [];
     vi.spyOn(console, 'error').mockImplementation((...args) => {
-      errors.push(args.map(String).join(' '));
-    });
-    vi.spyOn(console, 'warn').mockImplementation((...args) => {
       errors.push(args.map(String).join(' '));
     });
 
@@ -332,28 +240,7 @@ describe('useAuth SSR and hydration', () => {
       expect(container.querySelector('[data-testid="email"]')?.textContent).toBe(USER.email);
     });
     expect(container.querySelector('[data-testid="loading"]')?.textContent).toBe('false');
-    expect(container.innerHTML).not.toContain(CANARY);
     expect(errors.join('\n')).not.toMatch(/hydrat/i);
-    expect(errors.join('\n')).not.toContain(CANARY);
-    await act(async () => {
-      root?.unmount();
-    });
-    container.remove();
-  });
-
-  it('hydrates missing storage to a settled unauthenticated client snapshot', async () => {
-    const html = renderToString(<AuthProbe />);
-    const container = document.createElement('div');
-    container.innerHTML = html;
-    document.body.appendChild(container);
-    let root: Root | undefined;
-    await act(async () => {
-      root = hydrateRoot(container, <AuthProbe />);
-    });
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="loading"]')?.textContent).toBe('false');
-    });
-    expect(container.querySelector('[data-testid="email"]')?.textContent).toBe('');
     await act(async () => {
       root?.unmount();
     });
@@ -362,9 +249,17 @@ describe('useAuth SSR and hydration', () => {
 });
 
 describe('useAuth snapshot helpers used by the hook', () => {
-  it('keeps Object.is identity for repeated client reads', () => {
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, JSON.stringify(USER));
+  beforeEach(() => {
+    __resetAuthStoreForTests();
+  });
+
+  it('keeps Object.is identity for repeated client reads', async () => {
+    vi.spyOn(apiClient, 'get').mockResolvedValue(USER);
+    subscribeAuth(() => undefined);
+    await bootstrapAuth();
+    await waitFor(() => {
+      expect(getClientSnapshot().isLoading).toBe(false);
+    });
     expect(Object.is(getClientSnapshot(), getClientSnapshot())).toBe(true);
   });
 });

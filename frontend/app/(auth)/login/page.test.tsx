@@ -4,10 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import LoginPage from '@/app/(auth)/login/page';
 import RegisterPage from '@/app/(auth)/register/page';
 import { apiClient } from '@/app/api/client';
-import { TOKEN_KEY, USER_KEY } from '@/lib/constants';
+import { __resetAuthStoreForTests } from '@/lib/auth-session';
 import type { LoginResponse, User } from '@/types';
 
-const CANARY = 'canary-token-s3d3c2c2-DO-NOT-LEAK';
 const USER: User = { id: 'user-1', email: 'seller@example.com', plan: 'free' };
 
 const navigation = vi.hoisted(() => ({
@@ -23,23 +22,26 @@ vi.mock('next/navigation', () => ({
 
 describe('login and register pages', () => {
   beforeEach(() => {
+    __resetAuthStoreForTests();
     localStorage.clear();
     navigation.push.mockReset();
+    vi.spyOn(apiClient, 'get').mockRejectedValue(new Error('unauthorized'));
     vi.spyOn(apiClient, 'post');
   });
 
   afterEach(() => {
     cleanup();
+    __resetAuthStoreForTests();
     localStorage.clear();
     vi.restoreAllMocks();
   });
 
-  it('signs in through the public login contract without rendering the token', async () => {
-    vi.mocked(apiClient.post).mockResolvedValue({
-      access_token: CANARY,
-      token_type: 'bearer',
+  it('signs in through the cookie login contract without persisting tokens', async () => {
+    const loginResponse: LoginResponse = {
+      token_type: 'cookie',
       user: USER,
-    } satisfies LoginResponse);
+    };
+    vi.mocked(apiClient.post).mockResolvedValue(loginResponse);
 
     render(<LoginPage />);
     fireEvent.change(screen.getByPlaceholderText('you@example.com'), {
@@ -57,9 +59,9 @@ describe('login and register pages', () => {
       email: 'seller@example.com',
       password: 'secret12',
     });
-    expect(document.body.innerHTML).not.toContain(CANARY);
-    expect(localStorage.getItem(TOKEN_KEY)).toBe(CANARY);
-    expect(JSON.parse(localStorage.getItem(USER_KEY) ?? '')).toEqual(USER);
+    expect(document.body.innerHTML).not.toMatch(/access_token|Authorization:\s*Bearer/i);
+    expect(localStorage.getItem('access_token')).toBeNull();
+    expect(JSON.stringify(loginResponse)).not.toContain('access_token');
   });
 
   it('registers through the existing API and redirect without writing tokens', async () => {
@@ -79,7 +81,7 @@ describe('login and register pages', () => {
       email: 'seller@example.com',
       password: 'secret12',
     });
-    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(document.body.innerHTML).not.toContain(CANARY);
+    expect(localStorage.getItem('access_token')).toBeNull();
+    expect(document.body.innerHTML).not.toMatch(/access_token|Authorization:\s*Bearer/i);
   });
 });

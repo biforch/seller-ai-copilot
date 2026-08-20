@@ -3,6 +3,16 @@ const nextConfig = {
   // Docker 部署优化
   output: "standalone",
 
+  async rewrites() {
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${backendUrl}/api/v1/:path*`,
+      },
+    ];
+  },
+
   // 开发环境 webpack 配置
   webpack: (config, { dev }) => {
     if (dev) {

@@ -1,11 +1,11 @@
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import DashboardLayout from '@/app/(dashboard)/layout';
-import { TOKEN_KEY, USER_KEY } from '@/lib/constants';
+import { apiClient } from '@/app/api/client';
+import { __resetAuthStoreForTests } from '@/lib/auth-session';
 import type { User } from '@/types';
 
-const CANARY = 'canary-token-s3d3c2c2-DO-NOT-LEAK';
 const USER: User = { id: 'user-1', email: 'seller@example.com', plan: 'free' };
 
 const navigation = vi.hoisted(() => ({
@@ -21,13 +21,30 @@ vi.mock('next/navigation', () => ({
 
 describe('dashboard auth layout', () => {
   beforeEach(() => {
-    localStorage.clear();
+    __resetAuthStoreForTests();
     navigation.push.mockReset();
+    vi.spyOn(apiClient, 'get').mockRejectedValue(new Error('unauthorized'));
   });
 
   afterEach(() => {
     cleanup();
-    localStorage.clear();
+    __resetAuthStoreForTests();
+    vi.restoreAllMocks();
+  });
+
+  it('shows loading before /auth/me completes', async () => {
+    const deferred = Promise.withResolvers<User>();
+    vi.mocked(apiClient.get).mockImplementation(() => deferred.promise);
+    render(
+      <DashboardLayout>
+        <div>secret</div>
+      </DashboardLayout>,
+    );
+    expect(screen.getByLabelText('Loading')).toBeInTheDocument();
+    deferred.resolve(USER);
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(USER.email);
+    });
   });
 
   it('redirects unauthenticated visits to login', async () => {
@@ -39,12 +56,11 @@ describe('dashboard auth layout', () => {
     await waitFor(() => {
       expect(navigation.push).toHaveBeenCalledWith('/login');
     });
-    expect(document.body.innerHTML).not.toContain(CANARY);
+    expect(document.body.textContent).not.toContain('secret');
   });
 
-  it('keeps an authenticated session and shows the stored email', async () => {
-    localStorage.setItem(TOKEN_KEY, CANARY);
-    localStorage.setItem(USER_KEY, JSON.stringify(USER));
+  it('keeps an authenticated session and shows the user email', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue(USER);
     render(
       <DashboardLayout>
         <div>secret</div>
@@ -54,6 +70,6 @@ describe('dashboard auth layout', () => {
       expect(document.body.textContent).toContain(USER.email);
     });
     expect(navigation.push).not.toHaveBeenCalledWith('/login');
-    expect(document.body.innerHTML).not.toContain(CANARY);
+    expect(document.body.innerHTML).not.toMatch(/access_token|Authorization:\s*Bearer/i);
   });
 });
