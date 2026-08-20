@@ -199,6 +199,30 @@ def test_production_rejects_insecure_session_cookie():
         )
 
 
+def test_staging_allows_insecure_session_cookie_only_for_loopback_http():
+    settings = Settings(
+        ENVIRONMENT="staging",
+        DATABASE_URL="postgresql://user:pass@localhost:5432/sellerai_staging",
+        JWT_SECRET_KEY="staging-jwt-secret-key-min-32-chars",
+        OPENAI_API_KEY="staging-openai-key",
+        CORS_ORIGINS="http://127.0.0.1:8080",
+        DEBUG=False,
+        SESSION_COOKIE_SECURE=False,
+    )
+    assert settings.resolved_session_cookie_secure is False
+
+    with pytest.raises(ValidationError, match="SESSION_COOKIE_SECURE"):
+        Settings(
+            ENVIRONMENT="production",
+            DATABASE_URL="postgresql://user:pass@localhost:5432/sellerai_prod",
+            JWT_SECRET_KEY="production-jwt-secret-key-min-32",
+            OPENAI_API_KEY="production-openai-key",
+            CORS_ORIGINS="http://127.0.0.1:8080",
+            DEBUG=False,
+            SESSION_COOKIE_SECURE=False,
+        )
+
+
 def test_session_fixation_creates_new_jti(client, user_factory, db_session):
     user = user_factory("fixation@example.com")
     first = _cookie_login(client, user.email)

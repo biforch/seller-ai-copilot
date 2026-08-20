@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -97,6 +98,24 @@ class Settings(BaseSettings):
         return [item.strip() for item in self.CORS_ORIGINS.split(",") if item.strip()]
 
     @property
+    def cors_origins_are_loopback_http(self) -> bool:
+        origins = self.cors_origins_list
+        if not origins or origins == ["*"]:
+            return False
+        for origin in origins:
+            parsed = urlparse(origin)
+            if parsed.scheme != "http":
+                return False
+            if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                return False
+            if parsed.path not in {"", "/"}:
+                return False
+            host = (parsed.hostname or "").lower()
+            if host not in {"127.0.0.1", "localhost", "::1"}:
+                return False
+        return True
+
+    @property
     def is_dev_like(self) -> bool:
         return self.ENVIRONMENT in {"development", "testing"}
 
@@ -173,8 +192,11 @@ class Settings(BaseSettings):
             raise ValueError("DEBUG must remain false outside development/testing")
         if "*" in self.cors_origins_list:
             raise ValueError("CORS_ORIGINS must not contain a wildcard outside development/testing")
-        if self.ENVIRONMENT in {"staging", "production"} and self.SESSION_COOKIE_SECURE is False:
-            raise ValueError("SESSION_COOKIE_SECURE must not be false in staging or production")
+        if self.SESSION_COOKIE_SECURE is False:
+            if self.ENVIRONMENT == "production":
+                raise ValueError("SESSION_COOKIE_SECURE must not be false in staging or production")
+            if self.ENVIRONMENT == "staging" and not self.cors_origins_are_loopback_http:
+                raise ValueError("SESSION_COOKIE_SECURE must not be false in staging or production")
         _ = self.amazon_settings
         return self
 

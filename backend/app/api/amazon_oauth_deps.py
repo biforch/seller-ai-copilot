@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.database.session import SessionLocal
 from app.integrations.amazon.config import AmazonSettings
+from app.integrations.amazon.exceptions import amazon_oauth_disabled_error
 from app.integrations.amazon.lwa import LwaTokenClient
 from app.integrations.amazon.token_encryption import TokenEncryptionService
 from app.integrations.amazon.token_encryption_loader import build_token_encryption_service
@@ -53,6 +54,8 @@ def build_amazon_oauth_service(
 
 
 def get_amazon_oauth_service() -> AmazonOAuthService:
+    if not settings.amazon_settings.oauth_enabled:
+        raise amazon_oauth_disabled_error()
     return build_amazon_oauth_service()
 
 

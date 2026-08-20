@@ -112,6 +112,7 @@ def _valid_rc_env(**overrides: str) -> dict[str, str]:
         "NEXT_PUBLIC_API_URL": "/api/v1",
         "NEXT_PUBLIC_APP_NAME": "SellerAI Copilot",
         "RC_HTTP_PORT": "8080",
+        "SESSION_COOKIE_SECURE": "false",
     }
     env.update(overrides)
     return env
@@ -302,6 +303,7 @@ def test_rc_compose_requires_critical_env_vars() -> None:
         "OPENAI_API_KEY",
         "CORS_ORIGINS",
         "ENVIRONMENT",
+        "SESSION_COOKIE_SECURE",
     ):
         assert f"${{{var}:?" in content, f"missing required env guard for {var}"
 
@@ -356,6 +358,7 @@ def test_env_rc_example_uses_placeholders_and_no_real_secrets() -> None:
     assert JWT_PLACEHOLDER in content
     assert "rc-placeholder-not-for-real-llm" in content
     assert "rc-local-only-change-me" not in content
+    assert "SESSION_COOKIE_SECURE=false" in content
 
 
 def test_env_rc_example_placeholders_are_rejected_by_validator() -> None:
@@ -1010,6 +1013,13 @@ def test_validator_accepts_valid_rc_environment() -> None:
     result = _run_validator_main(_valid_rc_env())
     assert result.returncode == 0
     assert result.stdout.strip() == SUCCESS_MESSAGE
+
+
+def test_validator_rejects_secure_session_cookie_on_http_rc() -> None:
+    with pytest.raises(RCEnvironmentError, match="SESSION_COOKIE_SECURE"):
+        validate_rc_environment(_valid_rc_env(SESSION_COOKIE_SECURE="true"))
+    with pytest.raises(RCEnvironmentError, match="SESSION_COOKIE_SECURE"):
+        validate_rc_environment(_valid_rc_env(SESSION_COOKIE_SECURE=""))
 
 
 def test_validator_accepts_secure_amazon_sp_api_profile() -> None:

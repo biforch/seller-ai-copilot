@@ -291,6 +291,14 @@ def test_start_unauthenticated(client, fake_oauth_service: FakeOAuthService):
     assert fake_oauth_service.start_calls == []
 
 
+def test_start_oauth_disabled_without_encryption_material(client, user_factory, auth_header):
+    user = user_factory("oauth-api-disabled-no-keys@example.com")
+    response = client.post(START_URL, headers=auth_header(user), json=_start_body())
+    assert response.status_code == 503
+    assert response.json()["error_code"] == AMAZON_OAUTH_DISABLED
+    assert "encryption" not in response.text.lower()
+
+
 def test_start_oauth_disabled(client, user_factory, auth_header, fake_oauth_service: FakeOAuthService):
     user = user_factory("oauth-api-disabled@example.com")
     fake_oauth_service.start_error = amazon_oauth_disabled_error()

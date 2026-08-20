@@ -266,6 +266,14 @@ def validate_rc_environment(environ: dict[str, str] | None = None) -> None:
     if url_password != postgres_password:
         raise RCEnvironmentError("DATABASE_URL password must match POSTGRES_PASSWORD")
 
+    session_cookie_secure = env.get("SESSION_COOKIE_SECURE", "").strip().lower()
+    if session_cookie_secure not in {"true", "false"}:
+        raise RCEnvironmentError("SESSION_COOKIE_SECURE must be true or false")
+    if session_cookie_secure != "false":
+        raise RCEnvironmentError(
+            "SESSION_COOKIE_SECURE must be false for the loopback HTTP RC stack"
+        )
+
     _validate_amazon_configuration(env)
 
 

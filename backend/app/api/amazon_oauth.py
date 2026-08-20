@@ -11,7 +11,6 @@ from starlette.responses import Response as StarletteResponse
 
 from app.api.amazon_oauth_deps import (
     AmazonOAuthServiceFactory,
-    get_amazon_oauth_service,
     get_amazon_oauth_service_factory,
 )
 from app.core.config import settings as app_settings
@@ -25,11 +24,11 @@ from app.integrations.amazon.exceptions import (
     AMAZON_OAUTH_ACCOUNT_PERSIST_FAILED,
     AMAZON_OAUTH_REDIRECT_INVALID,
     AmazonError,
+    amazon_oauth_disabled_error,
     amazon_oauth_redirect_invalid_error,
     sanitize_callback_redirect_error_code,
 )
 from app.schemas.amazon_oauth import AmazonOAuthStartRequest, AmazonOAuthStartResponse
-from app.services.amazon_oauth_service import AmazonOAuthService
 
 logger = logging.getLogger(__name__)
 
@@ -185,8 +184,11 @@ def start_amazon_oauth(
     request: Request,
     start_request: Annotated[AmazonOAuthStartRequest, Body()],
     current_user: dict = Depends(get_current_user),
-    oauth_service: AmazonOAuthService = Depends(get_amazon_oauth_service),
+    oauth_service_factory: AmazonOAuthServiceFactory = Depends(get_amazon_oauth_service_factory),
 ) -> JSONResponse:
+    if not _amazon_settings().oauth_enabled:
+        raise amazon_oauth_disabled_error()
+    oauth_service = oauth_service_factory()
     result = oauth_service.start_authorization(
         user_id=uuid.UUID(str(current_user["id"])),
         marketplace_code=start_request.marketplace_code,
