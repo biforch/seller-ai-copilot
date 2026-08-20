@@ -194,7 +194,7 @@ Exit gate (verification):
 ### S4 — Browser authentication hardening
 
 **Priority:** Required before public staging
-**Status:** Pending (not started; remains prerequisite for public staging)
+**Status:** In progress — **S4b1 complete** (revocable HttpOnly cookie sessions + CSRF backend; Bearer retained temporarily)
 **Scope:** authentication contract, frontend client, CSRF, CSP, migration compatibility.
 
 This is an isolated architecture phase and must not be mixed with S1–S3.
@@ -207,6 +207,21 @@ Deliverables:
 - Shorten access-token lifetime and document renewal behavior.
 - Add a CSP compatible with the built Next.js application, including `frame-ancestors 'none'`, `object-src 'none'`, and `base-uri 'self'`; avoid `unsafe-inline` unless narrowly justified.
 - Provide a controlled compatibility window or atomic frontend/backend deployment plan so old bearer clients do not fail unpredictably.
+
+#### S4b1 — Revocable cookie sessions and CSRF (backend)
+
+**Status:** Complete (backend only; `COOKIE_SESSION_ENABLED` defaults to false)
+
+- PostgreSQL `auth_sessions` stores SHA-256 hashes of `jti` and CSRF token only.
+- HttpOnly `sellerai_session` JWT (30-minute configurable TTL) plus readable `sellerai_csrf` double-submit token.
+- `POST /auth/logout` revokes server-side before clearing cookies.
+- Bearer JWT path remains for unmigrated frontend until **S4d**.
+
+#### S4d — Bearer removal deadline (mandatory before public staging)
+
+**Entry:** S4c frontend migration verified in RC.
+
+**Exit gate (hard stop for public staging):** remove `Authorization: Bearer` session acceptance, delete `LoginResponse.access_token`, and forbid long-lived dual authentication. Public staging must not ship with Bearer and Cookie both enabled for user sessions.
 
 Exit gate:
 

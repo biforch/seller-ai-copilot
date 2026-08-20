@@ -76,9 +76,13 @@ GENERATION_IN_PROGRESS = "GENERATION_IN_PROGRESS"
 GENERATION_FINALIZE_FAILED = "GENERATION_FINALIZE_FAILED"
 GENERATION_UNRECOVERABLE = "GENERATION_UNRECOVERABLE"
 QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
-AI_RESPONSE_INVALID_MESSAGE = (
-    "The AI service returned an invalid response. Please try again."
-)
+AUTH_SESSION_INVALID = "AUTH_SESSION_INVALID"
+AUTH_CSRF_INVALID = "AUTH_CSRF_INVALID"
+AUTH_ORIGIN_INVALID = "AUTH_ORIGIN_INVALID"
+AUTH_SESSION_INVALID_MESSAGE = "Authentication required."
+AUTH_CSRF_INVALID_MESSAGE = "Request rejected."
+AUTH_ORIGIN_INVALID_MESSAGE = "Request rejected."
+AI_RESPONSE_INVALID_MESSAGE = "The AI service returned an invalid response. Please try again."
 
 AMAZON_GENERIC_PUBLIC_MESSAGE = "Amazon integration request failed."
 AMAZON_CONFIG_PUBLIC_MESSAGE = "Amazon integration configuration is invalid."
@@ -196,6 +200,33 @@ class AppException(Exception):
         return self.message
 
 
+def auth_session_invalid_exception() -> AppException:
+    return AppException(
+        message=AUTH_SESSION_INVALID_MESSAGE,
+        code=status.HTTP_401_UNAUTHORIZED,
+        error_code=AUTH_SESSION_INVALID,
+        detail=None,
+    )
+
+
+def auth_csrf_invalid_exception() -> AppException:
+    return AppException(
+        message=AUTH_CSRF_INVALID_MESSAGE,
+        code=status.HTTP_403_FORBIDDEN,
+        error_code=AUTH_CSRF_INVALID,
+        detail=None,
+    )
+
+
+def auth_origin_invalid_exception() -> AppException:
+    return AppException(
+        message=AUTH_ORIGIN_INVALID_MESSAGE,
+        code=status.HTTP_403_FORBIDDEN,
+        error_code=AUTH_ORIGIN_INVALID,
+        detail=None,
+    )
+
+
 def ai_response_invalid_exception(cause: Exception | None = None) -> AppException:
     """Upstream LLM output could not be validated."""
     return AppException(
@@ -267,11 +298,7 @@ async def http_exception_handler(
     request: Request,
     exc: StarletteHTTPException,
 ) -> JSONResponse:
-    detail = (
-        exc.detail
-        if isinstance(exc.detail, str)
-        else str(exc.detail)
-    )
+    detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
 
     return JSONResponse(
         status_code=exc.status_code,
@@ -289,10 +316,7 @@ async def validation_exception_handler(
 ) -> JSONResponse:
     errors = exc.errors()
 
-    detail = "; ".join(
-        f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
-        for e in errors
-    )
+    detail = "; ".join(f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in errors)
 
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -308,18 +332,13 @@ async def unhandled_exception_handler(
     request: Request,
     exc: Exception,
 ) -> JSONResponse:
-
     logger.exception(
         "Unhandled exception on %s %s",
         request.method,
         request.url.path,
     )
 
-    detail = (
-        str(exc)
-        if settings.DEBUG
-        else None
-    )
+    detail = str(exc) if settings.DEBUG else None
 
     response = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -332,11 +351,7 @@ async def unhandled_exception_handler(
 
     origin = request.headers.get("origin")
 
-    if origin and (
-        settings.cors_origins_list == ["*"]
-        or origin in settings.cors_origins_list
-    ):
-
+    if origin and (settings.cors_origins_list == ["*"] or origin in settings.cors_origins_list):
         response.headers["Access-Control-Allow-Origin"] = origin
 
         response.headers["Access-Control-Allow-Credentials"] = "true"

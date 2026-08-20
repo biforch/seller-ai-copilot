@@ -25,6 +25,7 @@ EXPECTED_TABLES = {
     "amazon_listings",
     "amazon_oauth_states",
     "amazon_catalog_snapshots",
+    "auth_sessions",
     "alembic_version",
 }
 
@@ -125,9 +126,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert "ck_users_used_tokens_nonneg" in user_checks
     assert "ck_users_reserved_tokens_nonneg" in user_checks
 
-    reserved_col = next(
-        c for c in inspector.get_columns("users") if c["name"] == "reserved_tokens"
-    )
+    reserved_col = next(c for c in inspector.get_columns("users") if c["name"] == "reserved_tokens")
     assert reserved_col.get("default") is not None or reserved_col.get("server_default") is not None
 
     fks = inspector.get_foreign_keys("generation_requests")
@@ -156,7 +155,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "f9a0b1c2d3e4"
+        assert current == "a0b1c2d3e4f6"
 
     amazon_unique = {
         tuple(constraint["column_names"])
@@ -194,7 +193,10 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert "ck_amazon_sync_logs_items_seen_nonneg" in sync_checks
 
     assert _fk_ondelete(inspector, "amazon_accounts", "user_id") == "CASCADE"
-    assert _fk_ondelete(inspector, "amazon_marketplace_participations", "amazon_account_id") == "CASCADE"
+    assert (
+        _fk_ondelete(inspector, "amazon_marketplace_participations", "amazon_account_id")
+        == "CASCADE"
+    )
     assert _fk_ondelete(inspector, "amazon_sync_logs", "amazon_account_id") == "CASCADE"
 
     account_columns = {column["name"] for column in inspector.get_columns("amazon_accounts")}
@@ -265,16 +267,13 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     }
     assert ("amazon_listing_id", "content_hash") in catalog_unique
     catalog_checks = {
-        check["name"]
-        for check in inspector.get_check_constraints("amazon_catalog_snapshots")
+        check["name"] for check in inspector.get_check_constraints("amazon_catalog_snapshots")
     }
     assert "ck_amazon_catalog_snapshots_content_hash_format" in catalog_checks
     assert "ck_amazon_catalog_snapshots_asin_format" in catalog_checks
     assert "ck_amazon_catalog_snapshots_marketplace_not_blank" in catalog_checks
     assert "ck_amazon_catalog_snapshots_expires_after_fetch" in catalog_checks
-    catalog_indexes = {
-        index["name"] for index in inspector.get_indexes("amazon_catalog_snapshots")
-    }
+    catalog_indexes = {index["name"] for index in inspector.get_indexes("amazon_catalog_snapshots")}
     assert "ix_amazon_catalog_snapshots_listing_fetched" in catalog_indexes
     assert "ix_amazon_catalog_snapshots_expires_at" in catalog_indexes
     assert (
@@ -286,7 +285,29 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
         == "CASCADE"
     )
 
-    oauth_state_columns = {column["name"] for column in inspector.get_columns("amazon_oauth_states")}
+    auth_session_columns = {column["name"] for column in inspector.get_columns("auth_sessions")}
+    assert {
+        "id",
+        "user_id",
+        "jti_hash",
+        "csrf_token_hash",
+        "expires_at",
+        "revoked_at",
+        "created_at",
+    }.issubset(auth_session_columns)
+    auth_session_unique = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints("auth_sessions")
+    }
+    assert ("jti_hash",) in auth_session_unique
+    auth_session_indexes = {index["name"] for index in inspector.get_indexes("auth_sessions")}
+    assert "ix_auth_sessions_user_id_revoked_at" in auth_session_indexes
+    assert "ix_auth_sessions_expires_at" in auth_session_indexes
+    assert _fk_ondelete(inspector, "auth_sessions", "user_id") == "CASCADE"
+
+    oauth_state_columns = {
+        column["name"] for column in inspector.get_columns("amazon_oauth_states")
+    }
     assert {
         "id",
         "state_token_hash",
@@ -379,12 +400,17 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     generation_indexes = {idx["name"] for idx in inspector.get_indexes("generations")}
     assert "ix_projects_user_id_updated_at_created_at_id" in project_indexes
     project_index = next(
-        idx for idx in inspector.get_indexes("projects")
+        idx
+        for idx in inspector.get_indexes("projects")
         if idx["name"] == "ix_projects_user_id_updated_at_created_at_id"
     )
     assert project_index["column_names"] == ["user_id", "updated_at", "created_at", "id"]
     assert "ix_products_project_id_created_at_id" in product_indexes
     assert "ix_generations_product_id" in generation_indexes
+
+    command.downgrade(cfg, "f9a0b1c2d3e4")
+    inspector_auth_down = inspect(engine)
+    assert "auth_sessions" not in set(inspector_auth_down.get_table_names())
 
     command.downgrade(cfg, "e8f9a0b1c2d3")
     inspector_catalog_down = inspect(engine)
@@ -482,6 +508,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
         "amazon_listings",
         "amazon_oauth_states",
         "amazon_catalog_snapshots",
+        "auth_sessions",
     ]:
         model_columns = {column.name for column in Base.metadata.tables[table_name].columns}
         db_columns = {column["name"] for column in inspector_reup.get_columns(table_name)}

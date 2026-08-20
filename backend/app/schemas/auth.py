@@ -43,6 +43,11 @@ class LoginResponse(BaseModel):
     user: UserInfo
 
 
+class CookieLoginResponse(BaseModel):
+    token_type: str = "cookie"
+    user: UserInfo
+
+
 class UserResponse(BaseModel):
     id: str
     email: str

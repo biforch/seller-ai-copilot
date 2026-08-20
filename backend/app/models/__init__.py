@@ -5,6 +5,7 @@ from app.models.amazon_listing import AmazonListing
 from app.models.amazon_marketplace_participation import AmazonMarketplaceParticipation
 from app.models.amazon_oauth_state import AmazonOAuthState
 from app.models.amazon_sync_log import AmazonSyncLog
+from app.models.auth_session import AuthSession
 from app.models.generation import Generation
 from app.models.generation_request import GenerationRequest
 from app.models.listing_proposal import ListingProposal
@@ -16,6 +17,7 @@ from app.models.user import User
 
 __all__ = [
     "AmazonAccount",
+    "AuthSession",
     "AmazonCatalogSnapshot",
     "AmazonListing",
     "AmazonMarketplaceParticipation",

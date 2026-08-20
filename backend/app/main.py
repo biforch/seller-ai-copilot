@@ -23,6 +23,7 @@ from app.api import (
 )
 from app.core.access_log_safety import install_uvicorn_oauth_callback_access_log_filter
 from app.core.config import settings
+from app.core.csrf import CookieCsrfMiddleware
 from app.core.exceptions import (
     AppException,
     _error_response,
@@ -37,9 +38,7 @@ from app.core.response import success_response
 from app.database.session import get_db
 from app.integrations.amazon.exceptions import AmazonError
 
-logging.basicConfig(
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 
 install_uvicorn_oauth_callback_access_log_filter()
 
@@ -53,7 +52,6 @@ logger = logging.getLogger(__name__)
 # 不要指望这里自动建表了。
 
 
-
 app = FastAPI(
     title="SellerAI Copilot API",
     description="AI-powered eCommerce Assistant for Global Sellers",
@@ -64,28 +62,21 @@ app = FastAPI(
 )
 
 
-
 app.state.limiter = limiter
-
 
 
 async def rate_limit_handler(
     request: Request,
     exc: RateLimitExceeded,
 ):
-
     return JSONResponse(
-
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-
         content=_error_response(
             status.HTTP_429_TOO_MANY_REQUESTS,
             "Too Many Requests",
             str(exc.detail),
         ),
-
     )
-
 
 
 app.add_exception_handler(
@@ -128,22 +119,15 @@ app.add_exception_handler(
 )
 
 
-
-
 app.add_middleware(
     CORSMiddleware,
-
     allow_origins=settings.cors_origins_list,
-
     allow_credentials=True,
-
     allow_methods=["*"],
-
     allow_headers=["*"],
 )
 
-
-
+app.add_middleware(CookieCsrfMiddleware)
 
 
 # =========================
@@ -219,12 +203,8 @@ app.include_router(
 )
 
 
-
-
-
 @app.get("/health")
 async def health_check():
-
     return success_response(
         data={
             "status": "healthy",
@@ -245,9 +225,6 @@ def readiness_check(db: Session = Depends(get_db)):
     )
 
 
-
-
-
 @app.get("/")
 async def root():
     data = {
@@ -263,18 +240,11 @@ async def root():
 
 
 if __name__ == "__main__":
-
     import uvicorn
 
-
     uvicorn.run(
-
         "app.main:app",
-
         host="0.0.0.0",
-
         port=8000,
-
         reload=True,
-
     )

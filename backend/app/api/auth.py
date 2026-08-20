@@ -1,18 +1,23 @@
 from fastapi import APIRouter, Depends, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from app.core.auth_session_tokens import apply_session_cookies, clear_session_cookies
+from app.core.config import settings
 from app.core.exceptions import AppException
 from app.core.rate_limit import limiter
 from app.core.response import success_response
 from app.core.security import (
     create_access_token,
     get_current_user,
+    get_logout_context,
     get_password_hash,
     verify_password,
 )
 from app.database.session import get_db
 from app.models.user import User
 from app.schemas.auth import (
+    CookieLoginResponse,
     LoginRequest,
     LoginResponse,
     RegisterRequest,
@@ -20,6 +25,7 @@ from app.schemas.auth import (
     UserInfo,
     UserResponse,
 )
+from app.services.auth_session_service import auth_session_service
 
 router = APIRouter()
 
@@ -62,13 +68,53 @@ def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
             status.HTTP_401_UNAUTHORIZED,
         )
 
+    user_info = UserInfo(id=str(user.id), email=str(user.email), plan=str(user.plan))
+
+    if settings.COOKIE_SESSION_ENABLED:
+        try:
+            created = auth_session_service.create_session(db, user)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+        payload = success_response(
+            data=CookieLoginResponse(token_type="cookie", user=user_info).model_dump(),
+        )
+        response = JSONResponse(content=payload)
+        apply_session_cookies(response, created)
+        return response
+
     access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
     data = LoginResponse(
         access_token=access_token,
         token_type="bearer",
-        user=UserInfo(id=str(user.id), email=str(user.email), plan=str(user.plan)),
+        user=user_info,
     )
     return success_response(data=data.model_dump())
+
+
+@router.post("/logout")
+@limiter.limit("10/minute")
+def logout(
+    request: Request,
+    current_user: dict = Depends(get_logout_context),
+    db: Session = Depends(get_db),
+):
+    """Revoke the active cookie session and clear browser cookies."""
+    if current_user.get("auth_method") == "cookie" and current_user.get("jti"):
+        try:
+            auth_session_service.revoke_session(db, jti=str(current_user["jti"]))
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+    payload = success_response(message="Logged out")
+    response = JSONResponse(content=payload)
+    if settings.COOKIE_SESSION_ENABLED:
+        clear_session_cookies(response)
+    return response
 
 
 @router.get("/me")

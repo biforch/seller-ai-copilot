@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440
 
+    COOKIE_SESSION_ENABLED: bool = False
+    SESSION_TTL_MINUTES: int = 30
+    SESSION_COOKIE_SECURE: bool | None = None
+
     CORS_ORIGINS: str = "http://localhost:3000"
 
     APP_NAME: str = "SellerAI Copilot"
@@ -79,6 +83,13 @@ class Settings(BaseSettings):
             return ",".join(str(item) for item in value)
         return str(value)
 
+    @field_validator("SESSION_TTL_MINUTES")
+    @classmethod
+    def validate_session_ttl_minutes(cls, value: int) -> int:
+        if value < 5 or value > 60:
+            raise ValueError("SESSION_TTL_MINUTES must be between 5 and 60")
+        return value
+
     @property
     def cors_origins_list(self) -> list[str]:
         if self.CORS_ORIGINS == "*":
@@ -88,6 +99,12 @@ class Settings(BaseSettings):
     @property
     def is_dev_like(self) -> bool:
         return self.ENVIRONMENT in {"development", "testing"}
+
+    @property
+    def resolved_session_cookie_secure(self) -> bool:
+        if self.SESSION_COOKIE_SECURE is not None:
+            return self.SESSION_COOKIE_SECURE
+        return self.ENVIRONMENT in {"staging", "production"}
 
     @property
     def api_docs_enabled(self) -> bool:
@@ -128,9 +145,7 @@ class Settings(BaseSettings):
             if not self.OPENAI_API_KEY:
                 self.OPENAI_API_KEY = "test-openai-key-not-used"
             if self.AMAZON_SP_API_ENDPOINT_MODE != "mock":
-                raise ValueError(
-                    "Testing environment requires AMAZON_SP_API_ENDPOINT_MODE=mock"
-                )
+                raise ValueError("Testing environment requires AMAZON_SP_API_ENDPOINT_MODE=mock")
             _ = self.amazon_settings
             return self
 
@@ -157,9 +172,9 @@ class Settings(BaseSettings):
         if self.DEBUG:
             raise ValueError("DEBUG must remain false outside development/testing")
         if "*" in self.cors_origins_list:
-            raise ValueError(
-                "CORS_ORIGINS must not contain a wildcard outside development/testing"
-            )
+            raise ValueError("CORS_ORIGINS must not contain a wildcard outside development/testing")
+        if self.ENVIRONMENT in {"staging", "production"} and self.SESSION_COOKIE_SECURE is False:
+            raise ValueError("SESSION_COOKIE_SECURE must not be false in staging or production")
         _ = self.amazon_settings
         return self
 

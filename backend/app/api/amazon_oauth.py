@@ -1,13 +1,12 @@
 """Amazon OAuth HTTP endpoints."""
 
-from __future__ import annotations
-
 import hashlib
 import logging
 import uuid
+from typing import Annotated
 from urllib.parse import urlencode, urlparse, urlunparse
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.responses import Response as StarletteResponse
 
@@ -93,11 +92,7 @@ def _validate_frontend_base_url(url: str, *, environment: str) -> str:
         if parsed.scheme != "https":
             raise amazon_oauth_redirect_invalid_error()
         hostname = parsed.hostname.lower()
-        if not (
-            hostname.endswith(".test")
-            or "mock" in hostname
-            or hostname.endswith(".local")
-        ):
+        if not (hostname.endswith(".test") or "mock" in hostname or hostname.endswith(".local")):
             raise amazon_oauth_redirect_invalid_error()
     elif parsed.scheme not in {"http", "https"}:
         raise amazon_oauth_redirect_invalid_error()
@@ -196,25 +191,26 @@ def _callback_params_invalid(
 @limiter.limit("5/minute", key_func=_oauth_start_rate_limit_key)
 def start_amazon_oauth(
     request: Request,
-    body: AmazonOAuthStartRequest,
-    response: Response,
+    start_request: Annotated[AmazonOAuthStartRequest, Body()],
     current_user: dict = Depends(get_current_user),
     oauth_service: AmazonOAuthService = Depends(get_amazon_oauth_service),
-) -> dict:
+) -> JSONResponse:
     result = oauth_service.start_authorization(
         user_id=uuid.UUID(str(current_user["id"])),
-        marketplace_code=body.marketplace_code,
-        intent=body.intent,
-        target_account_id=body.target_account_id,
+        marketplace_code=start_request.marketplace_code,
+        intent=start_request.intent,
+        target_account_id=start_request.target_account_id,
     )
-    response.headers.update(_OAUTH_START_CACHE_HEADERS)
-    payload = AmazonOAuthStartResponse(
+    response_payload = AmazonOAuthStartResponse(
         authorization_url=result.authorization_url,
         marketplace_code=result.marketplace_code,
         region=result.region,
         expires_at=result.expires_at,
     )
-    return success_response(data=payload.model_dump(mode="json"))
+    return JSONResponse(
+        content=success_response(data=response_payload.model_dump(mode="json")),
+        headers=_OAUTH_START_CACHE_HEADERS,
+    )
 
 
 @router.get("/oauth/callback")
