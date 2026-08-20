@@ -183,9 +183,12 @@ parameters (`state`, `spapi_oauth_code`, `selling_partner_id`, `error`,
 
 RC nginx (`nginx/nginx.rc.conf`) defines an exact-match callback location with
 `access_log off;` before the generic `/api/` proxy block. The request is still
-proxied to `rc_backend` with the original query string; only the nginx access log
+proxied to `rc_backend` with the original query string; the nginx access log
 line is suppressed. The same exact location enforces a per-source-IP callback
-rate limit before proxying. OAuth start has a separate authenticated application
+rate limit before proxying. Because nginx `limit_req` error messages include the
+complete request line, the RC server uses `error_log stderr error;` and
+`limit_req_log_level notice;` so 429s do not write callback query strings into
+container logs. OAuth start has a separate authenticated application
 limit keyed by a one-way digest of the bearer credential; neither limiter logs or
 stores the credential or callback query.
 

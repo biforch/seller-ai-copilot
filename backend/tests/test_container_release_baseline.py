@@ -938,6 +938,8 @@ def test_nginx_rc_oauth_callback_access_log_isolated() -> None:
         "limit_req_zone $binary_remote_addr "
         "zone=oauth_callback_per_ip:10m rate=30r/m;"
     ) in nginx_conf
+    assert "error_log stderr error;" in nginx_conf
+    assert "limit_req_log_level notice;" in nginx_conf
 
 
 def test_runbook_documents_403_and_container_pg_dump() -> None:
@@ -955,6 +957,8 @@ def test_runbook_documents_403_and_container_pg_dump() -> None:
     assert "POSTGRES_USER" in runbook.split("## 3.")[1].split("## 4.")[0]
     assert "must match POSTGRES_USER" in runbook or "must match `POSTGRES_USER`" in runbook
     assert "32 characters" in runbook
+    assert "limit_req_log_level notice" in runbook
+    assert "error_log stderr error" in runbook
 
 
 def test_operations_contract_includes_fail_closed_health_and_restore_gates() -> None:
