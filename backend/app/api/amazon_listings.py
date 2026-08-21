@@ -1,6 +1,5 @@
 """Tenant-scoped Amazon listing read and sync endpoints."""
 
-import hashlib
 import uuid
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -22,6 +21,7 @@ from app.api.amazon_marketplaces_deps import (
     get_amazon_account_runtime_resolver,
 )
 from app.core.exceptions import _error_response, public_message_for_amazon_error_code
+from app.core.oauth_rate_limit import amazon_product_sync_rate_limit_key
 from app.core.rate_limit import limiter
 from app.core.response import success_response
 from app.core.security import get_current_user
@@ -51,14 +51,6 @@ from app.services.amazon_listing_read_service import AmazonListingReadService
 router = APIRouter()
 
 _PRIVATE_CACHE_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
-
-
-def _product_sync_rate_limit_key(request: Request) -> str:
-    authorization = request.headers.get("authorization", "")
-    if authorization:
-        return hashlib.sha256(authorization.encode("utf-8")).hexdigest()
-    client_host = request.client.host if request.client is not None else "unknown"
-    return f"anonymous:{client_host}"
 
 
 def _catalog_public(
@@ -177,7 +169,7 @@ def link_amazon_listing_product(
     "/accounts/{account_id}/marketplaces/{marketplace_id}/listings/sync",
     response_model=AmazonProductSyncApiResponse,
 )
-@limiter.limit("3/minute", key_func=_product_sync_rate_limit_key)
+@limiter.limit("3/minute", key_func=amazon_product_sync_rate_limit_key)
 async def sync_amazon_listings(
     request: Request,
     account_id: uuid.UUID,
@@ -248,7 +240,7 @@ def get_amazon_listing_catalog(
     "/accounts/{account_id}/marketplaces/{marketplace_id}/listings/{listing_id}/catalog/refresh",
     response_model=AmazonCatalogSnapshotApiResponse,
 )
-@limiter.limit("10/minute", key_func=_product_sync_rate_limit_key)
+@limiter.limit("10/minute", key_func=amazon_product_sync_rate_limit_key)
 async def refresh_amazon_listing_catalog(
     request: Request,
     account_id: uuid.UUID,

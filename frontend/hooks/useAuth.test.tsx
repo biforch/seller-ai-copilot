@@ -167,7 +167,7 @@ describe('useAuth', () => {
     expect(navigation.push).toHaveBeenCalledWith('/login');
   });
 
-  it('updates from same-tab auth events and cross-tab broadcast messages', async () => {
+  it('updates from same-tab auth events', async () => {
     const { result } = renderHook(() => useAuth());
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -183,6 +183,25 @@ describe('useAuth', () => {
       window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
     });
     expect(result.current.user).toBeNull();
+  });
+
+  it('clears hook state when an independent BroadcastChannel posts logged_out', async () => {
+    const { result } = renderHook(() => useAuth());
+    await waitFor(() => {
+      expect(result.current.user).toEqual(USER);
+    });
+
+    const sender = new BroadcastChannel('sellerai-auth');
+    try {
+      act(() => {
+        sender.postMessage({ type: 'logged_out' });
+      });
+      await waitFor(() => {
+        expect(result.current.user).toBeNull();
+      });
+    } finally {
+      sender.close();
+    }
   });
 
   it('does not duplicate bootstrap under StrictMode', async () => {

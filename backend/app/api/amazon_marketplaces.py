@@ -1,6 +1,5 @@
 """Tenant-scoped Amazon marketplace read and refresh endpoints."""
 
-import hashlib
 import uuid
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -14,6 +13,7 @@ from app.api.amazon_marketplaces_deps import (
     get_amazon_marketplace_refresh_service_factory,
 )
 from app.core.exceptions import _error_response, public_message_for_amazon_error_code
+from app.core.oauth_rate_limit import amazon_refresh_rate_limit_key
 from app.core.rate_limit import limiter
 from app.core.response import success_response
 from app.core.security import get_current_user
@@ -36,14 +36,6 @@ _PRIVATE_CACHE_HEADERS = {
     "Cache-Control": "no-store",
     "Pragma": "no-cache",
 }
-
-
-def _amazon_refresh_rate_limit_key(request: Request) -> str:
-    authorization = request.headers.get("authorization", "")
-    if authorization:
-        return hashlib.sha256(authorization.encode("utf-8")).hexdigest()
-    client_host = request.client.host if request.client is not None else "unknown"
-    return f"anonymous:{client_host}"
 
 
 def _amazon_error_response(exc: AmazonError) -> JSONResponse:
@@ -97,7 +89,7 @@ def list_amazon_marketplaces(
     "/accounts/{account_id}/marketplaces/refresh",
     response_model=AmazonMarketplaceRefreshApiResponse,
 )
-@limiter.limit("6/minute", key_func=_amazon_refresh_rate_limit_key)
+@limiter.limit("6/minute", key_func=amazon_refresh_rate_limit_key)
 async def refresh_amazon_marketplaces(
     request: Request,
     account_id: uuid.UUID,

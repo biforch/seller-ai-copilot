@@ -11,7 +11,7 @@ export type AuthBroadcastType = 'authenticated' | 'logged_out' | 'session_invali
 /** Same-tab notification. Carries no token, user, or response payload. */
 export const AUTH_CHANGED_EVENT = 'sellerai-auth-changed';
 
-const AUTH_BROADCAST_CHANNEL = 'sellerai-auth';
+export const AUTH_BROADCAST_CHANNEL = 'sellerai-auth';
 const SERVER_SNAPSHOT: AuthSnapshot = Object.freeze({
   user: null,
   isLoading: true,
@@ -54,6 +54,23 @@ function applySnapshot(next: AuthSnapshot): void {
   emitSameTabChange();
 }
 
+function handleBroadcastMessage(event: MessageEvent): void {
+  const payload = event.data;
+  if (!payload || typeof payload !== 'object') {
+    return;
+  }
+  const type = (payload as { type?: unknown }).type;
+  if (typeof type !== 'string' || !ALLOWED_BROADCAST_TYPES.has(type as AuthBroadcastType)) {
+    return;
+  }
+  if (type === 'authenticated') {
+    void bootstrapAuth();
+    return;
+  }
+  invalidateInFlightBootstrap();
+  applySnapshot({ user: null, isLoading: false });
+}
+
 function getBroadcastChannel(): BroadcastChannel | null {
   if (typeof window === 'undefined') {
     return null;
@@ -62,22 +79,13 @@ function getBroadcastChannel(): BroadcastChannel | null {
     if (typeof BroadcastChannel === 'undefined') {
       broadcastChannel = null;
     } else {
-      broadcastChannel = new BroadcastChannel(AUTH_BROADCAST_CHANNEL);
-      broadcastChannel.onmessage = (event: MessageEvent) => {
-        const payload = event.data;
-        if (!payload || typeof payload !== 'object') {
-          return;
-        }
-        const type = (payload as { type?: unknown }).type;
-        if (typeof type !== 'string' || !ALLOWED_BROADCAST_TYPES.has(type as AuthBroadcastType)) {
-          return;
-        }
-        if (type === 'authenticated') {
-          void bootstrapAuth();
-          return;
-        }
-        applySnapshot({ user: null, isLoading: false });
-      };
+      try {
+        const channel = new BroadcastChannel(AUTH_BROADCAST_CHANNEL);
+        channel.onmessage = handleBroadcastMessage;
+        broadcastChannel = channel;
+      } catch {
+        broadcastChannel = null;
+      }
     }
   }
   return broadcastChannel;
@@ -156,6 +164,12 @@ export function subscribeAuth(onStoreChange: () => void): () => void {
     return () => {};
   }
 
+  // Create the receive channel in this browsing context. Do not wait for a
+  // local markAuthenticated / markLoggedOut / markSessionInvalid.
+  // Keep the singleton open for the store lifetime so StrictMode
+  // unsubscribe/resubscribe does not permanently drop the channel.
+  getBroadcastChannel();
+
   listeners += 1;
   if (!hasBootstrapped) {
     hasBootstrapped = true;
@@ -185,13 +199,13 @@ if (typeof window !== 'undefined') {
 }
 
 export function __resetAuthStoreForTests(): void {
+  invalidateInFlightBootstrap();
   memorySnapshot = Object.freeze({ user: null, isLoading: true });
-  bootstrapPromise = null;
-  bootstrapGeneration = 0;
   hasBootstrapped = false;
   listeners = 0;
   if (broadcastChannel) {
+    broadcastChannel.onmessage = null;
     broadcastChannel.close();
-    broadcastChannel = undefined;
   }
+  broadcastChannel = undefined;
 }
