@@ -1,9 +1,11 @@
 # SellerAI Copilot Development Plan
 
-**Plan version:** 2026-08-19
-**Code baseline:** Draft PR #1 on `codex/amazon-mvp-hardening`; R2b verified at `a73a104`
-**Current verdict:** Core Amazon MVP, deterministic production build, and cookie-only browser sessions are verified. R2b security hardening is verified by Quality Gate run `32280189796`. S4 cookie authentication is closed by S4b1/S4c/S4d/S4e. Remaining public-launch blockers are approved HTTPS/DNS and monitoring infrastructure, plus R2e controlled Amazon acceptance.
+**Plan version:** 2026-08-21
+**Code baseline:** Draft PR #1 on `codex/amazon-mvp-hardening`; code and internal RC verified at `40b040f`
+**Current verdict:** Core Amazon MVP, deterministic production build, cookie-only sessions, and internal RC (including backup/restore) are verified. Latest Quality Gate on `40b040f` is run `32417685212` (backend, frontend, containers success; production policy `blocked=0`). Public staging/production remain blocked on HTTPS/DNS/HSTS, external monitoring and backup targets, Seller Central approval, and **R2e** controlled Amazon acceptance.
 **Source of truth:** Current code, Alembic migrations, automated tests, and this plan. Earlier A3/A4 design reviews remain historical references and are not active delivery plans.
+**Alembic head:** `a0b1c2d3e4f6`
+**Tests:** backend pytest **1586 passed** (S4e local suite; same HEAD family as Quality Gate `32417685212`). Frontend ESLint 0/0, TypeScript, Vitest, and production build pass in the Quality Gate `frontend` job.
 
 ## 1. Product objective
 
@@ -56,8 +58,10 @@ Publishing content back to Amazon is **not** part of the current MVP. Human revi
 - Encryption supports a key ring, but no bulk rotation/re-encryption operational workflow exists.
 - Celery/Redis background execution is not wired into business code.
 - Amazon online behavior for Listings and Catalog has not been revalidated against a controlled live seller account.
-- GitHub backend, frontend, production image, SBOM, and vulnerability jobs pass remotely on Draft PR #1.
-- A full disposable RC lifecycle (start, smoke, restart, backup/restore, rollback, and cleanup) has not yet been rehearsed locally.
+- GitHub backend, frontend, production image, SBOM, and vulnerability jobs pass remotely on Draft PR #1 (latest: Quality Gate `32417685212`).
+- Disposable RC start, smoke, restart, backup/restore into `sellerai_restore_test`, and label-verified cleanup have been rehearsed (R2d). Cookie-only browser RC followed in S4e.
+- No refresh token: sessions last 30 minutes (configurable 5–60); users re-login after expiry. This is an accepted product limit.
+- In-memory SlowAPI limiters are per Uvicorn worker (`--workers 2`); different workers do not share buckets. This is a known non-blocking limitation until a shared store is explicitly added.
 
 ### Out of scope until explicitly approved
 
@@ -198,7 +202,7 @@ Exit gate (verification):
 
 #### S4b1 — Revocable cookie sessions and CSRF (backend)
 
-**Status:** Complete
+**Status:** Complete (`f629d6c`)
 
 - PostgreSQL `auth_sessions` stores SHA-256 hashes of `jti` and CSRF token only.
 - HttpOnly `sellerai_session` JWT (5–60 minutes, default 30) plus readable `sellerai_csrf` double-submit token.
@@ -206,11 +210,13 @@ Exit gate (verification):
 
 #### S4c — Frontend cookie session migration
 
-**Status:** Complete (frontend cookie sessions; no localStorage bearer persistence)
+**Status:** Complete (`014d7cf`)
+
+Frontend cookie sessions; no localStorage bearer persistence.
 
 #### S4d — Cookie-only authentication (backend Bearer removal)
 
-**Status:** Complete
+**Status:** Complete (`a61ef34`; Quality Gate `32412640995`)
 
 - Removed `HTTPBearer` / `Authorization: Bearer` acceptance for user sessions.
 - Login always creates DB-backed sessions and HttpOnly cookies; response schema has no `access_token`.
@@ -232,9 +238,9 @@ Local disposable Compose project `sellerai_s4e` (HTTP loopback, `SESSION_COOKIE_
 - Public staging/production still require `SESSION_COOKIE_SECURE=true`. HTTP RC may set `false` only when `CORS_ORIGINS` is loopback HTTP.
 - No refresh token: sessions last 30 minutes; users re-login after expiry. Public HTTPS must sit in front of the app before enabling `Secure` cookies.
 
-**Evidence:** commit `3553406` (`fix(security): close cookie session RC gaps (S4e)`); Quality Gate run `32415940128`. S4d baseline remains run `32412640995`.
+**Evidence:** commit `3553406` (`fix(security): close cookie session RC gaps (S4e)`); Quality Gate run `32415940128`. Chrome headless login/refresh/new-tab/logout passed (16/16). S4d baseline remains run `32412640995`. Documentation of that evidence is `40b040f`.
 
-**S4 overall exit gate:** satisfied for cookie-only authentication. Public launch still requires approved HTTPS/DNS, HSTS at the TLS edge, and remaining R2/R2e operational gates.
+**S4 overall exit gate:** satisfied for cookie-only authentication. Public launch still requires approved HTTPS/DNS, HSTS at the TLS edge, external monitoring, and R2e.
 
 ### R1 — Remote quality gate and deterministic build
 
@@ -282,7 +288,7 @@ Exit gate: all required remote jobs pass with no skipped job and no secret-beari
 
 ### R2 — Release-candidate and operational acceptance
 
-**Status:** In progress
+**Status:** Internal RC complete; R2e remains pending external authorization
 
 #### R2a — Final read-only readiness audit
 
@@ -292,36 +298,37 @@ Exit gate: all required remote jobs pass with no skipped job and no secret-beari
 
 **Status:** Complete (`a73a104`; remote run `32280189796`)
 
-- OAuth start is limited by a one-way credential digest; callback is limited at the exact nginx path by source IP without logging its query.
+- OAuth start is limited by a validated session digest; callback is limited at the exact nginx path by source IP without logging its query.
 - RC nginx emits CSP, referrer, MIME-sniffing, clickjacking, and Permissions-Policy headers.
 - Staging/production reject wildcard CORS and disable FastAPI documentation/OpenAPI endpoints.
 - HSTS remains the responsibility of the future approved HTTPS termination layer; the loopback HTTP RC does not emit false HSTS.
 
-#### R2c — Operations contract and backup/restore rehearsal
+#### R2c — Operations contract
 
-**Status:** In progress
+**Status:** Complete (`7e96738`; `docs/operations-readiness.md`, `docs/rc-deployment-runbook.md`)
 
-- Update this plan and the RC runbook to current evidence.
-- Add a credential-free health probe suitable for an external scheduler.
-- Define actionable alert thresholds, ownership, redaction, incident response, and artifact retention.
-- Rehearse custom-format backup and restore into a fresh disposable database before release promotion.
+- Credential-free health probe for an external scheduler (`backend/scripts/check_service_health.py`).
+- Alert thresholds, ownership, redaction, incident response, artifact retention, RPO ≤24 hours and RTO ≤4 hours as policy targets.
+- Repeatable `pg_dump -Fc` / isolated `sellerai_restore_test` restore commands in the RC runbook.
+- Does **not** provision a monitoring vendor, DNS, TLS, or production backup storage.
 
 #### R2d — Disposable local RC acceptance
 
-**Entry:** R1b complete and Docker available.
-**Deliverables:**
+**Status:** Complete — backup/restore rehearsal verified
 
-- Build backend/frontend/nginx production images.
-- Start the disposable `_test` RC database and one-shot migration service.
-- Verify `/health`, `/health/ready`, frontend login, disabled production docs, migration head, non-root users, and internal-only service ports.
-- Run the documented non-LLM workflow: register, login, project/product, listing import/replay/history, proposal list, and tenant-safe error cases.
-- Capture only redacted evidence; do not call real LLM or Amazon endpoints.
+- Local Compose project `sellerai_r2d`: production images, one-shot migrate, `/health` and `/health/ready`, docs 404, non-root backend/frontend, nginx loopback only, non-LLM smoke, restart, label-verified cleanup.
+- `pg_dump -Fc`, `pg_restore --list`, restore into isolated `sellerai_restore_test`, Alembic/row-count checks, then drop only that restore database.
+- At rehearsal time the restored Alembic head was `f9a0b1c2d3e4`. Current application head is `a0b1c2d3e4f6` (`auth_sessions` from S4b1); repeat current RC restore against `a0b1c2d3e4f6`.
+- Nginx callback query isolation fix: `7bfd264` (`error_log stderr error;` / `limit_req_log_level notice;`).
+- Later cookie-only HTTP RC and real Chrome acceptance: **S4e** (`3553406`, Quality Gate `32415940128`).
 
-Exit gate: repeatable clean start, smoke pass, restart pass, rollback rehearsal, and label-verified RC cleanup.
+Exit gate: satisfied for internal disposable RC. Not a substitute for production backup infrastructure or R2e.
 
 #### R2e — Controlled Amazon acceptance
 
-**Entry:** R2 complete; approved Amazon Developer Console configuration and disposable seller test scope available.
+**Status:** Pending / External authorization required
+
+**Entry:** approved Amazon Developer Console configuration, disposable seller test scope, and public HTTPS (not loopback HTTP RC).
 **Deliverables:**
 
 - Verify exact OAuth redirect registration and Product Listing/Catalog roles.
@@ -330,11 +337,19 @@ Exit gate: repeatable clean start, smoke pass, restart pass, rollback rehearsal,
 - Exercise provider denial, token invalidation, rate limiting, pagination, empty enumeration, and reauthorization-required behavior where safely possible.
 - Confirm access logs and persisted records contain no OAuth code, token, state, page token, raw payload, or sensitive headers.
 
-Exit gate: documented, redacted evidence of the complete seller-to-proposal flow and an explicit go/no-go decision for staging.
+Amazon SP-API and OAuth stay **disabled** in internal RC. Enable them only for this controlled acceptance.
 
-#### R2f — Review and merge decision
+Exit gate: documented, redacted evidence of the complete seller-to-proposal flow and an explicit go/no-go decision for public staging.
 
-Only after R2c–R2e evidence is complete may Draft PR #1 be marked ready for human review. Merging PR #1, pushing `main`, and public deployment remain separate explicit authorization points.
+#### R2f — Merge gate versus production release gate
+
+These are separate authorizations.
+
+**PR merge gate (code):** Quality Gate green, linear history, no merge conflict, S4 cookie-only complete, internal R2d/S4e RC complete. Draft PR #1 may be marked Ready and merged **only** after final human review **and** explicit merge authorization. R2e is **not** an absolute precondition for merging the branch.
+
+**Production / public staging release gate:** approved HTTPS termination with HSTS and correct `X-Forwarded-Proto`; `SESSION_COOKIE_SECURE=true`; exact CORS origins; external monitoring and production backup targets; Seller Central application review and redirect allowlist; **R2e** controlled Amazon acceptance; production go/no-go.
+
+Pushing `main` and public deployment remain separate explicit authorization points after merge.
 
 ### P1 — Product selector scalability
 
@@ -396,6 +411,6 @@ For changes involving models or migrations, additionally require upgrade → dow
 
 ## 8. Decision checkpoints
 
-The next step is remaining operational launch gates: approved HTTPS/DNS and monitoring infrastructure, then R2e controlled Amazon acceptance. Cookie-only browser authentication (S4b1–S4e) is closed.
+The next step is remaining **release** gates, not code-merge gates: approved HTTPS/DNS/HSTS, external monitoring and backup targets, then R2e controlled Amazon acceptance. Cookie-only authentication (S4b1–S4e) and internal RC (R2c/R2d) are closed.
 
 Automatic Amazon publishing remains outside the plan until the read/sync/proposal workflow has production evidence, an explicit publishing threat model, rollback/reconciliation semantics, and separate user authorization.

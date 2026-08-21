@@ -166,8 +166,9 @@ Cookie/CSRF contract for this HTTP RC stack:
 
 - Set `SESSION_COOKIE_SECURE=false` in `.env.rc` (required by the RC safety gate). Compose passes it into `migrate` and `backend`.
 - Cookies: `sellerai_session` HttpOnly; `sellerai_csrf` readable; `SameSite=Lax`; `Path=/`; host-only (no `Domain`); `Max-Age=1800` (30 minutes). HTTP RC omits `Secure`.
-- Public staging/production must keep `SESSION_COOKIE_SECURE=true` and serve the app only behind approved HTTPS. This loopback HTTP stack does not emit HSTS.
-- There is no refresh token. After 30 minutes the session expires; the user must log in again.
+- This loopback HTTP RC is not a public HTTPS environment. Browsers will not send `Secure` cookies over HTTP, so internal RC must use `SESSION_COOKIE_SECURE=false` with loopback HTTP CORS only.
+- Public staging/production must terminate approved HTTPS in front of the app, set `SESSION_COOKIE_SECURE=true`, emit HSTS at the TLS edge, and preserve `X-Forwarded-Proto` from the trusted proxy (`$scheme` is not enough if TLS terminates upstream). This loopback HTTP stack does not emit HSTS.
+- There is no refresh token. After 30 minutes the session expires; the user must log in again. This is an accepted product limit.
 - Mutating API calls need `X-CSRF-Token` matching `sellerai_csrf` plus an Origin on the CORS allowlist. `/auth/login` and `/auth/register` skip CSRF but still require a valid Origin.
 - `Authorization: Bearer` is ignored even if the JWT is valid. Do not send bearer tokens from the browser.
 
@@ -329,10 +330,22 @@ docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml \
   '
 ```
 
-The restored Alembic head must equal `f9a0b1c2d3e4`. Compare representative table counts
-with the source and run an isolated application readiness check before recording the
-rehearsal as successful. Cleanup may drop only the exact `sellerai_restore_test` target
-after the evidence is recorded; never use a wildcard database name.
+The restored Alembic head must equal the current application head (`a0b1c2d3e4f6`).
+Compare representative table counts with the source and run an isolated application
+readiness check before recording the rehearsal as successful. Cleanup may drop only the
+exact `sellerai_restore_test` target after the evidence is recorded; never use a wildcard
+database name.
+
+### R2d rehearsal status (verified)
+
+A disposable local RC (`sellerai_r2d`) completed `pg_dump -Fc`, `pg_restore --list`,
+restore into isolated `sellerai_restore_test`, Alembic/row-count checks, restart, and
+label-verified cleanup. That rehearsal restored head `f9a0b1c2d3e4` (then-current).
+Nginx callback query isolation was fixed in `7bfd264`. Cookie-only HTTP RC and Chrome
+acceptance followed in S4e. Do not treat this as production backup-target proof.
+
+Amazon OAuth and SP-API remain **disabled** in RC. Enable them only for authorized **R2e**
+controlled acceptance; never against production seller credentials from this stack.
 
 ## 16. Migration rollback principles
 
@@ -373,9 +386,10 @@ This script **detects only** — it does not retry LLM calls.
 | Area | RC behavior |
 |------|-------------|
 | LLM / Generate | Not exercised in RC smoke; placeholder `OPENAI_API_KEY` only satisfies config |
-| Rate limiting | Post-login limits still keyed by client IP |
-| Trusted proxy | RC nginx sets `X-Forwarded-For` from `$remote_addr` only; full trusted-proxy design pending staging |
-| SP-API | Capability-gated and disabled by default; live rehearsal requires explicit secrets |
+| Rate limiting | In-memory SlowAPI is per Uvicorn worker (`--workers 2`); buckets are not shared. Non-blocking known limit. Post-login limits still keyed by client IP where documented |
+| Session refresh | None. Default 30-minute TTL; re-login after expiry is accepted |
+| Trusted proxy | RC nginx sets `X-Forwarded-For` from `$remote_addr` and `X-Forwarded-Proto $scheme`; public TLS termination must overwrite proto correctly |
+| SP-API / OAuth | Capability-gated and **disabled by default**; live Amazon is R2e only, with explicit secrets and HTTPS |
 | Amazon publishing | Not enabled; generated content remains a review proposal |
 | Redis | Not deployed — config default unused by current business code |
 | Debug ports | Postgres/backend/frontend are not published; nginx binds `127.0.0.1:8080` only |
@@ -399,8 +413,9 @@ python scripts/check_service_health.py http://127.0.0.1:8080
 The probe is credential-free, rejects redirects and credential-bearing URLs, and validates
 both liveness and database readiness. Alert thresholds, privacy rules, backup retention,
 incident response, and the release evidence record are defined in
-`docs/operations-readiness.md`. Public deployment remains blocked until an external
-monitoring/notification system and a successful restore rehearsal satisfy that contract.
+`docs/operations-readiness.md`. Internal restore procedure is verified (R2d). Public
+deployment remains blocked until an external monitoring/notification system and
+production backup encryption/retention targets are connected.
 
 ## 22. Local debug (optional)
 
