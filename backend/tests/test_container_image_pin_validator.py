@@ -318,8 +318,8 @@ def test_validator_script_runs_from_repo_root() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().startswith(SUCCESS_MESSAGE)
-    assert "15 runtime external pinned references" not in result.stdout
-    assert "14 runtime external pinned references" in result.stdout
+    assert "16 runtime external pinned references" not in result.stdout
+    assert "15 runtime external pinned references" in result.stdout
     assert "8 scanner pinned references" in result.stdout
 
 
