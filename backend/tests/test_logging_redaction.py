@@ -19,3 +19,16 @@ def test_redact_sensitive_text_masks_bearer_api_key_jwt_and_url_credentials():
     assert "client_secret=csec" not in redacted
     assert "jwt:[REDACTED]" in redacted
     assert "user:pass" not in redacted
+
+
+def test_redact_sensitive_text_masks_oauth_query_values():
+    raw = (
+        "GET /api/v1/amazon/oauth/callback?state=state-canary"
+        "&spapi_oauth_code=code-canary&selling_partner_id=seller-canary HTTP/1.1"
+    )
+    redacted = redact_sensitive_text(raw)
+    assert "state-canary" not in redacted
+    assert "code-canary" not in redacted
+    assert "seller-canary" not in redacted
+    assert "state=[REDACTED]" in redacted
+    assert "spapi_oauth_code=[REDACTED]" in redacted

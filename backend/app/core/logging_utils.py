@@ -22,6 +22,9 @@ _JSON_TOKEN_RE = re.compile(
     r'(?i)"(access_token|refresh_token|client_secret)"\s*:\s*"[^"]*"'
 )
 _URL_CREDENTIALS_RE = re.compile(r"://[^:@/\s]+:[^@/\s]+@")
+_OAUTH_QUERY_RE = re.compile(
+    r"(?i)([?&](?:code|authorization_code|spapi_oauth_code|state|selling_partner_id)=)[^&#\s]*"
+)
 
 
 def user_log_ref(user_id: Any) -> str:
@@ -52,6 +55,7 @@ def redact_sensitive_text(text: str) -> str:
     redacted = _AMZ_ACCESS_TOKEN_HEADER_RE.sub("x-amz-access-token=[REDACTED]", redacted)
     redacted = _AMAZON_LWA_ATZA_RE.sub("Atza|[REDACTED]", redacted)
     redacted = _AMAZON_LWA_ATZR_RE.sub("Atzr|[REDACTED]", redacted)
+    redacted = _OAUTH_QUERY_RE.sub(r"\1[REDACTED]", redacted)
     return _URL_CREDENTIALS_RE.sub("://[REDACTED]:[REDACTED]@", redacted)
 
 

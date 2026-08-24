@@ -34,6 +34,7 @@ from app.core.exceptions import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from app.core.log_filter import install_sensitive_data_log_filter
 from app.core.rate_limit import limiter
 from app.core.response import success_response
 from app.database.session import get_db
@@ -42,6 +43,7 @@ from app.integrations.amazon.exceptions import AmazonError
 logging.basicConfig(level=logging.INFO)
 
 install_uvicorn_oauth_callback_access_log_filter()
+install_sensitive_data_log_filter()
 
 logger = logging.getLogger(__name__)
 
