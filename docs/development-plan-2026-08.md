@@ -1,388 +1,193 @@
 # SellerAI Copilot Development Plan
 
-**Plan version:** 2026-08-21
-**Code baseline:** Draft PR #1 on `codex/amazon-mvp-hardening`; code and internal RC verified at `40b040f`
-**Current verdict:** Core Amazon MVP, deterministic production build, cookie-only sessions, and internal RC (including backup/restore) are verified. Latest Quality Gate on `40b040f` is run `32417685212` (backend, frontend, containers success; production policy `blocked=0`). Public staging/production remain blocked on HTTPS/DNS/HSTS, external monitoring and backup targets, Seller Central approval, and **R2e** controlled Amazon acceptance.
-**Source of truth:** Current code, Alembic migrations, automated tests, and this plan. Earlier A3/A4 design reviews remain historical references and are not active delivery plans.
-**Alembic head:** `a0b1c2d3e4f6`
-**Tests:** backend pytest **1586 passed** (S4e local suite; same HEAD family as Quality Gate `32417685212`). Frontend ESLint 0/0, TypeScript, Vitest, and production build pass in the Quality Gate `frontend` job.
+**Plan version:** 2026-08-24（战略冻结版 / B0a）
+**Supersedes:** 2026-08-21 Amazon-first release plan
+**Formal code baseline:** merged `origin/main` at `e71522dfa72516056f24ee351d2ba17e7f46caa8` (`e71522d`). PR #1 was fast-forward merged onto `main`; it is not a Draft and is not the living baseline label.
+**Current product line:** **Listing Audit**（决策分析助手）。Amazon 同步与内容生成不再是当前发布主线。
+**Alembic head on main:** `a0b1c2d3e4f6`
+**B0 status:** In progress
+**B1 status:** 尚未进入已提交基线
+**Source of truth:** 已合并的 `main@e71522d`、其 Alembic 链、自动化测试与本计划。脏工作区只是待收编资产来源，不是 source of truth。
+**Authority:** 本计划不授权 merge、deploy、删除数据、启用 Amazon、公开 Analysis，或调用外部生产服务。
 
-## 1. Product objective
+## 0. 正式证据（main@e71522d / R3d）
 
-Deliver a tenant-safe SellerAI workflow in which a seller can:
+| 项 | 状态 |
+| --- | --- |
+| Commit | `e71522d` `fix(security): isolate session-scoped client state and rate limits (R3d)` |
+| Backend pytest | **1591 passed** |
+| Frontend Vitest | **112** |
+| ESLint | **0/0** |
+| Quality Gate | [main push run 32489619995](https://github.com/biforch/seller-ai-copilot/actions/runs/32489619995) **success** |
+| MFA | **未进入 main**，不得写成已完成 |
+| `ANALYSIS_PUBLIC_ENABLED` | **不存在于 main**。`false` 是 **B0f 待实现合同**，不是已落地开关 |
+| Listing Audit API | **未实现**。Sprint 0.5 schema / prompt / eval 资产仅存在于冻结脏工作区，尚未提交 |
+| Render adapter | 仍在 Draft [PR #3](https://github.com/biforch/seller-ai-copilot/pull/3)；**未合并、未部署**。R4d 指出 backend `PORT=8000` 与供应链扫描问题尚待修复 |
+| Amazon 发布门禁 | **真实 Amazon 不再是当前发布门禁**。原 R2e **停止执行**，除非未来独立战略决策恢复 Amazon |
+| 公开测试门禁 | HTTPS / DNS / HSTS、外部监控、生产备份目标。平台账号或域名准备就绪 **不等于** 已部署或已验证上线 |
 
-1. connect an Amazon seller account through OAuth;
-2. discover eligible marketplaces;
-3. synchronize seller listings without overwriting SellerAI-owned content;
-4. explicitly link an Amazon listing to a SellerAI product;
-5. enrich the listing with bounded Amazon catalog context;
-6. generate an AI proposal;
-7. review and approve the proposal through the existing immutable listing-version workflow.
+## 1. 产品目标
 
-Publishing content back to Amazon is **not** part of the current MVP. Human review remains mandatory.
+当前主线验证的是：卖家是否重视更好的 Listing 决策，而不是 SellerAI 能否连接 Amazon 或生产更多内容。
 
-## 2. Non-negotiable engineering rules
+目标价值路径（**尚未在 main 实现**；B3 go/no-go 前禁止公开 Analysis）：
 
-- Tenant ownership is checked in the database query, not only in the API layer.
-- Cross-tenant missing and forbidden resources use the same tenant-safe `404` contract.
-- Refresh tokens remain encrypted at rest; access tokens, OAuth codes, raw state tokens, page tokens, credentials, headers, and raw provider payloads are never persisted or logged.
-- OAuth state is opaque, server-bound, single-use, time-limited, and fail-closed.
-- External HTTP calls do not run inside long database transactions.
-- Sync writes are fenced by lease ownership and finalize atomically.
-- Amazon snapshots never overwrite `ListingVersion`, `ListingProposal`, or an existing `product_id` link.
-- Amazon listing identity remains `(amazon_account_id, marketplace_id, seller_sku)`; ASIN is not globally unique.
-- Production and RC deployment never read a repository `.env` implicitly.
-- No release promotion occurs while a required quality, image-build, migration, readiness, or smoke gate is failed or skipped.
+1. 粘贴 Listing 标题、五点描述与产品描述；
+2. 获得有输入证据支撑的 0–100 总分、维度分、优先问题、限制说明及最多三项行动建议；
+3. 先用内部注册切片证明质量（B1），再决定是否投资匿名/公开路径（B2/B3）。
 
-## 3. Current implementation status
+首轮公开测试的学习目标（仅在 B3 go 之后才适用）约为：50 位测试用户、至少 20 份反馈、至少 5 个明确的价值认可。这些是决策门槛，不是流量 KPI。
 
-### Complete
+本阶段（B0 清理与冻结）**禁止实现** `AnalysisReport` 表/migration、匿名 claim、或任何新业务 API。
 
-- Core project/product, generation quota, immutable listing versions, proposals, review UI, tenant isolation, pagination, and response contracts.
-- Amazon SP-API transport, LWA refresh, typed Sellers/Listings/Catalog clients, response limits, retries, redaction, and mock/sandbox support.
-- Encrypted Amazon accounts, seller ownership uniqueness, marketplace participation, sync logs, account-global leases, and stale-lease recovery.
-- OAuth configuration, consent URL allowlist, authorization-code exchange, PostgreSQL state persistence, replay protection, connect/reauthorize orchestration, and callback/start APIs.
-- Tenant-safe Amazon account reads, marketplace refresh, listing synchronization, listing reads, and manual REST triggers.
-- Amazon listing-to-product linking, catalog snapshot/enrichment, Amazon workspace UI, and catalog-aware AI proposal generation.
-- RC configuration validation, database readiness, production Dockerfiles, pinned GitHub Actions, backend/frontend quality jobs, Compose validation, and production-image build jobs.
-- Official-registry lockfile enforcement, digest-pinned runtimes, four-image SBOM/Trivy policy, Alpine backend runtime hardening, Next.js 16 migration, ESLint 0/0 CI, and amd64/arm64 backend scan coverage.
-- RC browser response headers, OAuth start/callback rate limiting, live-environment wildcard-CORS rejection, and production API-documentation suppression.
+## 2. 范围重置
 
-### Partial or deliberately deferred
+### 当前 P0
 
-- Account lifecycle: connect and reauthorize exist; disconnect/delete/ownership transfer do not.
-- Post-connect orchestration: marketplace refresh is manual rather than automatic.
-- Product linking UI only loads the first 100 products.
-- Product synchronization aggregates at most 10,000 listings in memory; no checkpointed large-catalog mode exists.
-- Stale sync-log recovery occurs on later lease acquisition; no scheduled recovery job exists.
-- Encryption supports a key ring, but no bulk rotation/re-encryption operational workflow exists.
-- Celery/Redis background execution is not wired into business code.
-- Amazon online behavior for Listings and Catalog has not been revalidated against a controlled live seller account.
-- GitHub backend, frontend, production image, SBOM, and vulnerability jobs pass remotely on Draft PR #1 (latest: Quality Gate `32417685212`).
-- Disposable RC start, smoke, restart, backup/restore into `sellerai_restore_test`, and label-verified cleanup have been rehearsed (R2d). Cookie-only browser RC followed in S4e.
-- No refresh token: sessions last 30 minutes (configurable 5–60); users re-login after expiry. This is an accepted product limit.
-- In-memory SlowAPI limiters are per Uvicorn worker (`--workers 2`); different workers do not share buckets. This is a known non-blocking limitation until a shared store is explicitly added.
+- 文本版 Listing Audit 作为产品主线。
+- 先完成 B0 基线拆分与冻结，再收编脏工作区中的安全/MFA/eval 基础设施。
+- B1 仅服务注册测试用户的内部垂直切片；公开访客路径不得抢跑。
 
-### Out of scope until explicitly approved
+### P1/P2（B1 质量 gate 通过后才评估）
 
-- Automatic ASIN/SKU-to-product guessing.
-- Direct mutation of an approved/current listing without the proposal workflow.
-- Automatic Amazon publishing.
-- Inventory, pricing, orders, advertising, or FBA workflows.
-- Multi-region or multi-marketplace parallel sync that weakens the account-global lease.
+- 确定性 Profit Analyzer。
+- 产品关联、再次分析与最小报告对比。
+- 图片输入必须在上传/存储、内容安全、隐私、保留期与多模态成本验收后单独立项。
 
-## 4. Latest review findings
+### 冻结范围
 
-### Release blockers
+冻结表示：**完整保留** 代码、历史表、migration、service、API 与测试；保持 feature flag 默认关闭；从主导航隐藏；停止功能扩展。**禁止删除** Amazon 或旧 generation 实现。
 
-1. **OAuth callback access-log exposure** — **Resolved in `ecbf770` (S1).**
-   `state`, `spapi_oauth_code`, and `selling_partner_id` arrive in a GET query. Default nginx and Uvicorn access logs can retain the complete request target even though application logs are redacted. RC nginx now disables callback access logs; backend installs a Uvicorn access-log filter; runbook documents upstream ingress requirements.
+冻结对象：
 
-2. **Amazon workspace request race** — **Resolved in `248687f` (S2).**
-   Marketplace and listing requests could resolve out of order after rapid account/marketplace changes. The workspace now fences reads with per-resource request gates, synchronously invalidates dependent state on selection changes, and scopes action results to the active account/marketplace.
+- Amazon OAuth、账户、市场、同步、Catalog、Seller Central 审核及原 R2e。
+- Listing / 关键词生成、proposal、diff、审核收件箱与 Amazon → AI Context。
+- 自动发布、PPC、关键词库、竞品爬取、复杂 Agent、多模型 fallback。
+- 复杂项目管理、订阅、团队/RBAC 与高级仪表盘。
 
-### Pre-staging security work
+Amazon 基础设施在 `main@e71522d` 上已经完成并完整保留，但当前冻结、默认关闭：
 
-3. **Browser bearer-token storage** — **Partially mitigated in `a73a104` (R2b), not resolved.**
-   The 24-hour JWT remains JavaScript-readable in `localStorage`. RC now emits a constrained CSP and other browser headers, but the policy retains narrowly documented inline allowances for Next.js and cannot protect a bearer token from every same-origin XSS or compromised dependency. S4 remains a public-launch gate.
+- `AMAZON_SP_API_ENABLED=false`
+- `AMAZON_OAUTH_ENABLED=false`
+- `AMAZON_SP_API_ENDPOINT_MODE=mock`
 
-4. **Mutable container bases** — **Resolved in `65fdc7f` (S3b).**
-   Python, Node, nginx, and PostgreSQL release/CI/dev references now use reviewed `tag@sha256:digest` pins with an offline validator and documented lifecycle policy.
+B0f 将同时隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-closed。该工作尚未实施。
 
-5. **Unapproved npm registry dependency** — **Resolved in `8b3f77d` (S3a).**
-   The frontend lockfile now resolves all tarballs from `registry.npmjs.org`; `.npmrc`, CI, Docker, and static validators fail closed before `npm ci` when disallowed sources appear.
+## 3. 可复用工程底座（仅限已合并 main）
 
-### Product usability debt
+### 已在 main@e71522d 可复用
 
-6. The Amazon product selector cannot reach products after the first 100.
+- Cookie-only 可撤销会话、CSRF、注销撤销、租户隔离、限流、安全响应头，以及 R3d 的 session-scoped 客户端状态隔离。
+- PostgreSQL、Alembic（head `a0b1c2d3e4f6`）、健康检查、确定性构建、镜像 pin、SBOM/Trivy policy、内部 RC runbook。
+- Generation 状态、幂等、配额预留/结算、token 估算及失败恢复。
+- Product 存储与可读取的旧 Generation 历史。
+- Amazon 集成代码与测试（冻结，默认关闭）。
+- 当前 AI provider 合同保持 main 现状：默认 `OPENAI_BASE_URL=https://openrouter.ai/api/v1`。默认 URL 改直连 OpenAI、以及 `store=false` 等 AI 安全合同，**以后单独审查**，不混入 MFA 或 Listing Audit 基础设施。
 
-## 5. Execution plan
+### 存在于冻结脏工作区、尚未进入 main（不得写成已完成）
 
-Work advances by acceptance gate, not by calendar date. A later phase must not start while an earlier blocking gate remains open.
+- 登录滥用防护与强制 MFA。
+- 应用日志敏感过滤器。
+- Sprint 0.5 Listing Audit schema、prompt 版本、15 个 synthetic cases、evaluation runner / summary / 人工评分基础设施。
+- Render 生产适配器（权威副本在 Draft PR #3，不从脏树提交）。
+- `docs/security/evidence/**` 等证据文件：等对应代码落地后再提交，禁止提前声称控制已完成。
 
-### S1 — OAuth callback log containment
+### 未来改造（均未在 main 实现）
 
-**Priority:** Immediate release blocker
-**Status:** Complete (`ecbf770`)
-**Scope:** nginx, production backend startup/logging, security tests, RC runbook.
+- 独立 `analysis` domain。B1 才允许注册用户 API；B2 才允许匿名 claim；B3 go/no-go 前禁止公开 Analysis。
+- `ANALYSIS_PUBLIC_ENABLED=false` 作为 B0f 的服务端/前端双重 fail-closed 合同，**现在还没有这个配置项**。
+- 新 analysis 包不得依赖 Amazon。
 
-Deliverables:
+## 4. 不可妥协规则
 
-- Add an exact nginx callback location whose access log is disabled or whose log format excludes query strings.
-- Disable Uvicorn production access logging, or install a proven callback request-target redaction filter before any request is emitted.
-- Preserve status/latency observability through safe fixed fields or proxy logs that omit query strings.
-- Add canary tests proving state, code, seller ID, tokens, and query strings are absent from proxy/backend logs.
-- Document that upstream ingress/CDN/load-balancer logs must also omit callback query strings.
+- 租户与报告所有权在数据库查询中执行；跨租户 missing/forbidden 使用一致的安全 `404`。
+- 脏工作区不是 source of truth。收编必须按 B0a–B0f 拆分；`tests/evals/**/runs/**` 永不提交。
+- 不提交 `.env`、credential、seller ID、OAuth material、claim token、原始 Listing corpus、dump 或 provider payload。
+- Listing 原文不得进入日志、反馈事件、错误遥测或营销系统，也不得用于训练。
+- 分数与建议必须引用输入证据；证据不足时声明限制，不得虚构销量、关键词量、竞品或市场事实。
+- 新迁移必须 additive；现有 Amazon、ListingVersion、Proposal 与 Generation 保持可读。**本阶段禁止新增 AnalysisReport migration。**
+- RC/生产不隐式读取仓库 `.env`；任何必需 gate 失败或跳过时不得晋级。
+- 用户已准备 Cloudflare / Render / 域名 **不等于** 已经部署或验证；禁止写成已上线。
+- Human review 始终必需；自动 Amazon publishing 不在本计划内。
 
-Exit gate:
+## 5. 当前状态
 
-- Callback success, provider denial, invalid/replayed state, and unexpected-failure tests pass.
-- Canary values do not appear in application, Uvicorn, nginx, or captured container logs.
-- No change to fail-closed state consumption semantics.
+### 已完成且属于 main@e71522d
 
-### S2 — Amazon workspace concurrency correctness
+- 产品/项目存储、状态机、配额、幂等、不可变 Listing 历史与租户安全响应约定。
+- Cookie-only 服务端会话、CSRF、注销撤销与 R3d 会话隔离。
+- 确定性构建、镜像 pin、官方 npm registry、SBOM/Trivy policy、内部 RC 与备份恢复演练文档（内部 RC，不是生产部署）。
+- Amazon 集成技术上已完成并保留，但是 **dormant / frozen** 可选能力，不是产品主线，也不是当前发布门禁。
 
-**Priority:** Immediate correctness blocker
-**Status:** Complete (`248687f`)
-**Scope:** Amazon workspace request lifecycle and frontend tests.
+### 进行中（B0 In progress）
 
-Deliverables:
+- B0a：本战略冻结文档（本 commit）。
+- 后续 B0 收编必须在独立 worktree/PR 中进行，禁止把脏树当作可发布基线。
+- B0f 待实现：隐藏 Amazon 与旧 Generate 入口；新增 `ANALYSIS_PUBLIC_ENABLED=false` 并服务端 fail-closed。
 
-- Abort superseded marketplace/listing requests or use monotonic request generations.
-- Before committing a response, verify the account and marketplace still match the active selection.
-- Prevent stale requests from clearing the active request's loading state.
-- Clear dependent marketplace/listing/catalog state synchronously when a parent selection changes.
-- Cover rapid account switching, rapid marketplace switching, rejection after supersession, and unmount cancellation.
+### 阻塞公开测试
 
-Exit gate:
+- Listing Audit 尚未进入已提交基线；更没有公开 API。
+- 匿名报告、TTL/清理、claim token 与 MFA 后认领：**未实现，本阶段禁止实现**。
+- 强制 MFA：**未进入 main**。
+- HTTPS/DNS/HSTS、外部监控与生产备份目标。
+- Render adapter 未合并；R4d P1/P2 未修复；没有生产部署授权。
 
-- Deliberately reversed response order cannot show or act on stale account data.
-- Existing sync, link, catalog, pagination, and error behavior remains intact.
-- Frontend type-check and production build pass.
+## 6. 执行计划
 
-### S3 — Dependency and image supply-chain hardening
+按证据 gate 推进。较晚的公开阶段不得绕过较早的阻塞 gate。
 
-**Priority:** Required before staging
-**Status:** Complete and remotely verified
-**Scope:** lockfile, production Dockerfiles, Compose/CI image references, release tests.
+### B0 — 基线拆分与战略冻结
 
-#### S3a — Official npm registry
+**Status:** In progress
 
-**Status:** Complete (`8b3f77d`)
+**Entry:** `main@e71522d` 已合并；脏工作区已只读盘点。
 
-Deliverables:
+计划中的收编顺序（文档合同，不是本 PR 的实现范围）：
 
-- Point frontend installs at `https://registry.npmjs.org/` via `.npmrc`.
-- Normalize lockfile tarball sources to the official registry without changing dependency graph metadata.
-- Add a static lockfile registry validator and node:test coverage.
-- Run the validator in CI and production Docker deps stages before `npm ci`.
+- B0a：战略冻结文档（本文件与 `docs/strategy-reset-migration-plan-v0.1.md`）。
+- B0b：安全日志脱敏。
+- B0c → B0d：同一 PR 两个 commit，先登录滥用防护，再强制 MFA。
+- B0e：Sprint 0.5 schema / prompt / eval 基础设施（不含 `runs/**`）。
+- B0f：隐藏 Amazon 与旧 Generate；实现 `ANALYSIS_PUBLIC_ENABLED=false` 双重 fail-closed。
+- Render 继续只走 Draft PR #3，不从脏树提交。
 
-Exit gate:
+**Exit:** 变更可独立审查；冻结能力在 UI 与服务端双重关闭；必需测试绿色；**未部署**。`ANALYSIS_PUBLIC_ENABLED` 在 B0f 落地前不得写成已存在。
 
-- No `registry.npmmirror.com` URL remains in the tracked lockfile.
-- Clean-cache `npm ci` succeeds from the official registry.
-- Validator rejects spoofed hosts, non-HTTPS sources, ports, query strings, fragments, and userinfo.
+### B1 — 内部 Listing Audit 垂直切片
 
-#### S3b — Runtime lifecycle and image digest pinning
+**Status:** 尚未进入已提交基线（Next）
+**Access:** 仅注册测试用户。禁止匿名架构抢跑。
 
-**Status:** Complete (`65fdc7f`)
+**Entry:** B0 冻结合同成立；准备收编或重建 Listing Audit 契约后，才允许实现注册用户 API/UI。
 
-Deliverables:
+脏工作区中的 Sprint 0.5 schema、prompt、15 个 synthetic cases 与 eval harness **还不是 main 的一部分**。B1 不得把未提交资产或 eval 运行输出当成已发布能力。
 
-- Pin Python, Node, nginx, and PostgreSQL production/CI images to reviewed `tag@sha256:digest` references.
-- Keep human-readable tags beside digests for maintainability.
-- Add an explicit, reviewable update process for dependency/image digest changes.
+**Exit:** 契约稳定；每个问题/行动可追溯或明确标为限制；失败/重试不重复扣费；无 Amazon 依赖；人工质量评审确认值得继续。**若人工质量 gate 失败，不得进入 B2 匿名体系。**
 
-Exit gate:
+B1 仍不实现公开 Analysis、匿名 claim，或把 kill switch 打开。
 
-- Rebuilding the same commit resolves the same base image digests.
+### B2 — 匿名价值路径与报告认领
 
-#### S3c — SBOM and vulnerability policy
+**Entry:** B1 人工质量 gate **通过**。
 
-**Status:** Complete and remotely verified
+此后才允许 additive `analysis_reports`、匿名 claim 与公开文本分析。B0/B1 阶段禁止这些实现。
 
-Deliverables:
+**Exit:** 完整报告在注册前可见；报告不可枚举；并发认领只有一个 winner；滥用、预算、provider failure、timeout 与 kill switch 均 fail-closed。
 
-- CycloneDX SBOM generation for backend, frontend, and nginx production images.
-- Offline Trivy vulnerability scans from saved image tar (no Docker socket in scanner containers).
-- Fail-closed policy evaluator (CRITICAL always blocks; HIGH blocks when fix exists).
-- CI artifacts with 14-day retention; no `.trivyignore` in initial phase.
+### B3 — 公开体验、历史与衡量
 
-Exit gate (verification):
+**Entry:** B2 安全/滥用/认领 gate 通过，且 `ANALYSIS_PUBLIC_ENABLED` 仍默认 false，直到独立 go/no-go。
 
-- Remote `containers` job completes build + SBOM + Trivy + policy evaluation with pinned scanner images.
-- S3c may be marked **Verified** only after that remote proof — not after local fixture tests alone.
+**Exit / go/no-go:** HTTPS+HSTS、精确 CORS、外部监控、生产备份、删除作业、预算 guard、隐私说明齐备。**B3 go/no-go 前禁止公开 Analysis。** 平台准备就绪不是 go。
 
-**S3 overall:** Complete. Production policy passes for backend amd64/arm64, frontend, and nginx with `blocked=0`; evidence is retained in the Quality Gate artifacts.
+### B4 — Profit Analyzer 与受控扩展
 
-### S4 — Browser authentication hardening
+**Entry:** Listing Audit 已获得用户价值证据。恢复或扩展 Amazon 不在此列。
 
-**Priority:** Required before public staging
-**Status:** Complete — **S4e verified** (cookie-only RC acceptance closed)
+## 7. 验证与发布 Gate
 
-#### S4b1 — Revocable cookie sessions and CSRF (backend)
-
-**Status:** Complete (`f629d6c`)
-
-- PostgreSQL `auth_sessions` stores SHA-256 hashes of `jti` and CSRF token only.
-- HttpOnly `sellerai_session` JWT (5–60 minutes, default 30) plus readable `sellerai_csrf` double-submit token.
-- `POST /auth/logout` revokes the server-side session before clearing cookies.
-
-#### S4c — Frontend cookie session migration
-
-**Status:** Complete (`014d7cf`)
-
-Frontend cookie sessions; no localStorage bearer persistence.
-
-#### S4d — Cookie-only authentication (backend Bearer removal)
-
-**Status:** Complete (`a61ef34`; Quality Gate `32412640995`)
-
-- Removed `HTTPBearer` / `Authorization: Bearer` acceptance for user sessions.
-- Login always creates DB-backed sessions and HttpOnly cookies; response schema has no `access_token`.
-- Login/register enforce strict Origin allowlist; OAuth start rate limits keyed by validated session hash.
-- Rollback requires reverting S4c+S4d together; no runtime Bearer toggle remains.
-
-**S4d exit gate:** satisfied — cookie-only sessions enforced; Bearer path deleted.
-**Evidence:** commit `a61ef34`; Quality Gate run `32412640995`.
-
-#### S4e — Cookie-only RC security acceptance
-
-**Status:** Complete / Verified
-
-Local disposable Compose project `sellerai_s4e` (HTTP loopback, `SESSION_COOKIE_SECURE=false`) verified:
-
-- Cookie attributes: `sellerai_session` HttpOnly, `sellerai_csrf` readable, `SameSite=Lax`, `Path=/`, host-only, `Max-Age=1800`, no `Secure` on HTTP RC.
-- CSRF, Origin allowlist, session fixation, logout revoke-then-clear, tenant isolation, and browser login/refresh/new-tab/logout contracts passed.
-- OAuth disabled start returns `AMAZON_OAUTH_DISABLED` without network calls; start is rate-limited by validated session hash; callback GET stays on the exact nginx location with log isolation.
-- Public staging/production still require `SESSION_COOKIE_SECURE=true`. HTTP RC may set `false` only when `CORS_ORIGINS` is loopback HTTP.
-- No refresh token: sessions last 30 minutes; users re-login after expiry. Public HTTPS must sit in front of the app before enabling `Secure` cookies.
-
-**Evidence:** commit `3553406` (`fix(security): close cookie session RC gaps (S4e)`); Quality Gate run `32415940128`. Chrome headless login/refresh/new-tab/logout passed (16/16). S4d baseline remains run `32412640995`. Documentation of that evidence is `40b040f`.
-
-**S4 overall exit gate:** satisfied for cookie-only authentication. Public launch still requires approved HTTPS/DNS, HSTS at the TLS edge, external monitoring, and R2e.
-
-### R1 — Remote quality gate and deterministic build
-
-**Status:** Complete
-**Evidence:** Quality Gate run `32276998695` for the integrated baseline and run `32280189796` for R2b both passed backend, frontend, containers, SBOM, Trivy, and policy evaluation.
-
-#### R1a — Remote supply-chain verification
-
-**Status:** Complete
-
-**R1a-1 local npm toolchain gate (complete):**
-
-- Reclassified prior `@emnapi/runtime` extraneous finding as **`NPM_TOOLCHAIN_VERSION_MISMATCH`**, not lockfile graph defect.
-- Pinned reproducible frontend toolchain: Node **24.19.0**, npm **11.17.0** (matches S3b `node:24-alpine` digest).
-- npm **[PR #9221](https://github.com/npm/cli/pull/9221)** fix: lockfile inert optional entries stay; reifier bug fixed in npm **11.13.0+**.
-- Added fail-closed `validate-node-toolchain` and `validate-installed-dependency-tree` gates in CI and Docker (pre/post `npm ci`).
-- Lockfile dependency graph unchanged; only root `engines` metadata updated.
-- **Prohibited:** deleting `@emnapi/runtime` lock entries, direct dependency workaround, extraneous allowlists.
-
-Deliverables (completed):
-
-- Push authorized branch and execute remote `containers` job on GitHub runners.
-- Prove real build + `docker image save` + Syft SBOM + Trivy JSON + policy evaluator on all three production images.
-- Collect CI artifacts (`sellerai-supply-chain-<sha>`) and record scan summary.
-- If policy blocks on CRITICAL or fixable HIGH, report CVE/package/image summaries — do not add ignore rules in S3c.
-
-Exit gate:
-
-- Remote `containers` job passes with no skipped scan step. **Complete.**
-- S3c is marked **Verified** only after that remote proof. **Complete.**
-
-#### R1b — Full remote quality gate
-
-**Status:** Complete
-**Entry:** R1a complete.
-
-Deliverables:
-
-- Review local commits as a bounded branch/PR sequence.
-- Push only after explicit authorization.
-- Require backend, frontend, Compose, and production-image jobs to pass.
-- Record exact commit, migration head, action SHAs, image digests, test totals, and build artifacts.
-
-Exit gate: all required remote jobs pass with no skipped job and no secret-bearing logs/artifacts.
-
-### R2 — Release-candidate and operational acceptance
-
-**Status:** Internal RC complete; R2e remains pending external authorization
-
-#### R2a — Final read-only readiness audit
-
-**Status:** Complete (`R2A_READY_WITH_PRECONDITIONS`)
-
-#### R2b — Browser edge and OAuth boundary hardening
-
-**Status:** Complete (`a73a104`; remote run `32280189796`)
-
-- OAuth start is limited by a validated session digest; callback is limited at the exact nginx path by source IP without logging its query.
-- RC nginx emits CSP, referrer, MIME-sniffing, clickjacking, and Permissions-Policy headers.
-- Staging/production reject wildcard CORS and disable FastAPI documentation/OpenAPI endpoints.
-- HSTS remains the responsibility of the future approved HTTPS termination layer; the loopback HTTP RC does not emit false HSTS.
-
-#### R2c — Operations contract
-
-**Status:** Complete (`7e96738`; `docs/operations-readiness.md`, `docs/rc-deployment-runbook.md`)
-
-- Credential-free health probe for an external scheduler (`backend/scripts/check_service_health.py`).
-- Alert thresholds, ownership, redaction, incident response, artifact retention, RPO ≤24 hours and RTO ≤4 hours as policy targets.
-- Repeatable `pg_dump -Fc` / isolated `sellerai_restore_test` restore commands in the RC runbook.
-- Does **not** provision a monitoring vendor, DNS, TLS, or production backup storage.
-
-#### R2d — Disposable local RC acceptance
-
-**Status:** Complete — backup/restore rehearsal verified
-
-- Local Compose project `sellerai_r2d`: production images, one-shot migrate, `/health` and `/health/ready`, docs 404, non-root backend/frontend, nginx loopback only, non-LLM smoke, restart, label-verified cleanup.
-- `pg_dump -Fc`, `pg_restore --list`, restore into isolated `sellerai_restore_test`, Alembic/row-count checks, then drop only that restore database.
-- At rehearsal time the restored Alembic head was `f9a0b1c2d3e4`. Current application head is `a0b1c2d3e4f6` (`auth_sessions` from S4b1); repeat current RC restore against `a0b1c2d3e4f6`.
-- Nginx callback query isolation fix: `7bfd264` (`error_log stderr error;` / `limit_req_log_level notice;`).
-- Later cookie-only HTTP RC and real Chrome acceptance: **S4e** (`3553406`, Quality Gate `32415940128`).
-
-Exit gate: satisfied for internal disposable RC. Not a substitute for production backup infrastructure or R2e.
-
-#### R2e — Controlled Amazon acceptance
-
-**Status:** Pending / External authorization required
-
-**Entry:** approved Amazon Developer Console configuration, disposable seller test scope, and public HTTPS (not loopback HTTP RC).
-**Deliverables:**
-
-- Verify exact OAuth redirect registration and Product Listing/Catalog roles.
-- Execute one controlled OAuth connect/reauthorize flow.
-- Refresh marketplaces, synchronize one marketplace, enrich representative listings, link a product, and create a proposal.
-- Exercise provider denial, token invalidation, rate limiting, pagination, empty enumeration, and reauthorization-required behavior where safely possible.
-- Confirm access logs and persisted records contain no OAuth code, token, state, page token, raw payload, or sensitive headers.
-
-Amazon SP-API and OAuth stay **disabled** in internal RC. Enable them only for this controlled acceptance.
-
-Exit gate: documented, redacted evidence of the complete seller-to-proposal flow and an explicit go/no-go decision for public staging.
-
-#### R2f — Merge gate versus production release gate
-
-These are separate authorizations.
-
-**PR merge gate (code):** Quality Gate green, linear history, no merge conflict, S4 cookie-only complete, internal R2d/S4e RC complete. Draft PR #1 may be marked Ready and merged **only** after final human review **and** explicit merge authorization. R2e is **not** an absolute precondition for merging the branch.
-
-**Production / public staging release gate:** approved HTTPS termination with HSTS and correct `X-Forwarded-Proto`; `SESSION_COOKIE_SECURE=true`; exact CORS origins; external monitoring and production backup targets; Seller Central application review and redirect allowlist; **R2e** controlled Amazon acceptance; production go/no-go.
-
-Pushing `main` and public deployment remain separate explicit authorization points after merge.
-
-### P1 — Product selector scalability
-
-**Entry:** Security blockers closed; may run before or after R2e if it does not delay release validation.
-
-- Replace fixed first-page loading with server-side search and paginated selection.
-- Resolve already-linked products by ID even when outside the current result page.
-- Preserve tenant filtering and abort stale searches.
-
-### P2 — Account lifecycle design
-
-Disconnect is not a trivial UI action. Define before implementing:
-
-- whether disconnect deletes the account or clears ciphertext and marks it disabled;
-- whether disabled accounts retain global seller ownership;
-- behavior for listings, catalog snapshots, product links, sync logs, and active leases;
-- re-connect and ownership-transfer semantics;
-- audit requirements and irreversible-action confirmation.
-
-No disconnect endpoint is added until these rules, migration impact, and concurrency tests are approved.
-
-### P3 — Operational resilience
-
-Implement only from measured need:
-
-- scheduled stale-processing-log reconciliation;
-- active encryption-key rotation/re-encryption workflow;
-- checkpointed/chunked sync for sellers that exceed current page/item/time limits;
-- async worker/Celery wrapper that preserves the same lease and idempotency contracts.
-
-## 6. Required validation matrix
-
-Every implementation phase runs its directed tests plus:
+每个实施阶段至少运行：
 
 ```bash
 cd backend
@@ -392,6 +197,8 @@ mypy app scripts
 
 cd ../frontend
 npx tsc --noEmit
+npm run lint
+npm run test
 npm run build
 
 cd ..
@@ -399,18 +206,29 @@ docker compose --env-file .env.rc.example -f docker-compose.rc.yml config --quie
 git diff --check
 ```
 
-For changes involving models or migrations, additionally require upgrade → downgrade → re-upgrade against the dedicated migration test database. For concurrency, lease, OAuth state, account ownership, or sync-finalization changes, require real PostgreSQL multi-session tests.
+- **Code merge:** 范围干净、required checks 绿色、migration chain 验证、无 secret/user data，并获得明确 merge 授权。本 B0a PR 是 documentation-only，不授权 merge。
+- **Internal test:** B1 完成并批准测试数据。
+- **Public staging / production:** B3 go/no-go 通过；HTTPS+HSTS、监控、备份与明确授权齐备。
+- **Amazon:** 不再是当前产品的发布 gate。恢复 Amazon 必须单独产品决策，并重新做上线验收；不得默认继续原 R2e。
 
-## 7. Commit and review policy
+## 8. 数据迁移策略
 
-- One concern per commit; security, auth architecture, supply chain, and product behavior remain separate.
-- Never commit `.env`, credentials, test seller identifiers, OAuth codes, raw state, tokens, database dumps, or captured provider payloads.
-- Keep the two historical A3/A4 design-review files excluded unless a separate documentation decision explicitly includes them.
-- Before each commit: inspect staged file list, run `git diff --cached --check`, and verify no unrelated user changes are staged.
-- Do not push, deploy, call real Amazon, or perform destructive RC cleanup without explicit authorization and target confirmation.
+- 只做 additive migration；验证期不删除 Amazon、ListingVersion、ListingProposal 或 legacy Generation 表、service 或测试。
+- 正式 Alembic head 在 MFA 收编前保持 `a0b1c2d3e4f6`。
+- 本阶段禁止新增 AnalysisReport / claim migration。
+- `tests/evals/listing_audit/runs/**` 永不提交；`cases.json`、runner、rubric、schema、prompt 与可重复 summary 脚本必须保留并在 B0e 收编。
 
-## 8. Decision checkpoints
+## 9. Commit 与审查策略
 
-The next step is remaining **release** gates, not code-merge gates: approved HTTPS/DNS/HSTS, external monitoring and backup targets, then R2e controlled Amazon acceptance. Cookie-only authentication (S4b1–S4e) and internal RC (R2c/R2d) are closed.
+- 一项关注点一个 commit。战略文档、日志脱敏、登录防护、MFA、Listing Audit 基础设施、Amazon/Generate 隐藏、Render 适配器分开。
+- A3/A4 设计评审继续不提交、不删除、不处理。
+- 未获明确授权，不 push `main`、merge、deploy、调用真实 Amazon 或执行 destructive cleanup。
 
-Automatic Amazon publishing remains outside the plan until the read/sync/proposal workflow has production evidence, an explicit publishing threat model, rollback/reconciliation semantics, and separate user authorization.
+## 10. 决策检查点
+
+1. **现在：** 完成 B0 文档冻结与后续收编拆分。GO for B0 清理；NO-GO for 公开部署。
+2. **B1 后：** 人工质量证据决定是否投资匿名体系。失败则停止，不进入 B2。
+3. **B2/B3 后：** 决定公开测试是否安全、可衡量。B3 前 Analysis 保持关闭。
+4. **Amazon：** 只通过独立战略决策重启，并重新验收；原 R2e 不再自动恢复。
+
+当前结论：**GO for B0 documentation freeze and later isolated ingest；NO-GO for anonymous/public Analysis, Amazon-on, Render production, or any deployment.**
