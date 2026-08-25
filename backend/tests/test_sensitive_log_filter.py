@@ -39,6 +39,13 @@ def test_sensitive_log_filter_redacts_nested_mapping_arguments():
     assert "canary" not in record.getMessage()
 
 
+def test_sensitive_log_filter_redacts_opaque_positional_secret_from_message_context():
+    record = _record(msg="password=%s", args=("opaque-password-canary",))
+    SensitiveDataLogFilter().filter(record)
+    assert record.getMessage() == "password=[REDACTED]"
+    assert "opaque-password-canary" not in record.getMessage()
+
+
 def test_sensitive_log_filter_redacts_exception_arguments():
     try:
         raise RuntimeError("Bearer exception-token-canary")

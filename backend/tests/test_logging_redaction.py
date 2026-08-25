@@ -32,3 +32,18 @@ def test_redact_sensitive_text_masks_oauth_query_values():
     assert "seller-canary" not in redacted
     assert "state=[REDACTED]" in redacted
     assert "spapi_oauth_code=[REDACTED]" in redacted
+
+
+def test_redact_sensitive_text_masks_cookie_password_and_csrf_values():
+    raw = (
+        "Cookie: sellerai_session=session-canary; sellerai_csrf=csrf-cookie-canary\n"
+        "password=password-canary csrf_token=csrf-token-canary"
+    )
+    redacted = redact_sensitive_text(raw)
+    assert "session-canary" not in redacted
+    assert "csrf-cookie-canary" not in redacted
+    assert "password-canary" not in redacted
+    assert "csrf-token-canary" not in redacted
+    assert "Cookie: [REDACTED]" in redacted
+    assert "password=[REDACTED]" in redacted
+    assert "csrf_token=[REDACTED]" in redacted

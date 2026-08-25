@@ -46,9 +46,10 @@ class SensitiveDataLogFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
-            if isinstance(record.msg, str):
-                record.msg = redact_sensitive_text(record.msg)
-            record.args = _redact_value(record.args)
+            # Render first so a sensitive label in msg protects an otherwise opaque
+            # positional value (for example: logger.info("password=%s", value)).
+            record.msg = redact_sensitive_text(record.getMessage())
+            record.args = ()
             _redact_exception_info(record)
         except Exception:
             record.msg = _REDACTION_FAILURE_MESSAGE

@@ -11,8 +11,10 @@ _BEARER_RE = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
 _API_KEY_RE = re.compile(r"(sk-[A-Za-z0-9_-]{8,})", re.IGNORECASE)
 _JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 _TOKEN_KV_RE = re.compile(
-    r"(?i)\b(access_token|refresh_token|client_secret|api_key)\s*[:=]\s*\S+"
+    r"(?i)\b(access_token|refresh_token|client_secret|api_key|password|csrf_token|"
+    r"session_token|jwt_secret_key|token_encryption_key|mfa_secret)\s*[:=]\s*\S+"
 )
+_COOKIE_HEADER_RE = re.compile(r"(?i)\b(set-cookie|cookie)\s*:\s*[^\r\n]*")
 _AMZ_ACCESS_TOKEN_HEADER_RE = re.compile(
     r"(?i)x-amz-access-token\s*[:=]\s*\S+"
 )
@@ -49,6 +51,7 @@ def redact_sensitive_text(text: str) -> str:
     if not text:
         return text
     redacted = _BEARER_RE.sub("Bearer [REDACTED]", text)
+    redacted = _COOKIE_HEADER_RE.sub(r"\1: [REDACTED]", redacted)
     redacted = _API_KEY_RE.sub("sk-[REDACTED]", redacted)
     redacted = _JWT_RE.sub("jwt:[REDACTED]", redacted)
     redacted = _TOKEN_KV_RE.sub(r"\1=[REDACTED]", redacted)
