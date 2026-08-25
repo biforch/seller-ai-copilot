@@ -36,13 +36,6 @@ def test_production_cannot_bypass_rate_limit_with_x_test_client_ip(
     valid_listing_payload,
     monkeypatch,
 ):
-    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
-    monkeypatch.setattr(settings, "SESSION_COOKIE_SECURE", False)
-    monkeypatch.setattr(
-        "app.core.rate_limit.get_remote_address",
-        lambda request: "203.0.113.55",
-    )
-
     async def fake_generate_listing(self, **kwargs):
         result = dict(VALID_LISTING_OUTPUT)
         result["tokens_used"] = 1
@@ -52,6 +45,15 @@ def test_production_cannot_bypass_rate_limit_with_x_test_client_ip(
 
     tenant = tenant_bundle("prod-rate-limit")
     base_headers = auth_header(tenant["user"])
+
+    # Establish the fixture's MFA-verified testing session before switching
+    # the rate-limit key into its production behavior.
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "SESSION_COOKIE_SECURE", False)
+    monkeypatch.setattr(
+        "app.core.rate_limit.get_remote_address",
+        lambda request: "203.0.113.55",
+    )
 
     first_ip = {**base_headers, "X-Test-Client-IP": "10.99.1.1"}
     second_ip = {**base_headers, "X-Test-Client-IP": "10.99.2.2"}

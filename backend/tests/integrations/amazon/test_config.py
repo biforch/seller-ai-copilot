@@ -6,6 +6,8 @@ from pydantic import ValidationError
 from app.core.config import Settings
 from app.integrations.amazon.config import AmazonEndpointMode, AmazonSettings
 
+MFA_TEST_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+
 
 def test_default_settings_disabled_and_mock():
     app_settings = Settings(
@@ -60,6 +62,7 @@ def test_production_rejects_non_amazon_lwa_host():
             DATABASE_URL="postgresql://example.com:5432/sellerai_prod",
             JWT_SECRET_KEY="x" * 32,
             OPENAI_API_KEY="test-openai-key",
+            MFA_ENCRYPTION_KEY=MFA_TEST_KEY,
             AMAZON_SP_API_ENABLED=True,
             AMAZON_LWA_CLIENT_ID="id",
             AMAZON_LWA_CLIENT_SECRET="secret",

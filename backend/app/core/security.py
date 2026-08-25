@@ -63,6 +63,8 @@ def _decode_session_cookie(token: str) -> dict:
 async def _resolve_cookie_user(
     session_cookie: str | None,
     db: Session,
+    *,
+    require_mfa: bool = True,
 ) -> dict:
     if not session_cookie:
         raise auth_session_invalid_exception()
@@ -79,12 +81,15 @@ async def _resolve_cookie_user(
         email=payload.get("email") if isinstance(payload.get("email"), str) else None,
         user_id=str(user_id),
     )
+    if require_mfa and not validated.mfa_verified:
+        raise auth_session_invalid_exception()
     return {
         "id": validated.user_id,
         "email": validated.email,
         "auth_method": "cookie",
         "jti": validated.jti,
         "session_id": str(validated.session_id),
+        "mfa_verified": validated.mfa_verified,
     }
 
 
@@ -96,12 +101,20 @@ async def get_current_user(
     return await _resolve_cookie_user(session_cookie, db)
 
 
+async def get_mfa_pending_user(
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    db: Session = Depends(get_db),
+):
+    """Resolve a password-authenticated session before mandatory MFA completes."""
+    return await _resolve_cookie_user(session_cookie, db, require_mfa=False)
+
+
 async def get_logout_context(
     session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     db: Session = Depends(get_db),
 ) -> dict:
     """Resolve logout context from the active cookie session only."""
-    return await _resolve_cookie_user(session_cookie, db)
+    return await _resolve_cookie_user(session_cookie, db, require_mfa=False)
 
 
 def decode_session_cookie(token: str) -> dict:

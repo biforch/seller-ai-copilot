@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, Integer, LargeBinary, String, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.session import Base
@@ -33,6 +33,10 @@ class User(Base):
     locked_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    mfa_secret_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    mfa_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    mfa_recovery_code_hashes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    mfa_last_totp_counter: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now())
 
     products = relationship("Product", back_populates="user", cascade="all, delete")

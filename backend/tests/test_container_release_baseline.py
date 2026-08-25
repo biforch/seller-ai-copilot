@@ -23,6 +23,7 @@ from scripts.validate_rc_environment import (  # noqa: E402
     DB_PASSWORD_PLACEHOLDER,
     FAILURE_PREFIX,
     JWT_PLACEHOLDER,
+    MFA_KEY_PLACEHOLDER,
     SUCCESS_MESSAGE,
     RCEnvironmentError,
     main,
@@ -107,6 +108,7 @@ def _valid_rc_env(**overrides: str) -> dict[str, str]:
         "POSTGRES_DB": "sellerai_rc_test",
         "DATABASE_URL": f"postgresql://sellerai_rc:{password}@postgres:5432/sellerai_rc_test",
         "JWT_SECRET_KEY": jwt,
+        "MFA_ENCRYPTION_KEY": base64.b64encode(b"m" * 32).decode("ascii"),
         "OPENAI_API_KEY": "rc-placeholder-not-for-real-llm",
         "CORS_ORIGINS": "http://127.0.0.1:8080",
         "NEXT_PUBLIC_API_URL": "/api/v1",
@@ -300,6 +302,7 @@ def test_rc_compose_requires_critical_env_vars() -> None:
         "POSTGRES_DB",
         "DATABASE_URL",
         "JWT_SECRET_KEY",
+        "MFA_ENCRYPTION_KEY",
         "OPENAI_API_KEY",
         "CORS_ORIGINS",
         "ENVIRONMENT",
@@ -1005,7 +1008,7 @@ def test_alembic_head_unchanged() -> None:
         text=True,
         check=True,
     )
-    assert "0a1b2c3d4e5f (head)" in result.stdout
+    assert "1b2c3d4e5f6a (head)" in result.stdout
 
 
 def test_validator_accepts_valid_rc_environment() -> None:
@@ -1074,6 +1077,8 @@ def test_validator_rejects_unsafe_amazon_profile(overrides, reason_fragment) -> 
         ({"DATABASE_URL": "postgresql://sellerai_rc:pw@8.8.8.8:5432/sellerai_rc_test"}, "RC postgres service"),
         ({"DATABASE_URL": "postgresql://sellerai_rc:pw@postgres:5432/other_db_test"}, "must match POSTGRES_DB"),
         ({"JWT_SECRET_KEY": JWT_PLACEHOLDER}, "JWT_SECRET_KEY placeholder"),
+        ({"MFA_ENCRYPTION_KEY": MFA_KEY_PLACEHOLDER}, "MFA_ENCRYPTION_KEY placeholder"),
+        ({"MFA_ENCRYPTION_KEY": "not-base64"}, "MFA_ENCRYPTION_KEY must be valid base64"),
         ({"POSTGRES_PASSWORD": DB_PASSWORD_PLACEHOLDER}, "POSTGRES_PASSWORD placeholder"),
         (
             {

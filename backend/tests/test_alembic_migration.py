@@ -157,7 +157,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "0a1b2c3d4e5f"
+        assert current == "1b2c3d4e5f6a"
 
     amazon_unique = {
         tuple(constraint["column_names"])
@@ -295,8 +295,14 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
         "csrf_token_hash",
         "expires_at",
         "revoked_at",
+        "mfa_verified_at",
+        "mfa_failed_attempts",
         "created_at",
     }.issubset(auth_session_columns)
+    auth_session_checks = {
+        check["name"] for check in inspector.get_check_constraints("auth_sessions")
+    }
+    assert "ck_auth_sessions_mfa_failed_attempts_range" in auth_session_checks
     auth_session_unique = {
         tuple(constraint["column_names"])
         for constraint in inspector.get_unique_constraints("auth_sessions")
@@ -306,6 +312,14 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     assert "ix_auth_sessions_user_id_revoked_at" in auth_session_indexes
     assert "ix_auth_sessions_expires_at" in auth_session_indexes
     assert _fk_ondelete(inspector, "auth_sessions", "user_id") == "CASCADE"
+
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    assert {
+        "mfa_secret_ciphertext",
+        "mfa_enabled_at",
+        "mfa_recovery_code_hashes",
+        "mfa_last_totp_counter",
+    }.issubset(user_columns)
 
     oauth_state_columns = {
         column["name"] for column in inspector.get_columns("amazon_oauth_states")

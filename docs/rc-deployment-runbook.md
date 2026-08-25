@@ -26,6 +26,7 @@ Edit `.env.rc` and replace **all** placeholders before starting:
 - `POSTGRES_PASSWORD`
 - `DATABASE_URL` (username and password must match `POSTGRES_USER` / `POSTGRES_PASSWORD`; percent-encode reserved characters in the URL only)
 - `JWT_SECRET_KEY` (at least 32 characters)
+- `MFA_ENCRYPTION_KEY` (standard base64 encoding of exactly 32 random bytes)
 
 Amazon remains disabled in the default RC profile. Do not add Amazon secrets unless
 you are intentionally running the capability-gated Amazon rehearsal in section 4.
@@ -40,6 +41,9 @@ Generate strong random values at runtime (do not paste into Git or review artifa
 # JWT (>= 32 chars for staging)
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 
+# MFA AES-256-GCM key (standard base64, exactly 32 decoded bytes)
+python -c "import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())"
+
 # Database password — prefer URL-safe values to avoid DATABASE_URL encoding issues
 python -c "import secrets; print(secrets.token_urlsafe(24))"
 ```
@@ -47,14 +51,23 @@ python -c "import secrets; print(secrets.token_urlsafe(24))"
 Set outputs in `.env.rc`:
 
 - `JWT_SECRET_KEY` — first command (minimum 32 characters; validator rejects shorter values)
-- `POSTGRES_PASSWORD` — second command
+- `MFA_ENCRYPTION_KEY` — second command (base64 syntax and decoded 32-byte length are validated)
+- `POSTGRES_PASSWORD` — third command
 - `POSTGRES_USER` — keep `sellerai_rc` unless you change it consistently everywhere
 - `DATABASE_URL` — username and decoded password must match `POSTGRES_USER` / `POSTGRES_PASSWORD`, e.g.
   `postgresql://sellerai_rc:<password>@postgres:5432/sellerai_rc_test`
 
 If the password contains reserved URL characters (`@`, `:`, `/`, `%`, etc.), percent-encode it in `DATABASE_URL` only. The RC validator decodes the URL with `urllib.parse.unquote` before comparing to `POSTGRES_PASSWORD`.
 
-Staging mode requires at least 32 characters for JWT and rejects known weak defaults.
+Staging mode requires at least 32 characters for JWT, rejects known weak defaults,
+and requires a valid 32-byte MFA encryption key. Do not reuse the MFA key from
+another environment or expose it in logs, screenshots, support tickets, or review artifacts.
+
+All interactive users must complete TOTP MFA after password authentication. First login
+returns an MFA enrollment challenge; access to business APIs remains blocked until the
+TOTP code is confirmed. Recovery codes are shown once, stored only as keyed hashes, and
+are single-use. Losing both the authenticator and all recovery codes requires a separate
+operator recovery procedure; do not disable MFA or edit session rows as a workaround.
 
 ## 4. Optional Amazon capability profile
 
@@ -330,7 +343,7 @@ docker compose -p sellerai_rc --env-file .env.rc -f docker-compose.rc.yml \
   '
 ```
 
-The restored Alembic head must equal the current application head (`a0b1c2d3e4f6`).
+The restored Alembic head must equal the current application head (`1b2c3d4e5f6a`).
 Compare representative table counts with the source and run an isolated application
 readiness check before recording the rehearsal as successful. Cleanup may drop only the
 exact `sellerai_restore_test` target after the evidence is recorded; never use a wildcard

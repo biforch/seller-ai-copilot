@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -50,6 +52,7 @@ class Settings(BaseSettings):
     SESSION_TTL_MINUTES: int = 30
     SESSION_COOKIE_SECURE: bool | None = None
     AUTH_TESTING_ALLOW_MISSING_ORIGIN: bool = False
+    MFA_ENCRYPTION_KEY: str = ""
 
     CORS_ORIGINS: str = "http://localhost:3000"
 
@@ -163,6 +166,11 @@ class Settings(BaseSettings):
                 self.JWT_SECRET_KEY = "pytest-jwt-secret-key-min-32-chars-long"
             if not self.OPENAI_API_KEY:
                 self.OPENAI_API_KEY = "test-openai-key-not-used"
+            if not self.MFA_ENCRYPTION_KEY:
+                self.MFA_ENCRYPTION_KEY = (
+                    "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+                )
+            self._validate_mfa_key()
             if self.AMAZON_SP_API_ENDPOINT_MODE != "mock":
                 raise ValueError("Testing environment requires AMAZON_SP_API_ENDPOINT_MODE=mock")
             _ = self.amazon_settings
@@ -179,6 +187,11 @@ class Settings(BaseSettings):
                 self.JWT_SECRET_KEY = "dev-only-jwt-secret-key-min-32-chars"
             if not self.OPENAI_API_KEY:
                 raise ValueError("OPENAI_API_KEY is required in development")
+            if not self.MFA_ENCRYPTION_KEY:
+                self.MFA_ENCRYPTION_KEY = (
+                    "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+                )
+            self._validate_mfa_key()
             _ = self.amazon_settings
             return self
 
@@ -188,6 +201,7 @@ class Settings(BaseSettings):
             raise ValueError("JWT_SECRET_KEY must be at least 32 characters")
         if not self.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required")
+        self._validate_mfa_key()
         if self.DEBUG:
             raise ValueError("DEBUG must remain false outside development/testing")
         if "*" in self.cors_origins_list:
@@ -199,6 +213,16 @@ class Settings(BaseSettings):
                 raise ValueError("SESSION_COOKIE_SECURE must not be false in staging or production")
         _ = self.amazon_settings
         return self
+
+    def _validate_mfa_key(self) -> None:
+        if not self.MFA_ENCRYPTION_KEY:
+            raise ValueError("MFA_ENCRYPTION_KEY is required")
+        try:
+            key = base64.b64decode(self.MFA_ENCRYPTION_KEY, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("MFA_ENCRYPTION_KEY must be valid base64") from exc
+        if len(key) != 32:
+            raise ValueError("MFA_ENCRYPTION_KEY must encode exactly 32 bytes")
 
 
 settings = Settings()

@@ -29,6 +29,8 @@ from app.models.auth_session import AuthSession
 from app.services.amazon_oauth_service import AmazonOAuthStartResult
 from tests.integrations.amazon.conftest import TEST_CLIENT_ID, TEST_CLIENT_SECRET
 
+MFA_TEST_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+
 CANARY_JWT = "canary.jwt.token.value.must-not-leak"
 CANARY_CSRF = "canary-csrf-token-value-must-not-leak"
 CANARY_JTI = "canary-jti-value-must-not-leak"
@@ -180,6 +182,7 @@ def test_staging_rejects_insecure_session_cookie():
             DATABASE_URL="postgresql://user:pass@localhost:5432/sellerai_staging",
             JWT_SECRET_KEY="staging-jwt-secret-key-min-32-chars",
             OPENAI_API_KEY="staging-openai-key",
+            MFA_ENCRYPTION_KEY=MFA_TEST_KEY,
             CORS_ORIGINS="https://app.example.com",
             DEBUG=False,
             SESSION_COOKIE_SECURE=False,
@@ -193,6 +196,7 @@ def test_production_rejects_insecure_session_cookie():
             DATABASE_URL="postgresql://user:pass@localhost:5432/sellerai_prod",
             JWT_SECRET_KEY="production-jwt-secret-key-min-32",
             OPENAI_API_KEY="production-openai-key",
+            MFA_ENCRYPTION_KEY=MFA_TEST_KEY,
             CORS_ORIGINS="https://app.example.com",
             DEBUG=False,
             SESSION_COOKIE_SECURE=False,
@@ -205,6 +209,7 @@ def test_staging_allows_insecure_session_cookie_only_for_loopback_http():
         DATABASE_URL="postgresql://user:pass@localhost:5432/sellerai_staging",
         JWT_SECRET_KEY="staging-jwt-secret-key-min-32-chars",
         OPENAI_API_KEY="staging-openai-key",
+        MFA_ENCRYPTION_KEY=MFA_TEST_KEY,
         CORS_ORIGINS="http://127.0.0.1:8080",
         DEBUG=False,
         SESSION_COOKIE_SECURE=False,
@@ -217,6 +222,7 @@ def test_staging_allows_insecure_session_cookie_only_for_loopback_http():
             DATABASE_URL="postgresql://user:pass@localhost:5432/sellerai_prod",
             JWT_SECRET_KEY="production-jwt-secret-key-min-32",
             OPENAI_API_KEY="production-openai-key",
+            MFA_ENCRYPTION_KEY=MFA_TEST_KEY,
             CORS_ORIGINS="http://127.0.0.1:8080",
             DEBUG=False,
             SESSION_COOKIE_SECURE=False,

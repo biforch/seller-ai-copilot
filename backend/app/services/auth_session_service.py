@@ -24,16 +24,20 @@ class ValidatedSession:
     email: str
     jti: str
     session_id: uuid.UUID
+    mfa_verified: bool
 
 
 class AuthSessionService:
-    def create_session(self, db: Session, user: User) -> CreatedSessionTokens:
+    def create_session(
+        self, db: Session, user: User, *, mfa_verified: bool = False
+    ) -> CreatedSessionTokens:
         created = build_created_session(user_id=str(user.id), email=str(user.email))
         record = AuthSession(
             user_id=user.id,
             jti_hash=hash_session_secret(created.jti),
             csrf_token_hash=hash_session_secret(created.csrf_token),
             expires_at=created.expires_at,
+            mfa_verified_at=datetime.now(UTC) if mfa_verified else None,
         )
         db.add(record)
         db.flush()
@@ -67,7 +71,33 @@ class AuthSessionService:
             email=email or "",
             jti=jti,
             session_id=session.id,
+            mfa_verified=session.mfa_verified_at is not None,
         )
+
+    def mark_mfa_verified(self, db: Session, *, session_id: uuid.UUID) -> None:
+        session = (
+            db.query(AuthSession)
+            .filter(AuthSession.id == session_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if session is None or session.revoked_at is not None:
+            raise auth_session_invalid_exception()
+        session.mfa_verified_at = datetime.now(UTC)
+        session.mfa_failed_attempts = 0
+
+    def record_mfa_failure(self, db: Session, *, session_id: uuid.UUID) -> None:
+        session = (
+            db.query(AuthSession)
+            .filter(AuthSession.id == session_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if session is None or session.revoked_at is not None:
+            raise auth_session_invalid_exception()
+        session.mfa_failed_attempts = min(session.mfa_failed_attempts + 1, 5)
+        if session.mfa_failed_attempts >= 5:
+            session.revoked_at = datetime.now(UTC)
 
     def validate_csrf_for_session(self, db: Session, *, jti: str, csrf_token: str) -> None:
         session = self.get_session_for_csrf(db, jti=jti)

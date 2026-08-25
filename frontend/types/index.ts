@@ -160,7 +160,33 @@ export interface LoginResponse {
 
   token_type: string;
 
+  user: User | null;
+
+  mfa_required: boolean;
+
+  mfa_enrollment_required: boolean;
+
+}
+
+
+
+export interface MfaSetupResponse {
+
+  secret: string;
+
+  provisioning_uri: string;
+
+}
+
+
+
+export interface MfaCompletionResponse {
+
   user: User;
+
+  recovery_codes?: string[];
+
+  recovery_code_used?: boolean;
 
 }
 

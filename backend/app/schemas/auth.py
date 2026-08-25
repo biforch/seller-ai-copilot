@@ -48,7 +48,36 @@ class UserInfo(BaseModel):
 
 class LoginResponse(BaseModel):
     token_type: str = "cookie"
+    user: UserInfo | None = None
+    mfa_required: bool = True
+    mfa_enrollment_required: bool
+
+
+class MfaCodeRequest(BaseModel):
+    code: str
+
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or len(normalized) > 64:
+            raise ValueError("Invalid MFA code")
+        return normalized
+
+
+class MfaSetupResponse(BaseModel):
+    secret: str
+    provisioning_uri: str
+
+
+class MfaConfirmResponse(BaseModel):
     user: UserInfo
+    recovery_codes: list[str]
+
+
+class MfaVerifyResponse(BaseModel):
+    user: UserInfo
+    recovery_code_used: bool
 
 
 class UserResponse(BaseModel):

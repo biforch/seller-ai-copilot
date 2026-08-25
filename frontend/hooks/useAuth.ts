@@ -24,8 +24,11 @@ export function useAuth() {
         email,
         password,
       });
-      markAuthenticated(data.user);
-      router.push('/dashboard');
+      if (!data.mfa_required && data.user) {
+        markAuthenticated(data.user);
+        router.push('/dashboard');
+      }
+      return data;
     },
     [router],
   );

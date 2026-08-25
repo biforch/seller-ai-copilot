@@ -23,6 +23,8 @@ const USER: User = { id: 'user-1', email: 'seller@example.com', plan: 'free' };
 const LOGIN_RESPONSE: LoginResponse = {
   token_type: 'cookie',
   user: USER,
+  mfa_required: false,
+  mfa_enrollment_required: false,
 };
 
 const navigation = vi.hoisted(() => ({
@@ -106,6 +108,24 @@ describe('useAuth', () => {
     expect(localStorage.getItem('access_token')).toBeNull();
     expect(navigation.push).toHaveBeenCalledWith('/dashboard');
     assertNoTokenArtifacts(result.current);
+  });
+
+  it('returns an MFA challenge without authenticating or navigating', async () => {
+    vi.mocked(apiClient.get).mockRejectedValue(new Error('pending MFA'));
+    vi.mocked(apiClient.post).mockResolvedValue({
+      token_type: 'cookie',
+      user: null,
+      mfa_required: true,
+      mfa_enrollment_required: false,
+    });
+    const { result } = renderHook(() => useAuth());
+    let response;
+    await act(async () => {
+      response = await result.current.login('seller@example.com', 'Secret12!abc');
+    });
+    expect(response).toMatchObject({ mfa_required: true, user: null });
+    expect(result.current.user).toBeNull();
+    expect(navigation.push).not.toHaveBeenCalledWith('/dashboard');
   });
 
   it('does not clear other tabs when login fails', async () => {

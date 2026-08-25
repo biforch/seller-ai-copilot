@@ -18,6 +18,7 @@ os.environ.setdefault(
     "postgresql://sellerai:sellerai123@localhost:5432/sellerai_migration_test",
 )
 os.environ["CORS_ORIGINS"] = "http://localhost:3000"
+os.environ["AUTH_TESTING_AUTO_VERIFY_MFA"] = "true"
 
 import pytest
 from fastapi.testclient import TestClient

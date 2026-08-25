@@ -17,6 +17,7 @@ RC_ALLOWED_ENVIRONMENTS = frozenset({"staging"})
 RC_POSTGRES_HOST = "postgres"
 RC_POSTGRES_PORT = 5432
 JWT_PLACEHOLDER = "REPLACE_WITH_RUNTIME_GENERATED_SECRET_MIN_32_CHARS"
+MFA_KEY_PLACEHOLDER = "REPLACE_WITH_BASE64_ENCODED_32_BYTE_KEY"
 DB_PASSWORD_PLACEHOLDER = "REPLACE_WITH_RC_DATABASE_PASSWORD"
 LEGACY_DB_PASSWORD = "rc-local-only-change-me"
 SUCCESS_MESSAGE = "RC environment safety check passed"
@@ -133,6 +134,17 @@ def _validate_jwt_secret(jwt_secret_key: str) -> None:
         raise RCEnvironmentError("JWT_SECRET_KEY must be at least 32 characters")
 
 
+def _validate_mfa_key(value: str) -> None:
+    if value == MFA_KEY_PLACEHOLDER:
+        raise RCEnvironmentError("MFA_ENCRYPTION_KEY placeholder must be replaced before startup")
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise RCEnvironmentError("MFA_ENCRYPTION_KEY must be valid base64") from None
+    if len(decoded) != 32:
+        raise RCEnvironmentError("MFA_ENCRYPTION_KEY must encode exactly 32 bytes")
+
+
 def _validate_database_url_host(hostname: str) -> None:
     lowered = hostname.lower()
     if lowered in {"localhost", "127.0.0.1", "::1"}:
@@ -241,8 +253,10 @@ def validate_rc_environment(environ: dict[str, str] | None = None) -> None:
     postgres_password = _require(env, "POSTGRES_PASSWORD")
     database_url = _require(env, "DATABASE_URL")
     jwt_secret_key = _require(env, "JWT_SECRET_KEY")
+    mfa_encryption_key = _require(env, "MFA_ENCRYPTION_KEY")
 
     _validate_jwt_secret(jwt_secret_key)
+    _validate_mfa_key(mfa_encryption_key)
     _validate_placeholders(
         postgres_password=postgres_password,
         database_url=database_url,

@@ -8,6 +8,8 @@ from pydantic import ValidationError
 from app.core.config import WEAK_JWT_SECRETS, Settings
 from app.core.logging_utils import redact_sensitive_text
 
+MFA_TEST_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+
 
 def test_production_rejects_weak_jwt_secret():
     with pytest.raises(ValueError, match="JWT_SECRET_KEY"):
@@ -52,6 +54,7 @@ def test_live_environments_reject_wildcard_cors(environment):
             DATABASE_URL="postgresql://example.com:5432/sellerai_live",
             JWT_SECRET_KEY="x" * 32,
             OPENAI_API_KEY="test-openai-key",
+            MFA_ENCRYPTION_KEY=MFA_TEST_KEY,
             CORS_ORIGINS="*",
         )
 
@@ -74,6 +77,7 @@ def test_api_docs_are_only_enabled_in_dev_like_environments(environment, enabled
         else "postgresql://example.com:5432/sellerai_live",
         "JWT_SECRET_KEY": "x" * 32,
         "OPENAI_API_KEY": "test-openai-key",
+        "MFA_ENCRYPTION_KEY": MFA_TEST_KEY,
     }
     settings = Settings(**kwargs)
     assert settings.api_docs_enabled is enabled
@@ -88,6 +92,25 @@ def test_invalid_environment_value_is_rejected():
             JWT_SECRET_KEY="pytest-jwt-secret-key-min-32-chars-long",
             OPENAI_API_KEY="test-openai-key",
         )
+
+
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_live_environments_require_a_valid_mfa_encryption_key(environment):
+    common = {
+        "_env_file": None,
+        "ENVIRONMENT": environment,
+        "DATABASE_URL": "postgresql://example.com:5432/sellerai_live",
+        "JWT_SECRET_KEY": "x" * 32,
+        "OPENAI_API_KEY": "test-openai-key",
+        "CORS_ORIGINS": "https://app.example.com",
+        "SESSION_COOKIE_SECURE": True,
+    }
+
+    with pytest.raises(ValueError, match="MFA_ENCRYPTION_KEY"):
+        Settings(**common)
+
+    with pytest.raises(ValueError, match="MFA_ENCRYPTION_KEY"):
+        Settings(**common, MFA_ENCRYPTION_KEY="not-base64")
 
 
 def test_testing_refuses_non_test_database_name():
