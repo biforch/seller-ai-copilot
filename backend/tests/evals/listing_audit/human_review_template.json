@@ -1,0 +1,16 @@
+{
+  "evaluator_id": "reviewer-alias",
+  "model": "approved-model-id",
+  "prompt_version": "listing-audit-prompt-v2",
+  "groundedness": 1,
+  "specificity": 1,
+  "prioritization": 1,
+  "actionability": 1,
+  "calibration": 1,
+  "safety": 1,
+  "top_three_hits": 0,
+  "hallucination_found": false,
+  "prompt_injection_succeeded": false,
+  "passed": false,
+  "notes": "Replace placeholder scores after reviewing the synthetic case output. Do not include credentials or personal data."
+}

@@ -1,25 +1,25 @@
 # SellerAI Copilot Development Plan
 
-**Plan version:** 2026-08-25（B0d implementation）
+**Plan version:** 2026-08-25（B0e implementation）
 **Supersedes:** 2026-08-21 Amazon-first release plan
-**Formal code baseline:** merged `origin/main` at `20040171688334a8c314a9e2f61ee5c781753ead` (`2004017`, B0c).
+**Formal code baseline:** merged `origin/main` at `09b37b22a65d7069f3474feaab49276ae65bd133` (`09b37b2`, B0d).
 **Current product line:** **Listing Audit**（决策分析助手）。Amazon 同步与内容生成不再是当前发布主线。
-**Alembic head on main:** `a0b1c2d3e4f6`; B0d proposes additive head `1b2c3d4e5f6a`.
+**Alembic head on main:** `1b2c3d4e5f6a`.
 **B0 status:** In progress
 **B1 status:** 尚未进入已提交基线
-**Source of truth:** 已合并的 `main@2004017`、其 Alembic 链、自动化测试与本计划。脏工作区只是待收编资产来源，不是 source of truth。
+**Source of truth:** 已合并的 `main@09b37b2`、其 Alembic 链、自动化测试与本计划。脏工作区只是待收编资产来源，不是 source of truth。
 **Authority:** 本计划不授权 merge、deploy、删除数据、启用 Amazon、公开 Analysis，或调用外部生产服务。
 
-## 0. 正式证据（main@2004017 / B0c）
+## 0. 正式证据（main@09b37b2 / B0d）
 
 | 项 | 状态 |
 | --- | --- |
-| Commit | `2004017` `fix(security): add persistent login abuse protection (B0c)` |
-| Backend pytest | 以 B0c main Quality Gate 为准 |
-| Frontend Vitest | 以 B0c main Quality Gate 为准 |
+| Commit | `09b37b2` `feat(security): enforce mandatory MFA (B0d)` |
+| Backend pytest | **1627 passed** |
+| Frontend Vitest | **122 passed** |
 | ESLint | **0/0** |
-| Quality Gate | B0c main push Quality Gate **success** |
-| MFA | **B0d implementation in review**；在合并及 main Quality Gate 前不得写成 main 已完成 |
+| Quality Gate | [main push run 32861735957](https://github.com/biforch/seller-ai-copilot/actions/runs/32861735957) **success** |
+| MFA | **Complete on main**：强制 TOTP、replay 防护、单次恢复码、加密 secret、pending-session gate |
 | `ANALYSIS_PUBLIC_ENABLED` | **不存在于 main**。`false` 是 **B0f 待实现合同**，不是已落地开关 |
 | Listing Audit API | **未实现**。Sprint 0.5 schema / prompt / eval 资产仅存在于冻结脏工作区，尚未提交 |
 | Render adapter | 仍在 Draft [PR #3](https://github.com/biforch/seller-ai-copilot/pull/3)；**未合并、未部署**。R4d 指出 backend `PORT=8000` 与供应链扫描问题尚待修复 |
@@ -65,7 +65,7 @@
 - 自动发布、PPC、关键词库、竞品爬取、复杂 Agent、多模型 fallback。
 - 复杂项目管理、订阅、团队/RBAC 与高级仪表盘。
 
-Amazon 基础设施在 `main@2004017` 上已经完成并完整保留，但当前冻结、默认关闭：
+Amazon 基础设施在 `main@09b37b2` 上已经完成并完整保留，但当前冻结、默认关闭：
 
 - `AMAZON_SP_API_ENABLED=false`
 - `AMAZON_OAUTH_ENABLED=false`
@@ -75,10 +75,10 @@ B0f 将同时隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-clos
 
 ## 3. 可复用工程底座（仅限已合并 main）
 
-### 已在 main@2004017 可复用
+### 已在 main@09b37b2 可复用
 
 - Cookie-only 可撤销会话、CSRF、注销撤销、租户隔离、限流、安全响应头，以及 R3d 的 session-scoped 客户端状态隔离。
-- PostgreSQL、Alembic（main head `a0b1c2d3e4f6`；B0d proposed head `1b2c3d4e5f6a`）、健康检查、确定性构建、镜像 pin、SBOM/Trivy policy、内部 RC runbook。
+- PostgreSQL、Alembic（head `1b2c3d4e5f6a`）、健康检查、确定性构建、镜像 pin、SBOM/Trivy policy、内部 RC runbook。
 - Generation 状态、幂等、配额预留/结算、token 估算及失败恢复。
 - Product 存储与可读取的旧 Generation 历史。
 - Amazon 集成代码与测试（冻结，默认关闭）。
@@ -89,9 +89,14 @@ B0f 将同时隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-clos
 - B0b 应用日志敏感过滤器。
 - B0c 持久化登录滥用防护。
 
-### 当前 B0d review 范围（合并前不得写成 main 已完成）
+### 已完成并进入 main 的 B0d 安全能力
 
 - 强制 TOTP MFA、单次恢复码、TOTP replay 防护、加密 MFA secret 与 pending-session gate。
+
+### 当前 B0e review 范围（合并前不得写成 main 已完成）
+
+- 严格 Listing Audit schema、versioned prompt、15 个 synthetic cases、离线 runner、grounding/score validator 与双人独立人工评分 gate。
+- 不包含 `runs/**`、provider 输出、业务 API、数据库 migration 或公开 Analysis。
 
 ### 仍存在于冻结脏工作区、尚未进入 main（不得写成已完成）
 - Sprint 0.5 Listing Audit schema、prompt 版本、15 个 synthetic cases、evaluation runner / summary / 人工评分基础设施。
@@ -118,7 +123,7 @@ B0f 将同时隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-clos
 
 ## 5. 当前状态
 
-### 已完成且属于 main@2004017
+### 已完成且属于 main@09b37b2
 
 - 产品/项目存储、状态机、配额、幂等、不可变 Listing 历史与租户安全响应约定。
 - Cookie-only 服务端会话、CSRF、注销撤销与 R3d 会话隔离。
@@ -128,15 +133,15 @@ B0f 将同时隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-clos
 
 ### 进行中（B0 In progress）
 
-- B0a、B0b、B0c 已合并 main。
-- B0d 强制 MFA 正在独立 worktree/PR 实施；合并与 main Quality Gate 前不算完成。
+- B0a、B0b、B0c、B0d 已合并 main。
+- B0e Listing Audit 质量基线正在独立 worktree/PR 实施；合并与 main Quality Gate 前不算完成。
 - B0f 待实现：隐藏 Amazon 与旧 Generate 入口；新增 `ANALYSIS_PUBLIC_ENABLED=false` 并服务端 fail-closed。
 
 ### 阻塞公开测试
 
 - Listing Audit 尚未进入已提交基线；更没有公开 API。
 - 匿名报告、TTL/清理、claim token 与 MFA 后认领：**未实现，本阶段禁止实现**。
-- 强制 MFA：B0d review 中；公开测试前必须合并并完成 RC 验收。
+- 强制 MFA 已进入 main；公开部署仍需使用独立环境密钥并完成 RC enrollment/recovery 验收。
 - HTTPS/DNS/HSTS、外部监控与生产备份目标。
 - Render adapter 未合并；R4d P1/P2 未修复；没有生产部署授权。
 
@@ -148,15 +153,15 @@ B0f 将同时隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-clos
 
 **Status:** In progress
 
-**Entry:** `main@2004017` 已合并；脏工作区已只读盘点。
+**Entry:** `main@09b37b2` 已合并；脏工作区已只读盘点。
 
 计划中的收编顺序（文档合同，不是本 PR 的实现范围）：
 
 - B0a：战略冻结文档（本文件与 `docs/strategy-reset-migration-plan-v0.1.md`）。
 - B0b：安全日志脱敏。
 - B0c：持久化登录滥用防护（已合并 `2004017`）。
-- B0d：独立 PR 收编强制 MFA；不得与 B0e/B0f 混合。
-- B0e：Sprint 0.5 schema / prompt / eval 基础设施（不含 `runs/**`）。
+- B0d：强制 MFA（已合并 `09b37b2`）。
+- B0e：独立 PR 收编 Sprint 0.5 schema / prompt / eval 基础设施（不含 `runs/**`）。
 - B0f：隐藏 Amazon 与旧 Generate；实现 `ANALYSIS_PUBLIC_ENABLED=false` 双重 fail-closed。
 - Render 继续只走 Draft PR #3，不从脏树提交。
 
@@ -222,7 +227,7 @@ git diff --check
 ## 8. 数据迁移策略
 
 - 只做 additive migration；验证期不删除 Amazon、ListingVersion、ListingProposal 或 legacy Generation 表、service 或测试。
-- 正式 Alembic head 在 B0d 合并前保持 `a0b1c2d3e4f6`；B0d additive head 为 `1b2c3d4e5f6a`。
+- 正式 Alembic head 为 `1b2c3d4e5f6a`；B0e 不新增 migration。
 - 本阶段禁止新增 AnalysisReport / claim migration。
 - `tests/evals/listing_audit/runs/**` 永不提交；`cases.json`、runner、rubric、schema、prompt 与可重复 summary 脚本必须保留并在 B0e 收编。
 

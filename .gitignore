@@ -17,6 +17,7 @@ backend/venv/
 backend/.env
 /backend/.env.amazon.sandbox
 backend/*.egg-info/
+backend/tests/evals/listing_audit/runs/
 
 # ---- General ----
 .env
