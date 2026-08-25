@@ -15,7 +15,7 @@ def test_auth_register_rate_limit_on_real_route(client, isolated_client_ip):
             headers=headers,
             json={
                 "email": f"rate-limit-auth-{index}@example.com",
-                "password": "Password1",
+                "password": "Password1!abc",
             },
         )
         responses.append(response)

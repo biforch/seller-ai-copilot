@@ -70,8 +70,8 @@ describe('login and register pages', () => {
     const email = screen.getByPlaceholderText('you@example.com');
     const [password, confirm] = screen.getAllByPlaceholderText('••••••••');
     fireEvent.change(email, { target: { value: 'seller@example.com' } });
-    fireEvent.change(password, { target: { value: 'secret12' } });
-    fireEvent.change(confirm, { target: { value: 'secret12' } });
+    fireEvent.change(password, { target: { value: 'Secret12!abc' } });
+    fireEvent.change(confirm, { target: { value: 'Secret12!abc' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
 
     await waitFor(() => {
@@ -79,7 +79,7 @@ describe('login and register pages', () => {
     });
     expect(apiClient.post).toHaveBeenCalledWith('/auth/register', {
       email: 'seller@example.com',
-      password: 'secret12',
+      password: 'Secret12!abc',
     });
     expect(localStorage.getItem('access_token')).toBeNull();
     expect(document.body.innerHTML).not.toMatch(/access_token|Authorization:\s*Bearer/i);

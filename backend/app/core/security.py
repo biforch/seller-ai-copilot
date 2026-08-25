@@ -11,12 +11,22 @@ from app.core.exceptions import auth_session_invalid_exception
 from app.database.session import get_db
 from app.services.auth_session_service import auth_session_service
 
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["bcrypt_sha256", "pbkdf2_sha256"],
+    deprecated=["pbkdf2_sha256"],
+)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """验证密码"""
     return pwd_context.verify(plain_password, hashed_password)
+
+
+def verify_and_update_password(
+    plain_password: str, hashed_password: str
+) -> tuple[bool, str | None]:
+    """Verify a password and return an upgraded hash when the stored scheme is legacy."""
+    return pwd_context.verify_and_update(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:

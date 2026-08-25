@@ -12,7 +12,6 @@ from app.core.security import (
     decode_session_cookie,
     get_current_user,
     get_password_hash,
-    verify_password,
 )
 from app.database.session import get_db
 from app.models.user import User
@@ -25,8 +24,13 @@ from app.schemas.auth import (
     UserResponse,
 )
 from app.services.auth_session_service import auth_session_service
+from app.services.login_abuse_service import login_abuse_service
 
 router = APIRouter()
+
+
+def _invalid_credentials() -> AppException:
+    return AppException("Invalid email or password", status.HTTP_401_UNAUTHORIZED)
 
 
 @router.post("/register")
@@ -62,12 +66,14 @@ def register(request: Request, body: RegisterRequest, db: Session = Depends(get_
 def login(request: Request, body: LoginRequest, db: Session = Depends(get_db)):
     """用户登录."""
     validate_request_origin(request)
-    user = db.query(User).filter(User.email == body.email).first()
-    if not user or not verify_password(body.password, str(user.password_hash)):
-        raise AppException(
-            "Invalid email or password",
-            status.HTTP_401_UNAUTHORIZED,
-        )
+    attempt = login_abuse_service.verify_credentials(
+        db, email=str(body.email), password=body.password
+    )
+    if not attempt.authenticated or attempt.user is None:
+        if attempt.state_changed:
+            db.commit()
+        raise _invalid_credentials()
+    user = attempt.user
 
     user_info = UserInfo(id=str(user.id), email=str(user.email), plan=str(user.plan))
     try:

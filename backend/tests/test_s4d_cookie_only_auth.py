@@ -125,7 +125,7 @@ def test_login_register_require_allowed_origin(client, user_factory):
 
     register = client.post(
         "/api/v1/auth/register",
-        json={"email": "origin-register@example.com", "password": "Password1"},
+        json={"email": "origin-register@example.com", "password": "Password1!abc"},
         headers={"Origin": TEST_ORIGIN},
     )
     assert register.status_code == 200

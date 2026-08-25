@@ -1005,7 +1005,7 @@ def test_alembic_head_unchanged() -> None:
         text=True,
         check=True,
     )
-    assert "a0b1c2d3e4f6 (head)" in result.stdout
+    assert "0a1b2c3d4e5f (head)" in result.stdout
 
 
 def test_validator_accepts_valid_rc_environment() -> None:

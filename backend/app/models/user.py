@@ -13,6 +13,10 @@ class User(Base):
     __table_args__ = (
         CheckConstraint("used_tokens >= 0", name="ck_users_used_tokens_nonneg"),
         CheckConstraint("reserved_tokens >= 0", name="ck_users_reserved_tokens_nonneg"),
+        CheckConstraint(
+            "failed_login_attempts >= 0 AND failed_login_attempts <= 5",
+            name="ck_users_failed_login_attempts_range",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -23,6 +27,12 @@ class User(Base):
     used_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     reserved_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     reset_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, server_default="0"
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime | None] = mapped_column(DateTime, server_default=func.now())
 
     products = relationship("Product", back_populates="user", cascade="all, delete")

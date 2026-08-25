@@ -68,12 +68,22 @@ def test_auth_sessions_migration_revision_does_not_import_app_modules():
     assert "import app." not in source
 
 
+def test_login_abuse_migration_revision_does_not_import_app_modules():
+    backend_root = Path(__file__).resolve().parents[1]
+    revision_path = (
+        backend_root / "alembic" / "versions" / "0a1b2c3d4e5f_login_abuse_protection.py"
+    )
+    source = revision_path.read_text(encoding="utf-8")
+    assert "from app." not in source
+    assert "import app." not in source
+
+
 def test_alembic_revision_chain_is_valid():
     backend_root = Path(__file__).resolve().parents[1]
     cfg = Config(str(backend_root / "alembic.ini"))
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    assert heads == ["a0b1c2d3e4f6"]
+    assert heads == ["0a1b2c3d4e5f"]
 
     revisions = {rev.revision: rev for rev in script.walk_revisions()}
     assert "34b6d855017a" in revisions
@@ -86,3 +96,4 @@ def test_alembic_revision_chain_is_valid():
     assert revisions["e8f9a0b1c2d3"].down_revision == "d7e8f9a0b1c2"
     assert revisions["f9a0b1c2d3e4"].down_revision == "e8f9a0b1c2d3"
     assert revisions["a0b1c2d3e4f6"].down_revision == "f9a0b1c2d3e4"
+    assert revisions["0a1b2c3d4e5f"].down_revision == "a0b1c2d3e4f6"

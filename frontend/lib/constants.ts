@@ -12,4 +12,5 @@ export const CSRF_HEADER_NAME = 'X-CSRF-Token';
 
 export const CSRF_EXEMPT_API_PATHS = ['/auth/login', '/auth/register'] as const;
 
-export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MIN_LENGTH = 12;
+export const PASSWORD_MAX_LENGTH = 128;

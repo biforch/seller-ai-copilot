@@ -125,6 +125,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
     user_checks = {c["name"] for c in inspector.get_check_constraints("users")}
     assert "ck_users_used_tokens_nonneg" in user_checks
     assert "ck_users_reserved_tokens_nonneg" in user_checks
+    assert "ck_users_failed_login_attempts_range" in user_checks
 
     reserved_col = next(c for c in inspector.get_columns("users") if c["name"] == "reserved_tokens")
     assert reserved_col.get("default") is not None or reserved_col.get("server_default") is not None
@@ -146,6 +147,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     user_columns = {column["name"] for column in inspector.get_columns("users")}
     assert "reserved_tokens" in user_columns
+    assert {"failed_login_attempts", "locked_until"}.issubset(user_columns)
 
     unique = {
         tuple(constraint["column_names"])
@@ -155,7 +157,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "a0b1c2d3e4f6"
+        assert current == "0a1b2c3d4e5f"
 
     amazon_unique = {
         tuple(constraint["column_names"])
