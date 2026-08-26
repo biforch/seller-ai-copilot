@@ -29,6 +29,9 @@ DEFAULT_CASES = ROOT / "tests" / "evals" / "listing_audit" / "cases.json"
 SCHEMA_VERSION = "listing-audit-schema-v1"
 EVAL_DATASET_VERSION = "listing-audit-synthetic-v2"
 OPENROUTER_ROUTING_DOCS = "https://openrouter.ai/docs/guides/routing/provider-selection"
+RUNS_ROOT = ROOT / "tests" / "evals" / "listing_audit" / "runs"
+EXTERNAL_CALL_CONFIRMATION = "B1D-15-SYNTHETIC-CASES"
+PROVIDER_TIMEOUT_SECONDS = 120.0
 
 
 def parse_temperature(value: str) -> float | None:
@@ -58,6 +61,13 @@ def parse_args() -> argparse.Namespace:
         help="Sampling temperature, or null when the exact model does not support it",
     )
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument(
+        "--confirm-external-call",
+        help=(
+            "Required exact confirmation for an online run. This is not a secret; use "
+            f"{EXTERNAL_CALL_CONFIRMATION!r} only after provider, model, and spend approval."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -90,7 +100,12 @@ def create_provider_client(provider: str) -> OpenAI:
                 "OPENAI_API_KEY is not available to this process; "
                 "configure it outside chat and do not pass it as a CLI argument"
             )
-        return OpenAI(api_key=api_key, base_url="https://api.openai.com/v1")
+        return OpenAI(
+            api_key=api_key,
+            base_url="https://api.openai.com/v1",
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
     if provider == "openrouter":
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
@@ -98,7 +113,12 @@ def create_provider_client(provider: str) -> OpenAI:
                 "OPENROUTER_API_KEY is not available to this process; "
                 "configure it outside chat and do not pass it as a CLI argument"
             )
-        return OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
+        return OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            timeout=PROVIDER_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
     raise ValueError(f"unsupported provider: {provider}")
 
 
@@ -128,6 +148,32 @@ def expected_run_metadata(args: argparse.Namespace) -> dict:
     }
 
 
+def validate_online_run_contract(args: argparse.Namespace) -> Path:
+    if not args.model:
+        raise SystemExit("--model is required for online baseline runs")
+    if not args.output_dir:
+        raise SystemExit("--output-dir is required for online baseline runs")
+    if args.confirm_external_call != EXTERNAL_CALL_CONFIRMATION:
+        raise SystemExit(
+            "online baseline runs require the exact --confirm-external-call value "
+            f"{EXTERNAL_CALL_CONFIRMATION!r} after provider, model, and spend approval"
+        )
+    if len(args.model) > 200 or not args.model.strip() or any(
+        character.isspace() or ord(character) < 32 for character in args.model
+    ):
+        raise SystemExit("--model must be a non-empty exact provider model ID without whitespace")
+
+    runs_root = RUNS_ROOT.resolve()
+    output_dir = args.output_dir.resolve()
+    try:
+        relative = output_dir.relative_to(runs_root)
+    except ValueError as exc:
+        raise SystemExit(f"--output-dir must be a child of {RUNS_ROOT}") from exc
+    if relative == Path("."):
+        raise SystemExit("--output-dir must name a run directory below the ignored runs root")
+    return output_dir
+
+
 def validate_existing_artifact(path: Path, case, expected_metadata: dict) -> None:
     try:
         artifact = json.loads(path.read_text(encoding="utf-8"))
@@ -152,6 +198,7 @@ def validate_existing_artifact(path: Path, case, expected_metadata: dict) -> Non
 def write_json_atomically(path: Path, payload: dict) -> None:
     temporary = path.with_suffix(f"{path.suffix}.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.chmod(0o600)
     temporary.replace(path)
 
 
@@ -171,18 +218,15 @@ def raise_provider_diagnostic(exc: APIStatusError, args: argparse.Namespace, cas
 
 
 def run_online(args: argparse.Namespace) -> None:
-    if not args.model:
-        raise SystemExit("--model is required for online baseline runs")
-    if not args.output_dir:
-        raise SystemExit("--output-dir is required for online baseline runs")
-
+    output_dir = validate_online_run_contract(args)
     cases = load_eval_cases(args.cases)
     client = create_provider_client(args.provider)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    output_dir.chmod(0o700)
     run_started = datetime.now(UTC).isoformat()
     run_metadata = expected_run_metadata(args)
 
-    manifest_path = args.output_dir / "manifest.json"
+    manifest_path = output_dir / "manifest.json"
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         for key, expected_value in run_metadata.items():
@@ -193,7 +237,7 @@ def run_online(args: argparse.Namespace) -> None:
                 )
 
     for case in cases:
-        destination = args.output_dir / f"{case.case_id}.json"
+        destination = output_dir / f"{case.case_id}.json"
         if destination.exists():
             validate_existing_artifact(destination, case, run_metadata)
             print(f"resumed {case.case_id} (existing artifact validated)")
@@ -233,7 +277,12 @@ def run_online(args: argparse.Namespace) -> None:
                 "response_character_count": len(content),
                 "response_content_retained": False,
             }
-            failure_path = args.output_dir / f"{case.case_id}.failure.json"
+            failure_path = output_dir / f"{case.case_id}.failure.json"
+            if failure_path.exists():
+                raise RuntimeError(
+                    f"{case.case_id}: refusing to overwrite existing failure evidence "
+                    f"{failure_path}; use a new run directory"
+                ) from exc
             write_json_atomically(failure_path, failure)
             raise RuntimeError(
                 f"{case.case_id}: provider output failed schema or grounding validation "

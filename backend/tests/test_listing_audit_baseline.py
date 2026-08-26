@@ -17,9 +17,13 @@ from app.analysis.schemas import (
 )
 from app.analysis.scoring import SCORE_WEIGHTS, calculate_overall_score
 from scripts.run_listing_audit_baseline import (
+    EXTERNAL_CALL_CONFIRMATION,
+    PROVIDER_TIMEOUT_SECONDS,
     create_provider_client,
     parse_temperature,
     temperature_mode,
+    validate_online_run_contract,
+    write_json_atomically,
 )
 
 CASES_PATH = Path(__file__).parent / "evals" / "listing_audit" / "cases.json"
@@ -194,7 +198,53 @@ def test_openai_client_uses_the_fixed_official_endpoint(monkeypatch):
     assert captured == {
         "api_key": "synthetic-eval-key",
         "base_url": "https://api.openai.com/v1",
+        "timeout": PROVIDER_TIMEOUT_SECONDS,
+        "max_retries": 0,
     }
+
+
+def test_online_run_requires_explicit_confirmation_and_ignored_output_dir(
+    tmp_path, monkeypatch
+):
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr("scripts.run_listing_audit_baseline.RUNS_ROOT", runs_root)
+
+    class Args:
+        model = "approved/model"
+        output_dir = runs_root / "run-001"
+        confirm_external_call = None
+
+    with pytest.raises(SystemExit, match="confirm-external-call"):
+        validate_online_run_contract(Args())
+
+    Args.confirm_external_call = EXTERNAL_CALL_CONFIRMATION
+    assert validate_online_run_contract(Args()) == (runs_root / "run-001").resolve()
+
+    Args.output_dir = tmp_path / "tracked-output"
+    with pytest.raises(SystemExit, match="must be a child"):
+        validate_online_run_contract(Args())
+
+
+@pytest.mark.parametrize("model", ["", " model", "model alias", "model\nname"])
+def test_online_run_rejects_ambiguous_model_ids(tmp_path, monkeypatch, model):
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr("scripts.run_listing_audit_baseline.RUNS_ROOT", runs_root)
+
+    class Args:
+        output_dir = runs_root / "run-001"
+        confirm_external_call = EXTERNAL_CALL_CONFIRMATION
+
+    Args.model = model
+    with pytest.raises(SystemExit, match="model"):
+        validate_online_run_contract(Args())
+
+
+def test_eval_artifacts_are_written_owner_only(tmp_path):
+    destination = tmp_path / "artifact.json"
+    write_json_atomically(destination, {"synthetic": True})
+
+    assert destination.stat().st_mode & 0o777 == 0o600
+    assert destination.read_text(encoding="utf-8") == '{\n  "synthetic": true\n}'
 
 
 def _passing_review(evaluator_id: str) -> dict:

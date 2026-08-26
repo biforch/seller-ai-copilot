@@ -30,6 +30,7 @@ cd backend
 PYTHONPATH=. python3 scripts/run_listing_audit_baseline.py \
   --model '<exact-approved-model-id>' \
   --temperature 0.2 \
+  --confirm-external-call B1D-15-SYNTHETIC-CASES \
   --output-dir 'tests/evals/listing_audit/runs/<prompt-model-run-id>'
 ```
 
@@ -45,6 +46,7 @@ PYTHONPATH=. python3 scripts/run_listing_audit_baseline.py \
   --provider openrouter \
   --model '<exact-openrouter-model-id>' \
   --temperature null \
+  --confirm-external-call B1D-15-SYNTHETIC-CASES \
   --output-dir 'tests/evals/listing_audit/runs/<provider-model-run-id>'
 ```
 
@@ -64,6 +66,13 @@ run metadata, schema, grounded evidence, and deterministic score have been
 validated. Invalid or incompatible artifacts are never overwritten. Schema or
 grounding failures write only non-content failure metadata (including a response
 hash and character count); the rejected response text is not retained.
+
+The confirmation value is deliberately non-secret and prevents accidental calls;
+use it only after the exact provider/model and a maximum spend have been approved.
+The SDK timeout is fixed at 120 seconds with automatic retries disabled, so one
+invocation can make at most one provider request for each of the 15 synthetic
+cases. Output is restricted to the ignored `runs/` tree with directory mode 0700
+and JSON artifact mode 0600. Existing failure evidence is never overwritten.
 
 The manifest and every successful artifact also record the synthetic evaluation
 dataset version and exact cases-file SHA-256 digest. A changed case set therefore
