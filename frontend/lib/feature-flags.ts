@@ -5,3 +5,5 @@
 export const AMAZON_WORKSPACE_VISIBLE = false;
 export const LEGACY_GENERATION_VISIBLE = false;
 export const ANALYSIS_PUBLIC_ENABLED = false;
+export const LISTING_AUDIT_INTERNAL_VISIBLE =
+  process.env.NEXT_PUBLIC_LISTING_AUDIT_INTERNAL_ENABLED === 'true';

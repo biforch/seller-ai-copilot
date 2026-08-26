@@ -128,6 +128,7 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/v1}
         NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-SellerAI Copilot}
+        NEXT_PUBLIC_LISTING_AUDIT_INTERNAL_ENABLED: ${NEXT_PUBLIC_LISTING_AUDIT_INTERNAL_ENABLED:-false}
     image: sellerai-frontend-prod:rc
     environment:
       NODE_ENV: production

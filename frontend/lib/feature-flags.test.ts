@@ -7,6 +7,7 @@ import {
   AMAZON_WORKSPACE_VISIBLE,
   ANALYSIS_PUBLIC_ENABLED,
   LEGACY_GENERATION_VISIBLE,
+  LISTING_AUDIT_INTERNAL_VISIBLE,
 } from '@/lib/feature-flags';
 
 const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
@@ -16,6 +17,31 @@ describe('frozen product capabilities', () => {
     expect(AMAZON_WORKSPACE_VISIBLE).toBe(false);
     expect(LEGACY_GENERATION_VISIBLE).toBe(false);
     expect(ANALYSIS_PUBLIC_ENABLED).toBe(false);
+    expect(LISTING_AUDIT_INTERNAL_VISIBLE).toBe(false);
+  });
+
+  it('keeps the internal Listing Audit route guarded and public analysis disabled', () => {
+    const listingAuditPage = readSource('app/(dashboard)/listing-audit/page.tsx');
+    const dashboard = readSource('app/(dashboard)/dashboard/page.tsx');
+
+    expect(listingAuditPage).toContain('if (!LISTING_AUDIT_INTERNAL_VISIBLE)');
+    expect(listingAuditPage).toContain('notFound()');
+    expect(dashboard).toContain('LISTING_AUDIT_INTERNAL_VISIBLE ?');
+    expect(ANALYSIS_PUBLIC_ENABLED).toBe(false);
+  });
+
+  it('keeps every Listing Audit deployment switch off by default', () => {
+    const dockerfile = readSource('Dockerfile.prod');
+    const localEnv = readSource('.env.local.example');
+    const rcEnv = readSource('../.env.rc.example');
+    const rcCompose = readSource('../docker-compose.rc.yml');
+
+    expect(dockerfile).toContain('ARG NEXT_PUBLIC_LISTING_AUDIT_INTERNAL_ENABLED=false');
+    expect(localEnv).toContain('NEXT_PUBLIC_LISTING_AUDIT_INTERNAL_ENABLED=false');
+    expect(rcEnv).toContain('LISTING_AUDIT_INTERNAL_ENABLED=false');
+    expect(rcEnv).toContain('NEXT_PUBLIC_LISTING_AUDIT_INTERNAL_ENABLED=false');
+    expect(rcCompose).toContain('${LISTING_AUDIT_INTERNAL_ENABLED:-false}');
+    expect(rcCompose).toContain('${NEXT_PUBLIC_LISTING_AUDIT_INTERNAL_ENABLED:-false}');
   });
 
   it('does not expose Amazon or legacy Generate navigation', () => {

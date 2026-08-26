@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 import {
+  FileSearch,
   FolderKanban,
   History
 } from 'lucide-react';
@@ -13,6 +14,7 @@ import {
 import { useProducts } from '@/hooks/useProducts';
 
 import { useProjects } from '@/hooks/useProjects';
+import { LISTING_AUDIT_INTERNAL_VISIBLE } from '@/lib/feature-flags';
 
 
 
@@ -82,6 +84,19 @@ Manage your AI selling projects and listings
 
 
 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+
+{LISTING_AUDIT_INTERNAL_VISIBLE ? (
+<button
+onClick={()=>router.push('/listing-audit')}
+className="bg-blue-600 text-white p-6 rounded-xl hover:bg-blue-700 flex items-center gap-4"
+>
+<FileSearch/>
+<div>
+<h3 className="font-semibold">Listing Audit</h3>
+<p className="text-sm">Review a listing before publishing</p>
+</div>
+</button>
+) : null}
 
 
 

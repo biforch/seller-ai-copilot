@@ -74,6 +74,7 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: /api/v1
       NEXT_PUBLIC_APP_NAME: SellerAI Copilot
+      NEXT_PUBLIC_LISTING_AUDIT_INTERNAL_ENABLED: ${NEXT_PUBLIC_LISTING_AUDIT_INTERNAL_ENABLED:-false}
       BACKEND_URL: http://backend:8000
 
     depends_on:
