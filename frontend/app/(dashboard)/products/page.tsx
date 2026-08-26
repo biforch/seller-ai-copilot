@@ -75,12 +75,6 @@ export default function ProductsPage() {
           <h1 className="text-3xl font-bold text-gray-900">My Products</h1>
           <p className="text-gray-600 mt-1">All your generated product listings</p>
         </div>
-        <button
-          onClick={() => router.push('/generate')}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          New Listing
-        </button>
       </div>
 
       {error && (

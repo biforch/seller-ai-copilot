@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     APP_NAME: str = "SellerAI Copilot"
     DEBUG: bool = False
 
+    # Frozen product capabilities. Public Analysis requires a future B3 source
+    # change; it cannot be enabled by deployment configuration alone.
+    LEGACY_GENERATION_ENABLED: bool = False
+    ANALYSIS_PUBLIC_ENABLED: bool = False
+
     AMAZON_SP_API_ENABLED: bool = False
     AMAZON_LWA_CLIENT_ID: str = ""
     AMAZON_LWA_CLIENT_SECRET: str = ""
@@ -154,6 +159,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self) -> Settings:
+        if self.ANALYSIS_PUBLIC_ENABLED:
+            raise ValueError(
+                "ANALYSIS_PUBLIC_ENABLED must remain false before the B3 go/no-go"
+            )
+
         if self.ENVIRONMENT == "testing":
             if not self.DATABASE_URL:
                 self.DATABASE_URL = TEST_DATABASE_URL

@@ -100,12 +100,6 @@ function ProjectDetailSession({ id }: { id: string }) {
           <p>Products: {project.product_count ?? productPagination.total}</p>
         </div>
 
-        <button
-          onClick={() => router.push(`/generate?project_id=${project.id}`)}
-          className="mt-8 px-5 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          Generate Listing
-        </button>
       </div>
 
       <div className="bg-white border rounded-xl p-8 mt-6">

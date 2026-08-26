@@ -203,11 +203,12 @@ app.include_router(
 )
 
 
-app.include_router(
-    generate.router,
-    prefix="/api/v1/generate",
-    tags=["Generate"],
-)
+if settings.LEGACY_GENERATION_ENABLED:
+    app.include_router(
+        generate.router,
+        prefix="/api/v1/generate",
+        tags=["Generate"],
+    )
 
 
 app.include_router(

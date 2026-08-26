@@ -19,6 +19,9 @@ os.environ.setdefault(
 )
 os.environ["CORS_ORIGINS"] = "http://localhost:3000"
 os.environ["AUTH_TESTING_AUTO_VERIFY_MFA"] = "true"
+# Legacy generation remains covered by its regression suite while production
+# defaults to frozen/off. Individual freeze tests instantiate default settings.
+os.environ["LEGACY_GENERATION_ENABLED"] = "true"
 
 import pytest
 from fastapi.testclient import TestClient
