@@ -1,27 +1,27 @@
 # SellerAI Copilot Development Plan
 
-**Plan version:** 2026-08-26（B1c registered internal UI）
+**Plan version:** 2026-08-26（B1d controlled quality-gate preflight）
 **Supersedes:** 2026-08-21 Amazon-first release plan
-**Formal code baseline:** merged `origin/main` at `e9af6530706428c4cde85aa634fe2325e8e91920` (`e9af653`, B1b registered internal API).
+**Formal code baseline:** merged `origin/main` at `d1e45d1fe41dd46d0f7c67168b4ec7ca2a27ad9a` (`d1e45d1`, B1c registered internal UI).
 **Current product line:** **Listing Audit**（决策分析助手）。Amazon 同步与内容生成不再是当前发布主线。
 **Alembic head on main:** `1b2c3d4e5f6a`.
 **B0 status:** Complete
-**B1 status:** In progress (B1c)
-**Source of truth:** 已合并的 `main@e9af653`、其 Alembic 链、自动化测试与本计划。历史脏工作区不是 source of truth。
+**B1 status:** In progress (B1d; external provider authorization required)
+**Source of truth:** 已合并的 `main@d1e45d1`、其 Alembic 链、自动化测试与本计划。历史脏工作区不是 source of truth。
 **Authority:** 本计划不授权 merge、deploy、删除数据、启用 Amazon、公开 Analysis，或调用外部生产服务。
 
-## 0. 正式证据（main@811f36a / B0 complete）
+## 0. 正式证据（main@d1e45d1 / B1c complete）
 
 | 项 | 状态 |
 | --- | --- |
 | Commit | `811f36a`（包含 B0a–B0f 与随后 OpenSSL runtime remediation） |
-| Backend pytest | **1657 passed** on merged main |
-| Frontend Vitest | **125 passed** on merged main |
+| Backend pytest | **1677 passed** on merged main |
+| Frontend Vitest | **131 passed** on merged main |
 | ESLint | **0/0** |
-| Quality Gate | [B1b PR run 32991416113](https://github.com/biforch/seller-ai-copilot/actions/runs/32991416113) 在精确 SHA `e9af653` **success**，production vulnerability policy `blocked=0`；严格 FF 后 main push 未生成独立 run |
+| Quality Gate | [B1c main run 32999182796](https://github.com/biforch/seller-ai-copilot/actions/runs/32999182796) 在精确 SHA `d1e45d1` **success**，production vulnerability policy `blocked=0` |
 | MFA | **Complete on main**：强制 TOTP、replay 防护、单次恢复码、加密 secret、pending-session gate |
 | `ANALYSIS_PUBLIC_ENABLED` | main 已固定默认 `false`，且任何 `true` 配置 fail-closed |
-| Listing Audit internal slice | B1b API 已合并；B1c UI 实现中。仅 Cookie 会话注册用户、双端内部开关默认关闭；不含公开或匿名路径 |
+| Listing Audit internal slice | B1a service、B1b API 与 B1c UI 已合并。仅 Cookie 会话注册用户、双端内部开关默认关闭；不含公开或匿名路径 |
 | Render adapter | 仍在 Draft [PR #3](https://github.com/biforch/seller-ai-copilot/pull/3)；**未合并、未部署**。R4d 指出 backend `PORT=8000` 与供应链扫描问题尚待修复 |
 | Amazon 发布门禁 | **真实 Amazon 不再是当前发布门禁**。原 R2e **停止执行**，除非未来独立战略决策恢复 Amazon |
 | 公开测试门禁 | HTTPS / DNS / HSTS、外部监控、生产备份目标。平台账号或域名准备就绪 **不等于** 已部署或已验证上线 |
@@ -30,7 +30,7 @@
 
 当前主线验证的是：卖家是否重视更好的 Listing 决策，而不是 SellerAI 能否连接 Amazon 或生产更多内容。
 
-目标价值路径（**尚未在 main 实现**；B3 go/no-go 前禁止公开 Analysis）：
+目标价值路径已作为默认关闭的注册用户内部切片进入 main；B3 go/no-go 前仍禁止公开 Analysis：
 
 1. 粘贴 Listing 标题、五点描述与产品描述；
 2. 获得有输入证据支撑的 0–100 总分、维度分、优先问题、限制说明及最多三项行动建议；
@@ -137,7 +137,7 @@ B0f 已隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-closed；�
 
 ### 阻塞公开测试
 
-- Listing Audit 质量基线已合并；业务 API 与公开入口仍未实现。
+- Listing Audit 内部注册用户 API/UI 已合并且默认关闭；受控 provider 运行与双人人工质量 gate 尚未执行。
 - 匿名报告、TTL/清理、claim token 与 MFA 后认领：**未实现，本阶段禁止实现**。
 - 强制 MFA 已进入 main；公开部署仍需使用独立环境密钥并完成 RC enrollment/recovery 验收。
 - HTTPS/DNS/HSTS、外部监控与生产备份目标。
@@ -167,7 +167,7 @@ B0f 已隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-closed；�
 
 ### B1 — 内部 Listing Audit 垂直切片
 
-**Status:** In progress (B1c)
+**Status:** In progress (B1d; external provider authorization required)
 **Access:** 仅注册测试用户。禁止匿名架构抢跑。
 
 **Entry:** B0 冻结合同成立；准备收编或重建 Listing Audit 契约后，才允许实现注册用户 API/UI。
@@ -178,8 +178,8 @@ Sprint 0.5 schema、prompt、15 个 synthetic cases 与 eval harness 已通过 B
 
 - **B1a — Complete (`2ab6ace`):** provider-neutral Listing Audit 执行服务；严格 schema、grounding、确定性评分与 token 元数据边界。无 HTTP 路由、无真实 provider 调用、无新表。
 - **B1b — Complete (`e9af653`):** 复用现有 `generation_requests` / quota 状态机，增加注册用户专用、幂等且失败不重复扣费的内部 API。独立 `LISTING_AUDIT_INTERNAL_ENABLED` 默认 false；鉴权、CSRF/Origin 与开关检查通过后才允许构造 provider。
-- **B1c — In progress:** 内部注册用户 UI；前端入口与直达路由由独立、默认 false 的 build-time 开关保护。保持 Amazon / Generate 隐藏，`ANALYSIS_PUBLIC_ENABLED=false`。
-- **B1d:** 受控 provider 运行与双人人工质量 gate；失败则停止，不进入 B2。
+- **B1c — Complete (`d1e45d1`):** 内部注册用户 UI；前端入口与直达路由由独立、默认 false 的 build-time 开关保护。保持 Amazon / Generate 隐藏，`ANALYSIS_PUBLIC_ENABLED=false`。
+- **B1d — Offline preflight complete (`cc440dd`, pending merge):** 在线 runner 需显式非秘密确认值；输出仅允许进入 Git 忽略的 `runs/`，目录/文件权限为 0700/0600；SDK 自动重试关闭且单次超时 120 秒，因此一次完整执行最多 15 个 provider 请求。真实运行仍需明确 provider、精确 model、最大预算与两个独立 reviewer；未授权前禁止调用。人工 gate 失败则停止，不进入 B2。
 
 **Exit:** 契约稳定；每个问题/行动可追溯或明确标为限制；失败/重试不重复扣费；无 Amazon 依赖；人工质量评审确认值得继续。**若人工质量 gate 失败，不得进入 B2 匿名体系。**
 
@@ -249,4 +249,4 @@ git diff --check
 3. **B2/B3 后：** 决定公开测试是否安全、可衡量。B3 前 Analysis 保持关闭。
 4. **Amazon：** 只通过独立战略决策重启，并重新验收；原 R2e 不再自动恢复。
 
-当前结论：**GO for B0 documentation freeze and later isolated ingest；NO-GO for anonymous/public Analysis, Amazon-on, Render production, or any deployment.**
+当前结论：**GO for B1d controlled quality evaluation after explicit provider/model/budget authorization；NO-GO for anonymous/public Analysis, Amazon-on, Render production, or any deployment.**
