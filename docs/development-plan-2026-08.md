@@ -1,26 +1,26 @@
 # SellerAI Copilot Development Plan
 
-**Plan version:** 2026-08-25（B0f implementation）
+**Plan version:** 2026-08-26（B1a internal service boundary）
 **Supersedes:** 2026-08-21 Amazon-first release plan
-**Formal code baseline:** merged `origin/main` at `de7c52fb96bd9e5b4af1da36243b7632a115a209` (`de7c52f`, B0e).
+**Formal code baseline:** merged `origin/main` at `811f36a3e6d63e389d6c9b5e6aefd13ce3b9d3c9` (`811f36a`, B0f plus OpenSSL remediation).
 **Current product line:** **Listing Audit**（决策分析助手）。Amazon 同步与内容生成不再是当前发布主线。
 **Alembic head on main:** `1b2c3d4e5f6a`.
-**B0 status:** In progress
-**B1 status:** 尚未进入已提交基线
-**Source of truth:** 已合并的 `main@de7c52f`、其 Alembic 链、自动化测试与本计划。脏工作区只是待收编资产来源，不是 source of truth。
+**B0 status:** Complete
+**B1 status:** In progress (B1a)
+**Source of truth:** 已合并的 `main@811f36a`、其 Alembic 链、自动化测试与本计划。历史脏工作区不是 source of truth。
 **Authority:** 本计划不授权 merge、deploy、删除数据、启用 Amazon、公开 Analysis，或调用外部生产服务。
 
-## 0. 正式证据（main@de7c52f / B0e）
+## 0. 正式证据（main@811f36a / B0 complete）
 
 | 项 | 状态 |
 | --- | --- |
-| Commit | `de7c52f` `test(analysis): add Listing Audit quality baseline (B0e)` |
-| Backend pytest | **1649 passed** |
-| Frontend Vitest | **122 passed** |
+| Commit | `811f36a`（包含 B0a–B0f 与随后 OpenSSL runtime remediation） |
+| Backend pytest | **1657 passed** on merged main |
+| Frontend Vitest | **125 passed** on merged main |
 | ESLint | **0/0** |
-| Quality Gate | [main push run 32869084353](https://github.com/biforch/seller-ai-copilot/actions/runs/32869084353) **success** |
+| Quality Gate | [main push run 32947769067](https://github.com/biforch/seller-ai-copilot/actions/runs/32947769067) **success**, production vulnerability policy `blocked=0` |
 | MFA | **Complete on main**：强制 TOTP、replay 防护、单次恢复码、加密 secret、pending-session gate |
-| `ANALYSIS_PUBLIC_ENABLED` | **B0f 正在实现**；合并前仍不得写成 main 已有 |
+| `ANALYSIS_PUBLIC_ENABLED` | main 已固定默认 `false`，且任何 `true` 配置 fail-closed |
 | Listing Audit API | **未实现**。B0e 仅合并 schema / prompt / eval 基线，不含 API、migration 或 provider 输出 |
 | Render adapter | 仍在 Draft [PR #3](https://github.com/biforch/seller-ai-copilot/pull/3)；**未合并、未部署**。R4d 指出 backend `PORT=8000` 与供应链扫描问题尚待修复 |
 | Amazon 发布门禁 | **真实 Amazon 不再是当前发布门禁**。原 R2e **停止执行**，除非未来独立战略决策恢复 Amazon |
@@ -65,17 +65,17 @@
 - 自动发布、PPC、关键词库、竞品爬取、复杂 Agent、多模型 fallback。
 - 复杂项目管理、订阅、团队/RBAC 与高级仪表盘。
 
-Amazon 基础设施在 `main@de7c52f` 上已经完成并完整保留，但当前冻结、默认关闭：
+Amazon 基础设施在 `main@811f36a` 上已经完成并完整保留，但当前冻结、默认关闭：
 
 - `AMAZON_SP_API_ENABLED=false`
 - `AMAZON_OAUTH_ENABLED=false`
 - `AMAZON_SP_API_ENDPOINT_MODE=mock`
 
-B0f 正在独立分支隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-closed；合并前不算完成。
+B0f 已隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-closed；实现完整保留。
 
 ## 3. 可复用工程底座（仅限已合并 main）
 
-### 已在 main@de7c52f 可复用
+### 已在 main@811f36a 可复用
 
 - Cookie-only 可撤销会话、CSRF、注销撤销、租户隔离、限流、安全响应头，以及 R3d 的 session-scoped 客户端状态隔离。
 - PostgreSQL、Alembic（head `1b2c3d4e5f6a`）、健康检查、确定性构建、镜像 pin、SBOM/Trivy policy、内部 RC runbook。
@@ -105,7 +105,7 @@ B0f 正在独立分支隐藏 Amazon 与旧 Generate 入口，并保持服务端 
 ### 未来改造（均未在 main 实现）
 
 - 独立 `analysis` domain。B1 才允许注册用户 API；B2 才允许匿名 claim；B3 go/no-go 前禁止公开 Analysis。
-- `ANALYSIS_PUBLIC_ENABLED=false` 正在 B0f 实现；B0f 合并前仍不是 main 合同。
+- `ANALYSIS_PUBLIC_ENABLED=false` 已是 main 合同；B3 独立 go/no-go 前禁止改为 true。
 - 新 analysis 包不得依赖 Amazon。
 
 ## 4. 不可妥协规则
@@ -122,7 +122,7 @@ B0f 正在独立分支隐藏 Amazon 与旧 Generate 入口，并保持服务端 
 
 ## 5. 当前状态
 
-### 已完成且属于 main@de7c52f
+### 已完成且属于 main@811f36a
 
 - 产品/项目存储、状态机、配额、幂等、不可变 Listing 历史与租户安全响应约定。
 - Cookie-only 服务端会话、CSRF、注销撤销与 R3d 会话隔离。
@@ -130,10 +130,10 @@ B0f 正在独立分支隐藏 Amazon 与旧 Generate 入口，并保持服务端 
 - Amazon 集成技术上已完成并保留，但是 **dormant / frozen** 可选能力，不是产品主线，也不是当前发布门禁。
 - B0a 战略冻结、B0b 日志脱敏、B0c 登录滥用防护、B0d 强制 MFA、B0e Listing Audit 质量基线。
 
-### 进行中（B0 In progress）
+### 已完成（B0 Complete）
 
-- B0a–B0e 已合并 main。
-- B0f 正在独立 worktree 实施：隐藏 Amazon 与旧 Generate 入口；新增 `ANALYSIS_PUBLIC_ENABLED=false` 并服务端 fail-closed。
+- B0a–B0f 已合并 main。
+- Amazon 与旧 Generate 入口已隐藏；`ANALYSIS_PUBLIC_ENABLED=false` 且服务端 fail-closed。
 
 ### 阻塞公开测试
 
@@ -149,9 +149,9 @@ B0f 正在独立分支隐藏 Amazon 与旧 Generate 入口，并保持服务端 
 
 ### B0 — 基线拆分与战略冻结
 
-**Status:** In progress
+**Status:** Complete
 
-**Entry:** `main@de7c52f` 已合并；脏工作区已只读盘点。
+**Entry:** `main@811f36a` 已满足 B0 exit；历史脏工作区不参与后续实现。
 
 计划中的收编顺序（文档合同，不是本 PR 的实现范围）：
 
@@ -163,16 +163,23 @@ B0f 正在独立分支隐藏 Amazon 与旧 Generate 入口，并保持服务端 
 - B0f：隐藏 Amazon 与旧 Generate；实现 `ANALYSIS_PUBLIC_ENABLED=false` 双重 fail-closed。
 - Render 继续只走 Draft PR #3，不从脏树提交。
 
-**Exit:** 变更可独立审查；冻结能力在 UI 与服务端双重关闭；必需测试绿色；**未部署**。`ANALYSIS_PUBLIC_ENABLED` 在 B0f 落地前不得写成已存在。
+**Exit evidence:** B0a–B0f 已进入 main；Amazon 与旧 Generate 在 UI / 服务端双重关闭；`ANALYSIS_PUBLIC_ENABLED=false` 且 true 配置 fail-closed；main Quality Gate 已通过。未部署。
 
 ### B1 — 内部 Listing Audit 垂直切片
 
-**Status:** 尚未进入已提交基线（Next）
+**Status:** In progress (B1a)
 **Access:** 仅注册测试用户。禁止匿名架构抢跑。
 
 **Entry:** B0 冻结合同成立；准备收编或重建 Listing Audit 契约后，才允许实现注册用户 API/UI。
 
-脏工作区中的 Sprint 0.5 schema、prompt、15 个 synthetic cases 与 eval harness **还不是 main 的一部分**。B1 不得把未提交资产或 eval 运行输出当成已发布能力。
+Sprint 0.5 schema、prompt、15 个 synthetic cases 与 eval harness 已通过 B0e 进入 main；`runs/**` 仍禁止提交，且这些基线资产本身不代表业务 API 已发布。
+
+分批顺序：
+
+- **B1a:** provider-neutral Listing Audit 执行服务；严格 schema、grounding、确定性评分与 token 元数据边界。无 HTTP 路由、无真实 provider 调用、无新表。
+- **B1b:** 复用现有 `generation_requests` / quota 状态机，增加注册用户专用、幂等且失败不重复扣费的内部 API。
+- **B1c:** 内部注册用户 UI；保持 Amazon / Generate 隐藏，`ANALYSIS_PUBLIC_ENABLED=false`。
+- **B1d:** 受控 provider 运行与双人人工质量 gate；失败则停止，不进入 B2。
 
 **Exit:** 契约稳定；每个问题/行动可追溯或明确标为限制；失败/重试不重复扣费；无 Amazon 依赖；人工质量评审确认值得继续。**若人工质量 gate 失败，不得进入 B2 匿名体系。**
 
