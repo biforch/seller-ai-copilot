@@ -32,6 +32,7 @@ from scripts.validate_rc_environment import (  # noqa: E402
 
 BACKEND_DOCKERFILE_PROD = REPO_ROOT / "backend" / "Dockerfile.prod"
 FRONTEND_DOCKERFILE_PROD = REPO_ROOT / "frontend" / "Dockerfile.prod"
+NGINX_DOCKERFILE_RC = REPO_ROOT / "nginx" / "Dockerfile.rc"
 RC_COMPOSE = REPO_ROOT / "docker-compose.rc.yml"
 ENV_RC_EXAMPLE = REPO_ROOT / ".env.rc.example"
 RUNBOOK = REPO_ROOT / "docs" / "rc-deployment-runbook.md"
@@ -231,6 +232,18 @@ def test_frontend_production_dockerfile_standalone_runner() -> None:
     assert "NODE_ENV=production" in content
     assert "COPY --from=builder /app/public ./public" in content
     assert ".next/static" in content
+
+
+@pytest.mark.parametrize(
+    "dockerfile",
+    [BACKEND_DOCKERFILE_PROD, FRONTEND_DOCKERFILE_PROD, NGINX_DOCKERFILE_RC],
+)
+def test_production_runtime_pins_openssl_security_fix(dockerfile: Path) -> None:
+    content = _read(dockerfile)
+
+    assert "apk add --no-cache" in content
+    assert "libcrypto3=3.5.8-r0" in content
+    assert "libssl3=3.5.8-r0" in content
 
 
 def _normalized_dockerfile_text(path: Path) -> str:

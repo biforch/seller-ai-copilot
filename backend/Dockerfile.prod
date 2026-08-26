@@ -28,6 +28,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apk add --no-cache \
         ca-certificates \
+        libcrypto3=3.5.8-r0 \
+        libssl3=3.5.8-r0 \
         libstdc++ \
         postgresql-libs \
     && addgroup -S -g 1001 app \

@@ -222,6 +222,15 @@ Cross-verified on **2026-08-18**:
 - **Internal RC tags:** Local build tags are outside external pin scope but validated against an internal allowlist.
 - **S3c scope:** Runtime pinning does not claim images are vulnerability-free. SBOM/scan policy lives in `docs/supply-chain-security-policy.md`. Production `containers` scans four targets (backend amd64, backend arm64, frontend, nginx).
 
+### Runtime OpenSSL security pin (2026-08-26)
+
+Trivy policy on main Run `32943407969` identified `CVE-2026-14456` in
+`libcrypto3` and `libssl3` `3.5.7-r0` across all final Alpine images. The
+reported fixed version is `3.5.8-r0`. Backend, frontend, and nginx final stages
+therefore install both runtime packages at the exact fixed version. This is a
+targeted package remediation, not a general `apk upgrade`, and the unchanged
+CRITICAL / HIGH-with-fix policy remains authoritative.
+
 ---
 
 ## 9. Historical Alpine candidate audit archive (S3d5)
