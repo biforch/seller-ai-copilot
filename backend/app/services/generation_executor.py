@@ -14,6 +14,8 @@ from fastapi import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.analysis.schemas import ListingAuditInput
+from app.analysis.service import ListingAuditProvider, ListingAuditService
 from app.core.config import settings
 from app.core.exceptions import (
     AI_PROVIDER_UNAVAILABLE,
@@ -475,6 +477,8 @@ class GenerationExecutor:
         response_payload: dict[str, Any],
         model: str,
         tokens_used: int,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
         latency_ms: int,
         generation_type: str,
         generation_input: dict[str, Any],
@@ -566,8 +570,8 @@ class GenerationExecutor:
             generation_id=generation.id,
             model=model,
             prompt_version=PROMPT_VERSIONS[ctx.request_type],
-            input_tokens=0,
-            output_tokens=0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             tokens_used=tokens_used,
             latency_ms=latency_ms,
         )
@@ -858,6 +862,76 @@ class GenerationExecutor:
             ctx,
             latency_ms=latency_ms,
             finalize_fn=finalize_analysis,
+        )
+
+    async def execute_listing_audit(
+        self,
+        *,
+        user_id: str,
+        body: ListingAuditInput,
+        idempotency_key: str,
+        request_hash: str,
+        provider: ListingAuditProvider,
+    ) -> dict[str, Any]:
+        user = self._get_user(user_id)
+        user_uuid = orm_uuid(user.id)
+        canonical_input = body.model_dump(mode="json")
+
+        begin = self.begin_execution(
+            user_id=user_uuid,
+            request_type="listing_audit",
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            input_data=canonical_input,
+        )
+        if begin.replay is not None:
+            return begin.replay
+
+        ctx = ExecutionContext(
+            request_id=orm_uuid(begin.request.id),
+            user_id=user_uuid,
+            project=None,
+            reserve_amount=orm_int(begin.request.reserved_tokens),
+            request_type="listing_audit",
+        )
+        service = ListingAuditService(provider)
+
+        async def call_provider() -> dict[str, Any]:
+            execution = await service.execute(body, request_id=ctx.request_id)
+            return {
+                "report": execution.report.model_dump(mode="json"),
+                "model": execution.model,
+                "input_tokens": execution.input_tokens,
+                "output_tokens": execution.output_tokens,
+                "tokens_used": execution.tokens_used,
+            }
+
+        result = await self._run_llm(ctx, call_provider)
+        latency_ms = int(result.pop("_latency_ms", 0))
+        tokens_used = int(result["tokens_used"])
+        input_tokens = int(result["input_tokens"])
+        output_tokens = int(result["output_tokens"])
+        model = str(result["model"])
+        report = dict(result["report"])
+
+        def finalize_listing_audit() -> dict[str, Any]:
+            return self._finalize_success(
+                ctx,
+                response_payload=report,
+                model=model,
+                tokens_used=tokens_used,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                generation_type="listing_audit",
+                generation_input=canonical_input,
+                generation_output=report,
+            )
+
+        return self._finalize_with_boundary(
+            ctx,
+            latency_ms=latency_ms,
+            finalize_fn=finalize_listing_audit,
         )
 
     async def execute_keywords(

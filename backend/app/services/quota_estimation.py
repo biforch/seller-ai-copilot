@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from app.analysis.prompt import render_listing_audit_prompt
+from app.analysis.schemas import ListingAuditInput
+from app.prompts.token_budget import MAX_OUTPUT_TOKENS, estimate_text_reserve_tokens
 from app.prompts.token_budget import estimate_reserve_tokens as _estimate_reserve_tokens
 from app.prompts.versions import PROMPT_VERSIONS
 
@@ -51,5 +54,12 @@ _RENDER_BUILDERS = {
 def estimate_reserve_tokens(request_type: str, canonical_input: dict) -> int:
     if request_type not in PROMPT_VERSIONS:
         raise ValueError(f"Unknown request_type: {request_type}")
+    if request_type == "listing_audit":
+        prompt = render_listing_audit_prompt(ListingAuditInput.model_validate(canonical_input))
+        return estimate_text_reserve_tokens(
+            system=prompt.system,
+            user=prompt.user,
+            max_output_tokens=MAX_OUTPUT_TOKENS[request_type],
+        )
     builder = _RENDER_BUILDERS[request_type]
     return _estimate_reserve_tokens(request_type, builder(canonical_input))

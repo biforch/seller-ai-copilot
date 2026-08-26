@@ -13,6 +13,7 @@ MAX_OUTPUT_TOKENS: dict[str, int] = {
     "listing": 2000,
     "analysis": 1000,
     "keywords": 800,
+    "listing_audit": 3000,
 }
 
 # Fixed system message bodies passed to _chat_json (must stay in sync with OpenAIService).
@@ -75,3 +76,13 @@ def estimate_reserve_tokens(request_type: str, render_variables: dict) -> int:
     rendered_input = estimate_rendered_input_tokens(request_type, render_variables)
     max_output = MAX_OUTPUT_TOKENS[request_type]
     return rendered_input + max_output + _SAFETY_MARGIN_TOKENS
+
+
+def estimate_text_reserve_tokens(*, system: str, user: str, max_output_tokens: int) -> int:
+    """Estimate a versioned prompt that is rendered outside the legacy templates."""
+    return (
+        _estimate_text_tokens(system)
+        + _estimate_text_tokens(user)
+        + max_output_tokens
+        + _SAFETY_MARGIN_TOKENS
+    )

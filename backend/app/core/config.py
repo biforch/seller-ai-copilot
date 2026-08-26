@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     # change; it cannot be enabled by deployment configuration alone.
     LEGACY_GENERATION_ENABLED: bool = False
     ANALYSIS_PUBLIC_ENABLED: bool = False
+    LISTING_AUDIT_INTERNAL_ENABLED: bool = False
 
     AMAZON_SP_API_ENABLED: bool = False
     AMAZON_LWA_CLIENT_ID: str = ""

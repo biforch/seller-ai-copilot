@@ -21,6 +21,9 @@ from app.api import (
     project,
     user,
 )
+from app.api import (
+    analysis as analysis_api,
+)
 from app.core.access_log_safety import install_uvicorn_oauth_callback_access_log_filter
 from app.core.auth_session_constants import SESSION_COOKIE_NAME
 from app.core.config import settings
@@ -186,6 +189,12 @@ app.include_router(
     auth.router,
     prefix="/api/v1/auth",
     tags=["Authentication"],
+)
+
+app.include_router(
+    analysis_api.router,
+    prefix="/api/v1/analysis",
+    tags=["Analysis"],
 )
 
 

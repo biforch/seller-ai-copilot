@@ -14,6 +14,7 @@ from app.services.auth_session_service import auth_session_service
 OAUTH_START_RATE_LIMIT_PREFIX = "oauth-start"
 AMAZON_REFRESH_RATE_LIMIT_PREFIX = "amazon-refresh"
 AMAZON_PRODUCT_SYNC_RATE_LIMIT_PREFIX = "amazon-product-sync"
+LISTING_AUDIT_RATE_LIMIT_PREFIX = "listing-audit"
 
 
 def _unauthenticated_session_bucket(request: Request, *, prefix: str, label: str) -> str:
@@ -49,3 +50,7 @@ def amazon_refresh_rate_limit_key(request: Request) -> str:
 
 def amazon_product_sync_rate_limit_key(request: Request) -> str:
     return session_rate_limit_key(request, prefix=AMAZON_PRODUCT_SYNC_RATE_LIMIT_PREFIX)
+
+
+def listing_audit_rate_limit_key(request: Request) -> str:
+    return session_rate_limit_key(request, prefix=LISTING_AUDIT_RATE_LIMIT_PREFIX)
