@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -16,15 +19,24 @@ from app.analysis.schemas import (
     ListingAuditReport,
 )
 from app.analysis.scoring import SCORE_WEIGHTS, calculate_overall_score
+from scripts.audit_listing_audit_baseline import (
+    INCIDENT_SCHEMA_VERSION,
+    RUN_METADATA_KEYS,
+    validate_incident_adjudication,
+)
 from scripts.run_listing_audit_baseline import (
     EXTERNAL_CALL_CONFIRMATION,
     PROVIDER_TIMEOUT_SECONDS,
     create_provider_client,
+    exclusive_run_directory,
+    extract_openrouter_usage,
     parse_temperature,
     temperature_mode,
     validate_online_run_contract,
+    validate_resume_accounting,
     write_json_atomically,
 )
+from scripts.summarize_listing_audit_baseline import load_scorecards
 
 CASES_PATH = Path(__file__).parent / "evals" / "listing_audit" / "cases.json"
 
@@ -210,9 +222,12 @@ def test_online_run_requires_explicit_confirmation_and_ignored_output_dir(
     monkeypatch.setattr("scripts.run_listing_audit_baseline.RUNS_ROOT", runs_root)
 
     class Args:
+        provider = "openrouter"
         model = "approved/model"
         output_dir = runs_root / "run-001"
         confirm_external_call = None
+        max_requests = 15
+        max_budget_usd = Decimal("5")
 
     with pytest.raises(SystemExit, match="confirm-external-call"):
         validate_online_run_contract(Args())
@@ -231,8 +246,11 @@ def test_online_run_rejects_ambiguous_model_ids(tmp_path, monkeypatch, model):
     monkeypatch.setattr("scripts.run_listing_audit_baseline.RUNS_ROOT", runs_root)
 
     class Args:
+        provider = "openrouter"
         output_dir = runs_root / "run-001"
         confirm_external_call = EXTERNAL_CALL_CONFIRMATION
+        max_requests = 15
+        max_budget_usd = Decimal("5")
 
     Args.model = model
     with pytest.raises(SystemExit, match="model"):
@@ -245,6 +263,169 @@ def test_eval_artifacts_are_written_owner_only(tmp_path):
 
     assert destination.stat().st_mode & 0o777 == 0o600
     assert destination.read_text(encoding="utf-8") == '{\n  "synthetic": true\n}'
+
+
+def test_online_contract_rejects_unbounded_requests_and_budget(tmp_path, monkeypatch):
+    runs_root = tmp_path / "runs"
+    monkeypatch.setattr("scripts.run_listing_audit_baseline.RUNS_ROOT", runs_root)
+
+    class Args:
+        provider = "openrouter"
+        model = "approved/model"
+        output_dir = runs_root / "run-001"
+        confirm_external_call = EXTERNAL_CALL_CONFIRMATION
+        max_requests = 16
+        max_budget_usd = Decimal("5")
+
+    with pytest.raises(SystemExit, match="max-requests"):
+        validate_online_run_contract(Args())
+    Args.max_requests = 15
+    Args.max_budget_usd = Decimal("0")
+    with pytest.raises(SystemExit, match="max-budget-usd"):
+        validate_online_run_contract(Args())
+
+
+def test_online_run_directory_lock_rejects_concurrent_writer(tmp_path):
+    run_dir = tmp_path / "run"
+    with exclusive_run_directory(run_dir):
+        with pytest.raises(RuntimeError, match="already owns"):
+            with exclusive_run_directory(run_dir):
+                pytest.fail("concurrent lock unexpectedly acquired")
+    assert run_dir.stat().st_mode & 0o777 == 0o700
+    assert (run_dir / ".run.lock").stat().st_mode & 0o777 == 0o600
+
+
+def test_openrouter_usage_must_include_nonnegative_cost_and_tokens():
+    class Response:
+        def model_dump(self, *, mode):
+            assert mode == "json"
+            return {
+                "usage": {
+                    "cost": 0.0042,
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150,
+                }
+            }
+
+    assert extract_openrouter_usage(Response()) == {
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "total_tokens": 150,
+        "cost_usd": "0.0042",
+    }
+
+
+def test_resume_accounting_cannot_understate_retained_attempts_or_cost(tmp_path):
+    case = type("Case", (), {"case_id": "LA-001"})()
+    (tmp_path / "LA-001.json").write_text(
+        json.dumps({"provider_usage": {"cost_usd": "0.04"}}), encoding="utf-8"
+    )
+    (tmp_path / "LA-001.failure.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="request accounting"):
+        validate_resume_accounting(tmp_path, [case], 1, Decimal("0.04"))
+    with pytest.raises(RuntimeError, match="manifest cost"):
+        validate_resume_accounting(tmp_path, [case], 2, Decimal("0.03"))
+    validate_resume_accounting(tmp_path, [case], 2, Decimal("0.04"))
+
+
+def _incident_fixture(tmp_path: Path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    manifest = {key: f"value-{key}" for key in RUN_METADATA_KEYS}
+    failure = {
+        "case_id": "LA-014",
+        **manifest,
+        "failure_stage": "output_validation",
+        "response_content_retained": False,
+    }
+    failure_path = run_dir / "LA-014.failure.json"
+    success_path = run_dir / "LA-014.json"
+    failure_path.write_text(json.dumps(failure), encoding="utf-8")
+    success_path.write_text('{"case_id":"LA-014"}', encoding="utf-8")
+    incident = {
+        "schema_version": INCIDENT_SCHEMA_VERSION,
+        "classification": "concurrent_runner_superseded_attempt",
+        "accepted_for_quality_baseline": True,
+        "non_reusable_exception": True,
+        "runner_lock_remediation_required": True,
+        "authorized_external_request_count": 15,
+        "actual_external_request_count": 16,
+        "request_limit_breach": 1,
+        "superseded_attempts": [
+            {
+                "case_id": "LA-014",
+                "failure_file": failure_path.name,
+                "superseded_by": success_path.name,
+                "failure_file_sha256": hashlib.sha256(failure_path.read_bytes()).hexdigest(),
+                "success_file_sha256": hashlib.sha256(success_path.read_bytes()).hexdigest(),
+            }
+        ],
+    }
+    incident_path = run_dir / "incident-adjudication.json"
+    incident_path.write_text(json.dumps(incident), encoding="utf-8")
+    return run_dir, manifest, incident_path
+
+
+def test_failure_requires_exact_incident_adjudication(tmp_path):
+    run_dir, manifest, incident_path = _incident_fixture(tmp_path)
+    absent = validate_incident_adjudication(
+        run_dir, manifest, ["LA-014.failure.json"], None
+    )
+    assert absent["unadjudicated_failure_files"] == ["LA-014.failure.json"]
+
+    accepted = validate_incident_adjudication(
+        run_dir, manifest, ["LA-014.failure.json"], incident_path
+    )
+    assert accepted["accepted"] is True
+    assert accepted["request_limit_breach"] == 1
+
+    (run_dir / "LA-014.json").write_text('{"tampered":true}', encoding="utf-8")
+    with pytest.raises(ValueError, match="inconsistent"):
+        validate_incident_adjudication(
+            run_dir, manifest, ["LA-014.failure.json"], incident_path
+        )
+
+
+def test_scorecards_require_distinct_reviewers_and_matching_metadata(tmp_path):
+    cases = [
+        {"case_id": f"LA-{index:03d}", **_passing_review("unused")}
+        for index in range(1, 16)
+    ]
+    for case in cases:
+        case.pop("evaluator_id")
+        case.pop("model")
+        case.pop("prompt_version")
+    paths = []
+    for reviewer in ("reviewer-a", "reviewer-b"):
+        path = tmp_path / f"{reviewer}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "evaluator_id": reviewer,
+                    "model": "approved-test-model",
+                    "prompt_version": "listing-audit-prompt-v2",
+                    "cases": cases,
+                }
+            ),
+            encoding="utf-8",
+        )
+        paths.append(path)
+    loaded = load_scorecards(
+        paths,
+        expected_model="approved-test-model",
+        expected_prompt_version="listing-audit-prompt-v2",
+    )
+    assert len(loaded) == 15
+    assert all(len(scores) == 2 for scores in loaded.values())
+
+    with pytest.raises(ValueError, match="metadata"):
+        load_scorecards(
+            paths,
+            expected_model="different-model",
+            expected_prompt_version="listing-audit-prompt-v2",
+        )
 
 
 def _passing_review(evaluator_id: str) -> dict:

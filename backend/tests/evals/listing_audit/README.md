@@ -31,6 +31,8 @@ PYTHONPATH=. python3 scripts/run_listing_audit_baseline.py \
   --model '<exact-approved-model-id>' \
   --temperature 0.2 \
   --confirm-external-call B1D-15-SYNTHETIC-CASES \
+  --max-requests 15 \
+  --max-budget-usd '<approved-positive-budget>' \
   --output-dir 'tests/evals/listing_audit/runs/<prompt-model-run-id>'
 ```
 
@@ -47,8 +49,15 @@ PYTHONPATH=. python3 scripts/run_listing_audit_baseline.py \
   --model '<exact-openrouter-model-id>' \
   --temperature null \
   --confirm-external-call B1D-15-SYNTHETIC-CASES \
+  --max-requests 15 \
+  --max-budget-usd '<approved-positive-budget>' \
   --output-dir 'tests/evals/listing_audit/runs/<provider-model-run-id>'
 ```
+
+Online OpenRouter runs must also provide `--max-requests` (at most 15) and a positive
+`--max-budget-usd`. The runner exclusively locks each run directory and requires
+provider-reported cost accounting; concurrent writers, unbounded spend, and resumes without
+usage evidence fail closed.
 
 OpenRouter mode uses its fixed official API URL and sends `store=false`,
 `zdr=true`, `data_collection=deny`, `require_parameters=true`, and

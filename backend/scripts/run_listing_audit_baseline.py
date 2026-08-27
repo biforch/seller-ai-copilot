@@ -9,11 +9,14 @@ run metadata to the selected directory.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
 import sys
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from openai import APIStatusError, OpenAI
@@ -32,6 +35,8 @@ OPENROUTER_ROUTING_DOCS = "https://openrouter.ai/docs/guides/routing/provider-se
 RUNS_ROOT = ROOT / "tests" / "evals" / "listing_audit" / "runs"
 EXTERNAL_CALL_CONFIRMATION = "B1D-15-SYNTHETIC-CASES"
 PROVIDER_TIMEOUT_SECONDS = 120.0
+MAX_BASELINE_REQUESTS = 15
+MAX_COMPLETION_TOKENS = 8_192
 
 
 def parse_temperature(value: str) -> float | None:
@@ -67,6 +72,12 @@ def parse_args() -> argparse.Namespace:
             "Required exact confirmation for an online run. This is not a secret; use "
             f"{EXTERNAL_CALL_CONFIRMATION!r} only after provider, model, and spend approval."
         ),
+    )
+    parser.add_argument("--max-requests", type=int, default=MAX_BASELINE_REQUESTS)
+    parser.add_argument(
+        "--max-budget-usd",
+        type=Decimal,
+        help="Required positive OpenRouter cost ceiling for online runs",
     )
     return parser.parse_args()
 
@@ -162,6 +173,15 @@ def validate_online_run_contract(args: argparse.Namespace) -> Path:
         character.isspace() or ord(character) < 32 for character in args.model
     ):
         raise SystemExit("--model must be a non-empty exact provider model ID without whitespace")
+    if args.max_requests < 1 or args.max_requests > MAX_BASELINE_REQUESTS:
+        raise SystemExit(f"--max-requests must be between 1 and {MAX_BASELINE_REQUESTS}")
+    if args.max_budget_usd is None or args.max_budget_usd <= 0:
+        raise SystemExit("--max-budget-usd must be a positive amount for online runs")
+    if args.provider != "openrouter":
+        raise SystemExit(
+            "online budget enforcement currently supports OpenRouter only because its response "
+            "includes provider-reported request cost"
+        )
 
     runs_root = RUNS_ROOT.resolve()
     output_dir = args.output_dir.resolve()
@@ -202,6 +222,47 @@ def write_json_atomically(path: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
+def extract_openrouter_usage(response) -> dict:
+    raw_usage = response.model_dump(mode="json").get("usage")
+    if not isinstance(raw_usage, dict):
+        raise RuntimeError("OpenRouter response omitted required usage accounting")
+    try:
+        cost = Decimal(str(raw_usage["cost"]))
+        prompt_tokens = int(raw_usage["prompt_tokens"])
+        completion_tokens = int(raw_usage["completion_tokens"])
+        total_tokens = int(raw_usage["total_tokens"])
+    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+        raise RuntimeError("OpenRouter response contained invalid usage accounting") from exc
+    if cost < 0 or min(prompt_tokens, completion_tokens, total_tokens) < 0:
+        raise RuntimeError("OpenRouter response contained negative usage accounting")
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "cost_usd": str(cost),
+    }
+
+
+@contextmanager
+def exclusive_run_directory(output_dir: Path):
+    """Reject concurrent writers for the same baseline run directory."""
+    output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    output_dir.chmod(0o700)
+    lock_path = output_dir / ".run.lock"
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(
+                f"another baseline runner already owns {output_dir}; no request was sent"
+            ) from exc
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
 def raise_provider_diagnostic(exc: APIStatusError, args: argparse.Namespace, case_id: str) -> None:
     if args.provider == "openrouter" and exc.status_code == 404:
         raise RuntimeError(
@@ -217,14 +278,42 @@ def raise_provider_diagnostic(exc: APIStatusError, args: argparse.Namespace, cas
     ) from exc
 
 
-def run_online(args: argparse.Namespace) -> None:
-    output_dir = validate_online_run_contract(args)
+def validate_resume_accounting(
+    output_dir: Path, cases, request_count: int, cumulative_cost: Decimal
+) -> None:
+    successful_artifacts = [
+        output_dir / f"{case.case_id}.json"
+        for case in cases
+        if (output_dir / f"{case.case_id}.json").exists()
+    ]
+    known_attempt_count = len(successful_artifacts) + len(
+        list(output_dir.glob("*.failure.json"))
+    )
+    if request_count < known_attempt_count:
+        raise RuntimeError(
+            "refusing to resume because manifest request accounting is below retained "
+            "success and failure evidence"
+        )
+    successful_cost = Decimal("0")
+    for path in successful_artifacts:
+        artifact = json.loads(path.read_text(encoding="utf-8"))
+        usage = artifact.get("provider_usage")
+        if not isinstance(usage, dict) or "cost_usd" not in usage:
+            raise RuntimeError(f"refusing to resume {path} without provider cost accounting")
+        successful_cost += Decimal(str(usage["cost_usd"]))
+    if cumulative_cost < successful_cost:
+        raise RuntimeError(
+            "refusing to resume because manifest cost is below retained artifact costs"
+        )
+
+
+def _run_online_locked(args: argparse.Namespace, output_dir: Path) -> None:
     cases = load_eval_cases(args.cases)
     client = create_provider_client(args.provider)
-    output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    output_dir.chmod(0o700)
     run_started = datetime.now(UTC).isoformat()
     run_metadata = expected_run_metadata(args)
+    request_count = 0
+    cumulative_cost = Decimal("0")
 
     manifest_path = output_dir / "manifest.json"
     if manifest_path.exists():
@@ -235,13 +324,43 @@ def run_online(args: argparse.Namespace) -> None:
                     f"refusing to resume with incompatible manifest: {key} expected "
                     f"{expected_value!r}, got {manifest.get(key)!r}"
                 )
+        for required_key in (
+            "external_request_count",
+            "cumulative_cost_usd",
+            "max_requests",
+            "max_budget_usd",
+        ):
+            if required_key not in manifest:
+                raise RuntimeError(
+                    f"refusing to resume legacy manifest without {required_key}; "
+                    "use a new run directory"
+                )
+        if manifest["max_requests"] != args.max_requests or Decimal(
+            str(manifest["max_budget_usd"])
+        ) != args.max_budget_usd:
+            raise RuntimeError("refusing to resume with different request or budget ceilings")
+        run_started = manifest.get("started_at", run_started)
+        request_count = int(manifest.get("external_request_count", 0))
+        cumulative_cost = Decimal(str(manifest.get("cumulative_cost_usd", "0")))
+        validate_resume_accounting(output_dir, cases, request_count, cumulative_cost)
 
     for case in cases:
         destination = output_dir / f"{case.case_id}.json"
         if destination.exists():
             validate_existing_artifact(destination, case, run_metadata)
+            artifact = json.loads(destination.read_text(encoding="utf-8"))
+            usage = artifact.get("provider_usage")
+            if not isinstance(usage, dict) or "cost_usd" not in usage:
+                raise RuntimeError(
+                    f"refusing to resume {destination} without provider cost accounting"
+                )
             print(f"resumed {case.case_id} (existing artifact validated)")
             continue
+
+        if request_count >= args.max_requests:
+            raise RuntimeError("authorized external request limit reached")
+        if cumulative_cost >= args.max_budget_usd:
+            raise RuntimeError("authorized external budget reached")
 
         prompt = render_listing_audit_prompt(case.input)
         request = {
@@ -252,10 +371,25 @@ def run_online(args: argparse.Namespace) -> None:
             ],
             "response_format": structured_output_format(),
             "store": False,
+            "max_completion_tokens": MAX_COMPLETION_TOKENS,
             "extra_body": provider_request_options(args.provider),
         }
         if args.temperature is not None:
             request["temperature"] = args.temperature
+        request_count += 1
+        write_json_atomically(
+            manifest_path,
+            {
+                "started_at": run_started,
+                "completed_at": None,
+                "case_count": len(cases),
+                "external_request_count": request_count,
+                "cumulative_cost_usd": str(cumulative_cost),
+                "max_requests": args.max_requests,
+                "max_budget_usd": str(args.max_budget_usd),
+                **run_metadata,
+            },
+        )
         try:
             response = client.chat.completions.create(**request)
         except APIStatusError as exc:
@@ -263,6 +397,25 @@ def run_online(args: argparse.Namespace) -> None:
         content = response.choices[0].message.content
         if not content:
             raise RuntimeError(f"{case.case_id}: provider returned empty content")
+        usage = extract_openrouter_usage(response)
+        cumulative_cost += Decimal(usage["cost_usd"])
+        write_json_atomically(
+            manifest_path,
+            {
+                "started_at": run_started,
+                "completed_at": None,
+                "case_count": len(cases),
+                "external_request_count": request_count,
+                "cumulative_cost_usd": str(cumulative_cost),
+                "max_requests": args.max_requests,
+                "max_budget_usd": str(args.max_budget_usd),
+                **run_metadata,
+            },
+        )
+        if cumulative_cost > args.max_budget_usd:
+            raise RuntimeError(
+                f"{case.case_id}: provider-reported cumulative cost exceeded the authorized budget"
+            )
         try:
             output = ListingAuditLLMOutput.model_validate_json(content)
             validate_evidence_grounding(case.input, output)
@@ -295,6 +448,7 @@ def run_online(args: argparse.Namespace) -> None:
             "expected": case.expected.model_dump(mode="json"),
             **run_metadata,
             "response_model_id": response.model,
+            "provider_usage": usage,
             "overall_score": calculate_overall_score(output.dimension_scores),
             "output": output.model_dump(mode="json"),
             "human_scores": [],
@@ -306,9 +460,19 @@ def run_online(args: argparse.Namespace) -> None:
         "started_at": run_started,
         "completed_at": datetime.now(UTC).isoformat(),
         "case_count": len(cases),
+        "external_request_count": request_count,
+        "cumulative_cost_usd": str(cumulative_cost),
+        "max_requests": args.max_requests,
+        "max_budget_usd": str(args.max_budget_usd),
         **run_metadata,
     }
     write_json_atomically(manifest_path, manifest)
+
+
+def run_online(args: argparse.Namespace) -> None:
+    output_dir = validate_online_run_contract(args)
+    with exclusive_run_directory(output_dir):
+        _run_online_locked(args, output_dir)
 
 
 def main() -> int:

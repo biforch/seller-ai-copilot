@@ -1,16 +1,16 @@
 # SellerAI Copilot Development Plan
 
-**Plan version:** 2026-08-26（B1d controlled quality-gate preflight）
+**Plan version:** 2026-08-27（B1d controlled quality gate complete）
 **Supersedes:** 2026-08-21 Amazon-first release plan
-**Formal code baseline:** merged `origin/main` at `d1e45d1fe41dd46d0f7c67168b4ec7ca2a27ad9a` (`d1e45d1`, B1c registered internal UI).
+**Formal code baseline:** merged `origin/main` at `0e940a2c0d292fb8e2dd25463adff12f73cfb8d0` (`0e940a2`, B1d offline preflight and plan).
 **Current product line:** **Listing Audit**（决策分析助手）。Amazon 同步与内容生成不再是当前发布主线。
 **Alembic head on main:** `1b2c3d4e5f6a`.
 **B0 status:** Complete
-**B1 status:** In progress (B1d; external provider authorization required)
-**Source of truth:** 已合并的 `main@d1e45d1`、其 Alembic 链、自动化测试与本计划。历史脏工作区不是 source of truth。
+**B1 status:** Complete (B1d human quality gate passed; implementation pending review)
+**Source of truth:** 已合并的 `main@0e940a2`、其 Alembic 链、自动化测试与本计划。历史脏工作区不是 source of truth。
 **Authority:** 本计划不授权 merge、deploy、删除数据、启用 Amazon、公开 Analysis，或调用外部生产服务。
 
-## 0. 正式证据（main@d1e45d1 / B1c complete）
+## 0. 正式证据（main@0e940a2 / B1d offline preflight complete）
 
 | 项 | 状态 |
 | --- | --- |
@@ -167,7 +167,7 @@ B0f 已隐藏 Amazon 与旧 Generate 入口，并保持服务端 fail-closed；�
 
 ### B1 — 内部 Listing Audit 垂直切片
 
-**Status:** In progress (B1d; external provider authorization required)
+**Status:** Complete (B1d human quality gate passed)
 **Access:** 仅注册测试用户。禁止匿名架构抢跑。
 
 **Entry:** B0 冻结合同成立；准备收编或重建 Listing Audit 契约后，才允许实现注册用户 API/UI。
@@ -179,7 +179,7 @@ Sprint 0.5 schema、prompt、15 个 synthetic cases 与 eval harness 已通过 B
 - **B1a — Complete (`2ab6ace`):** provider-neutral Listing Audit 执行服务；严格 schema、grounding、确定性评分与 token 元数据边界。无 HTTP 路由、无真实 provider 调用、无新表。
 - **B1b — Complete (`e9af653`):** 复用现有 `generation_requests` / quota 状态机，增加注册用户专用、幂等且失败不重复扣费的内部 API。独立 `LISTING_AUDIT_INTERNAL_ENABLED` 默认 false；鉴权、CSRF/Origin 与开关检查通过后才允许构造 provider。
 - **B1c — Complete (`d1e45d1`):** 内部注册用户 UI；前端入口与直达路由由独立、默认 false 的 build-time 开关保护。保持 Amazon / Generate 隐藏，`ANALYSIS_PUBLIC_ENABLED=false`。
-- **B1d — Offline preflight complete (`cc440dd`, pending merge):** 在线 runner 需显式非秘密确认值；输出仅允许进入 Git 忽略的 `runs/`，目录/文件权限为 0700/0600；SDK 自动重试关闭且单次超时 120 秒，因此一次完整执行最多 15 个 provider 请求。真实运行仍需明确 provider、精确 model、最大预算与两个独立 reviewer；未授权前禁止调用。人工 gate 失败则停止，不进入 B2。
+- **B1d — Human quality gate passed (2026-08-27; implementation pending review):** 经明确授权使用 OpenRouter `openai/gpt-5.4-mini`、USD 5 上限和 15 次请求目标完成 15 个 synthetic cases；两名独立 reviewer 完成 30 份评分。groundedness 4.00、specificity 4.10、prioritization 4.07、actionability 4.23、calibration 3.87、safety 5.00；hallucination 与 prompt-injection success 均为 0，Top-3 case pass rate 0.80。一次并发 resume 导致实际 16/15 请求及一份 LA-014 superseded failure；失败证据继续保留并由哈希绑定的非复用事故裁决审计。runner 已增加排他锁、请求/预算硬门禁和 provider usage accounting。详见 `docs/listing-audit-b1d-quality-evidence.md`。`runs/**` 仍永不提交。
 
 **Exit:** 契约稳定；每个问题/行动可追溯或明确标为限制；失败/重试不重复扣费；无 Amazon 依赖；人工质量评审确认值得继续。**若人工质量 gate 失败，不得进入 B2 匿名体系。**
 
@@ -249,4 +249,4 @@ git diff --check
 3. **B2/B3 后：** 决定公开测试是否安全、可衡量。B3 前 Analysis 保持关闭。
 4. **Amazon：** 只通过独立战略决策重启，并重新验收；原 R2e 不再自动恢复。
 
-当前结论：**GO for B1d controlled quality evaluation after explicit provider/model/budget authorization；NO-GO for anonymous/public Analysis, Amazon-on, Render production, or any deployment.**
+当前结论：**B1 human quality gate passed；GO for B2 planning after this implementation is reviewed and merged；NO-GO for anonymous/public Analysis, Amazon-on, Render production, or any deployment.**
