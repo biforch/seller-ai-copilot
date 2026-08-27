@@ -11,7 +11,7 @@ Vulnerability scanning, SBOM generation, and supply-chain enforcement are docume
 
 ## 1. Image inventory
 
-Expected external pinned references: **14** (validated by `validate_container_image_pins.py`).
+Expected external pinned references: **15** (validated by `validate_container_image_pins.py`).
 
 | File | Line | Repository | Tag | Environment | Architectures required |
 | --- | --- | --- | --- | --- | --- |
@@ -20,6 +20,7 @@ Expected external pinned references: **14** (validated by `validate_container_im
 | `frontend/Dockerfile.prod` | 2, 11, 26 | `node` | `24-alpine` | RC / production | linux/amd64; linux/arm64 |
 | `frontend/Dockerfile` | 1 | `node` | `24-alpine` | development | linux/amd64; linux/arm64 |
 | `nginx/Dockerfile.rc` | 1 | `nginx` | `1.30-alpine` | RC / production | linux/amd64; linux/arm64 |
+| `nginx/Dockerfile.render` | 1 | `nginx` | `1.30-alpine` | Render internal RC adapter | linux/amd64; linux/arm64 |
 | `docker-compose.rc.yml` | 7 | `postgres` | `16-alpine` | RC | linux/amd64; linux/arm64 |
 | `docker-compose.yml` | 3 | `postgres` | `16-alpine` | development | linux/amd64; linux/arm64 |
 | `docker-compose.yml` | 21 | `redis` | `7-alpine` | development only | linux/amd64; linux/arm64 |

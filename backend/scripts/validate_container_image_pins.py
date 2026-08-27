@@ -20,13 +20,14 @@ SCAN_TARGETS = (
     REPO_ROOT / "frontend" / "Dockerfile",
     REPO_ROOT / "frontend" / "Dockerfile.prod",
     REPO_ROOT / "nginx" / "Dockerfile.rc",
+    REPO_ROOT / "nginx" / "Dockerfile.render",
     REPO_ROOT / "docker-compose.yml",
     REPO_ROOT / "docker-compose.rc.yml",
     REPO_ROOT / ".github" / "workflows" / "quality.yml",
 )
 
 EXPECTED_SCAN_FILE_COUNT = len(SCAN_TARGETS)
-EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 14
+EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 15
 EXPECTED_INTERNAL_BUILD_REF_COUNT = 4
 EXPECTED_SCANNER_PINNED_REF_COUNT = 8
 EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT = 2
