@@ -1,0 +1,111 @@
+# Amazon-off internal RC adapter only. Do not sync this Blueprint, create
+# Render resources, or change DNS until a later explicit authorization.
+# LOG-02 (platform HTTP logs for the OAuth callback query string) is unresolved.
+# This file is not production-ready and is not Amazon-on approval.
+services:
+  - type: web
+    name: listnara-edge
+    runtime: docker
+    region: virginia
+    plan: starter
+    dockerContext: ./nginx
+    dockerfilePath: ./nginx/Dockerfile.render
+    autoDeployTrigger: off
+    healthCheckPath: /health/ready
+    domains:
+      - app.listnara.com
+    renderSubdomainPolicy: disabled
+    envVars:
+      - key: BACKEND_HOSTPORT
+        fromService:
+          type: pserv
+          name: listnara-backend
+          property: hostport
+      - key: FRONTEND_HOSTPORT
+        fromService:
+          type: pserv
+          name: listnara-frontend
+          property: hostport
+
+  - type: pserv
+    name: listnara-frontend
+    runtime: docker
+    region: virginia
+    plan: starter
+    dockerContext: ./frontend
+    dockerfilePath: ./frontend/Dockerfile.prod
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: HOSTNAME
+        value: 0.0.0.0
+      - key: NEXT_PUBLIC_API_URL
+        value: /api/v1
+      - key: NEXT_PUBLIC_APP_NAME
+        value: Listnara
+
+  - type: pserv
+    name: listnara-backend
+    runtime: docker
+    region: virginia
+    plan: starter
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile.prod
+    autoDeployTrigger: off
+    preDeployCommand: python scripts/validate_render_production_environment.py && alembic upgrade head
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: listnara-postgres
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_AMAZON_DATA_ENABLED
+        value: "false"
+      - key: OPENAI_DATA_RETENTION_MODE
+        value: default
+      - key: CORS_ORIGINS
+        value: https://app.listnara.com
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: APP_NAME
+        value: Listnara
+      - key: DEBUG
+        value: "false"
+      - key: ANALYSIS_PUBLIC_ENABLED
+        value: "false"
+      - key: LISTING_AUDIT_INTERNAL_ENABLED
+        value: "false"
+      - key: AMAZON_SP_API_ENABLED
+        value: "false"
+      - key: AMAZON_OAUTH_ENABLED
+        value: "false"
+      - key: AMAZON_SP_API_ENDPOINT_MODE
+        value: mock
+      - key: AMAZON_SP_API_REGION
+        value: na
+
+databases:
+  - name: listnara-postgres
+    region: virginia
+    plan: basic-1gb
+    diskSizeGB: 15
+    storageAutoscalingEnabled: false
+    postgresMajorVersion: "16"
+    databaseName: listnara_prod
+    user: listnara_app
+    connectionPool: none
+    ipAllowList: []

@@ -101,7 +101,7 @@ successful restore are evidenced in the chosen platform.
 For each promoted SHA, retain:
 
 - PR and immutable commit SHA;
-- Quality Gate run and exact nine-file supply-chain artifact identity;
+- Quality Gate run and exact eleven-file supply-chain artifact identity;
 - production image tag/digest inventory;
 - Alembic head;
 - backup checksum and restore-rehearsal timestamp (never the dump in Git);

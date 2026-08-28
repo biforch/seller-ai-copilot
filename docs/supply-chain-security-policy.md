@@ -136,7 +136,7 @@ S3c ships **zero** approved exceptions.
 | Name | `sellerai-supply-chain-<commit-sha>` |
 | Retention | **14 days** |
 | `if-no-files-found` | **error** |
-| Exact paths | `backend.cdx.json`, `backend-arm64.cdx.json`, `frontend.cdx.json`, `nginx.cdx.json`, `backend.trivy.json`, `backend-arm64.trivy.json`, `frontend.trivy.json`, `nginx.trivy.json`, `scan-summary.json` (9 JSON files) |
+| Exact paths | `backend.cdx.json`, `backend-arm64.cdx.json`, `frontend.cdx.json`, `nginx.cdx.json`, `nginx-render.cdx.json`, `backend.trivy.json`, `backend-arm64.trivy.json`, `frontend.trivy.json`, `nginx.trivy.json`, `nginx-render.trivy.json`, `scan-summary.json` (11 JSON files) |
 | Excluded | Image tar, scanner cache, logs, source, env files, hidden files |
 
 Access: GitHub Actions artifacts with repository-scoped permissions (`contents: read`, `actions: write`). Not published externally.

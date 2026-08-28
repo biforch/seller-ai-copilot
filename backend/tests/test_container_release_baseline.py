@@ -742,27 +742,32 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "backend-arm64.cdx.json" in upload_block
     assert "frontend.cdx.json" in upload_block
     assert "nginx.cdx.json" in upload_block
+    assert "nginx-render.cdx.json" in upload_block
     assert "backend.trivy.json" in upload_block
     assert "backend-arm64.trivy.json" in upload_block
     assert "frontend.trivy.json" in upload_block
     assert "nginx.trivy.json" in upload_block
+    assert "nginx-render.trivy.json" in upload_block
     assert "scan-summary.json" in upload_block
-    assert len([line for line in upload_block.splitlines() if line.strip().endswith(".json")]) == 9
+    assert len([line for line in upload_block.splitlines() if line.strip().endswith(".json")]) == 11
     assert "timeout-minutes: 45" in content
     assert "SYFT_CHECK_FOR_APP_UPDATE=false" in content
     assert "docker-archive:/input/backend.tar" in content
     assert "docker-archive:/input/backend-arm64.tar" in content
     assert "docker-archive:/input/frontend.tar" in content
     assert "docker-archive:/input/nginx.tar" in content
+    assert "docker-archive:/input/nginx-render.tar" in content
     assert "file:/input/" not in content.split("Generate CycloneDX SBOMs", 1)[1].split("Validate SBOM artifacts", 1)[0]
     assert "cyclonedx-json@1.6=/output/backend.cdx.json" in content
     assert "cyclonedx-json@1.6=/output/backend-arm64.cdx.json" in content
     assert "cyclonedx-json@1.6=/output/frontend.cdx.json" in content
     assert "cyclonedx-json@1.6=/output/nginx.cdx.json" in content
+    assert "cyclonedx-json@1.6=/output/nginx-render.cdx.json" in content
     assert "backend: trivy scan command failed" in content
     assert "backend-arm64: trivy scan command failed" in content
     assert "frontend: trivy scan command failed" in content
     assert "nginx: trivy scan command failed" in content
+    assert "nginx-render: trivy scan command failed" in content
     assert "Cleanup supply-chain scan workspace" in content
     assert 'rm -rf "${CLEANUP_TARGET}"' in content
     assert 'CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-scan"' in content

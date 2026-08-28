@@ -20,17 +20,18 @@ SCAN_TARGETS = (
     REPO_ROOT / "frontend" / "Dockerfile",
     REPO_ROOT / "frontend" / "Dockerfile.prod",
     REPO_ROOT / "nginx" / "Dockerfile.rc",
+    REPO_ROOT / "nginx" / "Dockerfile.render",
     REPO_ROOT / "docker-compose.yml",
     REPO_ROOT / "docker-compose.rc.yml",
     REPO_ROOT / ".github" / "workflows" / "quality.yml",
 )
 
 EXPECTED_SCAN_FILE_COUNT = len(SCAN_TARGETS)
-EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 14
+EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 15
 EXPECTED_INTERNAL_BUILD_REF_COUNT = 4
-EXPECTED_SCANNER_PINNED_REF_COUNT = 8
+EXPECTED_SCANNER_PINNED_REF_COUNT = 10
 EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT = 2
-EXPECTED_PRODUCTION_SCAN_TARGET_COUNT = 4
+EXPECTED_PRODUCTION_SCAN_TARGET_COUNT = 5
 
 ALLOWED_SCANNER_SHELL_VARS = frozenset(
     {
@@ -84,10 +85,12 @@ PRODUCTION_ARTIFACT_JSON_FILES = (
     "backend-arm64.cdx.json",
     "frontend.cdx.json",
     "nginx.cdx.json",
+    "nginx-render.cdx.json",
     "backend.trivy.json",
     "backend-arm64.trivy.json",
     "frontend.trivy.json",
     "nginx.trivy.json",
+    "nginx-render.trivy.json",
     "scan-summary.json",
 )
 
@@ -840,10 +843,12 @@ def _validate_syft_scan_step(path: Path, content: str) -> list[Finding]:
         "docker-archive:/input/backend-arm64.tar",
         "docker-archive:/input/frontend.tar",
         "docker-archive:/input/nginx.tar",
+        "docker-archive:/input/nginx-render.tar",
         "cyclonedx-json@1.6=/output/backend.cdx.json",
         "cyclonedx-json@1.6=/output/backend-arm64.cdx.json",
         "cyclonedx-json@1.6=/output/frontend.cdx.json",
         "cyclonedx-json@1.6=/output/nginx.cdx.json",
+        "cyclonedx-json@1.6=/output/nginx-render.cdx.json",
     )
     for token in required_outputs:
         if token not in block:
