@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import subprocess
@@ -25,6 +26,7 @@ VALID_ENV = {
     "ENVIRONMENT": "production",
     "DATABASE_URL": "postgresql://app:private-value@db.internal/listnara_prod",
     "JWT_SECRET_KEY": "x" * 32,
+    "MFA_ENCRYPTION_KEY": base64.b64encode(b"m" * 32).decode("ascii"),
     "OPENAI_API_KEY": "private-value",
     "OPENAI_BASE_URL": "https://api.openai.com/v1",
     "OPENAI_AMAZON_DATA_ENABLED": "false",
@@ -236,12 +238,30 @@ def test_environment_validator_fails_closed(
         validate_render_production_environment()
 
 
-def test_validator_does_not_require_unmerged_mfa_key(
+def test_validator_requires_mfa_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set_valid_environment(monkeypatch)
     monkeypatch.delenv("MFA_ENCRYPTION_KEY", raising=False)
-    validate_render_production_environment()
+    with pytest.raises(RenderProductionEnvironmentError, match="MISSING:MFA_ENCRYPTION_KEY"):
+        validate_render_production_environment()
+
+
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    [
+        ("not-base64", "MFA_KEY_INVALID_BASE64"),
+        (base64.b64encode(b"m" * 31).decode("ascii"), "MFA_KEY_INVALID_LENGTH"),
+        (base64.b64encode(b"m" * 33).decode("ascii"), "MFA_KEY_INVALID_LENGTH"),
+    ],
+)
+def test_validator_rejects_invalid_mfa_key(
+    monkeypatch: pytest.MonkeyPatch, value: str, reason: str
+) -> None:
+    _set_valid_environment(monkeypatch)
+    monkeypatch.setenv("MFA_ENCRYPTION_KEY", value)
+    with pytest.raises(RenderProductionEnvironmentError, match=reason):
+        validate_render_production_environment()
 
 
 def test_validator_cli_does_not_echo_secrets() -> None:
@@ -249,6 +269,7 @@ def test_validator_cli_does_not_echo_secrets() -> None:
     env.update(VALID_ENV)
     secret = "do-not-print-this-value"
     env["OPENAI_API_KEY"] = secret
+    env["MFA_ENCRYPTION_KEY"] = secret
     env["AMAZON_SP_API_ENABLED"] = "true"
     result = subprocess.run(
         [sys.executable, str(BACKEND_ROOT / "scripts" / "validate_render_production_environment.py")],
@@ -265,7 +286,6 @@ def test_validator_cli_does_not_echo_secrets() -> None:
 def test_blueprint_yaml_structure_is_private_manual_and_amazon_disabled() -> None:
     blueprint_text = (REPO_ROOT / "render.yaml").read_text()
     assert "generateValue" not in blueprint_text
-    assert "MFA_ENCRYPTION_KEY" not in blueprint_text
     blueprint = load_strict_yaml_mapping(blueprint_text)
     _assert_blueprint_release_guards(blueprint)
     services = blueprint["services"]
@@ -330,10 +350,15 @@ def test_blueprint_yaml_structure_is_private_manual_and_amazon_disabled() -> Non
         "property": "connectionString",
     }
     assert backend_vars["JWT_SECRET_KEY"] == {"key": "JWT_SECRET_KEY", "sync": False}
+    assert backend_vars["MFA_ENCRYPTION_KEY"] == {
+        "key": "MFA_ENCRYPTION_KEY",
+        "sync": False,
+    }
     assert backend_vars["OPENAI_API_KEY"] == {"key": "OPENAI_API_KEY", "sync": False}
     assert "value" not in backend_vars["JWT_SECRET_KEY"]
     assert "generateValue" not in backend_vars["JWT_SECRET_KEY"]
-    assert "MFA_ENCRYPTION_KEY" not in backend_vars
+    assert "value" not in backend_vars["MFA_ENCRYPTION_KEY"]
+    assert "generateValue" not in backend_vars["MFA_ENCRYPTION_KEY"]
 
     for item in backend_vars.values():
         if "value" in item:
@@ -358,7 +383,7 @@ def _assert_blueprint_release_guards(blueprint: dict) -> None:
     assert edge["renderSubdomainPolicy"] == "disabled"
     assert backend["autoDeployTrigger"] == "off"
     assert backend_vars["PORT"] == {"key": "PORT", "value": "8000"}
-    for name in ("JWT_SECRET_KEY", "OPENAI_API_KEY"):
+    for name in ("JWT_SECRET_KEY", "MFA_ENCRYPTION_KEY", "OPENAI_API_KEY"):
         assert backend_vars[name] == {"key": name, "sync": False}
         assert "generateValue" not in backend_vars[name]
 
@@ -377,7 +402,10 @@ def test_blueprint_release_guards_reject_invalid_backend_port(invalid_port: str 
         _assert_blueprint_release_guards(mutated)
 
 
-@pytest.mark.parametrize("mutation", ["generated-secret", "auto-deploy", "public-subdomain"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["generated-secret", "generated-mfa-secret", "auto-deploy", "public-subdomain"],
+)
 def test_blueprint_release_guards_reject_unsafe_mutations(mutation: str) -> None:
     blueprint = load_strict_yaml_mapping((REPO_ROOT / "render.yaml").read_text())
     mutated = deepcopy(blueprint)
@@ -385,6 +413,13 @@ def test_blueprint_release_guards_reject_unsafe_mutations(mutation: str) -> None
     if mutation == "generated-secret":
         jwt = next(item for item in by_name["listnara-backend"]["envVars"] if item["key"] == "JWT_SECRET_KEY")
         jwt["generateValue"] = True
+    elif mutation == "generated-mfa-secret":
+        mfa = next(
+            item
+            for item in by_name["listnara-backend"]["envVars"]
+            if item["key"] == "MFA_ENCRYPTION_KEY"
+        )
+        mfa["generateValue"] = True
     elif mutation == "auto-deploy":
         by_name["listnara-backend"]["autoDeployTrigger"] = "commit"
     else:

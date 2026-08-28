@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -27,6 +29,16 @@ def _is_true(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() == "true"
 
 
+def _validate_mfa_encryption_key() -> None:
+    encoded_key = _require("MFA_ENCRYPTION_KEY")
+    try:
+        decoded_key = base64.b64decode(encoded_key, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise RenderProductionEnvironmentError("MFA_KEY_INVALID_BASE64") from exc
+    if len(decoded_key) != 32:
+        raise RenderProductionEnvironmentError("MFA_KEY_INVALID_LENGTH")
+
+
 def validate_render_production_environment() -> None:
     if _require("ENVIRONMENT") != "production":
         raise RenderProductionEnvironmentError("ENVIRONMENT_NOT_PRODUCTION")
@@ -41,6 +53,7 @@ def validate_render_production_environment() -> None:
 
     if len(_require("JWT_SECRET_KEY")) < 32:
         raise RenderProductionEnvironmentError("JWT_SECRET_TOO_SHORT")
+    _validate_mfa_encryption_key()
     _require("OPENAI_API_KEY")
     if _require("OPENAI_BASE_URL") != "https://api.openai.com/v1":
         raise RenderProductionEnvironmentError("OPENAI_BASE_URL_INVALID")

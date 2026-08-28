@@ -67,6 +67,8 @@ services:
           property: connectionString
       - key: JWT_SECRET_KEY
         sync: false
+      - key: MFA_ENCRYPTION_KEY
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_BASE_URL

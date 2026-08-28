@@ -28,10 +28,10 @@ operators must follow the order below and must never publish only the edge.
 1. PostgreSQL 16 and the external backup target are ready (encryption, retention,
    checksum, failure alert). Do not start application deploys first.
 2. Deploy `listnara-backend` only after secrets are present in Render Secret
-   Manager (`JWT_SECRET_KEY` and `OPENAI_API_KEY` are `sync: false`; never
-   `generateValue`). The backend `preDeployCommand` runs the fail-closed
-   environment validator and `alembic upgrade head`. A failed pre-deploy must
-   stop that backend publish.
+   Manager (`JWT_SECRET_KEY`, `MFA_ENCRYPTION_KEY`, and `OPENAI_API_KEY` are
+   `sync: false`; never `generateValue`). The backend `preDeployCommand` runs
+   the fail-closed environment validator and `alembic upgrade head`. A failed
+   pre-deploy must stop that backend publish.
 3. Confirm backend `/health` and `/health/ready`.
 4. Deploy `listnara-frontend` and confirm its health check.
 5. Deploy `listnara-edge` last. Never publish the public edge while backend or
@@ -76,6 +76,25 @@ authorization are complete.
 Enter secret values only in Render Secret Manager. Chat, IDEs, commits, tickets,
 screenshots, deploy logs, and shell history are not approved secret channels.
 Confirm only that a named secret has been configured, never its value.
+
+The internal RC requires these three manually supplied backend secrets before
+the first backend pre-deploy:
+
+- `JWT_SECRET_KEY`: a strong random value of at least 32 characters.
+- `MFA_ENCRYPTION_KEY`: standard Base64 encoding of exactly 32 random bytes.
+- `OPENAI_API_KEY`: a provider credential required by application configuration;
+  it must not be exercised while Listing Audit and public Analysis remain disabled.
+
+Generate the MFA key only in an approved local secret-entry session and enter
+the result directly into Render Secret Manager:
+
+```bash
+python -c "import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())"
+```
+
+The Render pre-deploy validator rejects a missing key, malformed Base64, and any
+decoded length other than 32 bytes without printing the supplied value. Do not
+reuse the MFA key from development, testing, another RC, or production.
 
 ## Backup and migration rollback
 
