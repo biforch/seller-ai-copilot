@@ -421,9 +421,14 @@ def test_callback_log_contract_rejects_a_second_access_log_directive() -> None:
 
 def test_render_dockerfile_limits_template_substitution() -> None:
     dockerfile = (REPO_ROOT / "nginx" / "Dockerfile.render").read_text()
+    rc_dockerfile = (REPO_ROOT / "nginx" / "Dockerfile.rc").read_text()
     assert "NGINX_ENVSUBST_FILTER" in dockerfile
     assert "BACKEND_HOSTPORT" in dockerfile
     assert "FRONTEND_HOSTPORT" in dockerfile
     assert "HEALTHCHECK" in dockerfile
     assert "CMD wget" in dockerfile
     assert "CMD-SHELL" not in dockerfile
+    security_pin = "apk add --no-cache libcrypto3=3.5.8-r0 libssl3=3.5.8-r0"
+    assert security_pin in dockerfile
+    assert security_pin in rc_dockerfile
+    assert "apk upgrade" not in dockerfile
