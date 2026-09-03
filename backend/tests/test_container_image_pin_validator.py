@@ -45,7 +45,8 @@ VALID_POSTGRES = (
     "postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685"
 )
 VALID_NGINX = (
-    "nginx:1.30-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46"
+    "public.ecr.aws/docker/library/nginx:1.30-alpine@"
+    "sha256:02b1b2a0445514891a14aa371845f6085d5d9d10d385b30d6aad606a50a29a05"
 )
 SECRET_CANARY = "state-canary-secret-do-not-echo"
 

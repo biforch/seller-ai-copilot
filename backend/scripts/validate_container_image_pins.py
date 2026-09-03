@@ -158,6 +158,7 @@ ALLOWED_REGISTRIES = frozenset(
         "docker.io",
         "index.docker.io",
         "registry-1.docker.io",
+        "public.ecr.aws",
     }
 )
 

@@ -97,7 +97,7 @@ Repository runtime contract: `frontend/.nvmrc` = `24.19.0`, `package.json` `engi
 | Current mainline branch | 1.31.x (not used for RC/prod base images) |
 | Official sources | https://nginx.org/en/CHANGES-1.30 , https://nginx.org/news.html , https://nginx.org/en/download.html |
 | Docker Official Image tag | `nginx:1.30-alpine` — https://hub.docker.com/_/nginx |
-| Decision | **Upgrade** from interim `1.28-alpine` selection to **`nginx:1.30-alpine`** (current stable) |
+| Decision | **Upgrade** from interim `1.28-alpine` selection to **`nginx:1.30-alpine`** (current stable), consumed through the AWS Public ECR Docker Official Images mirror after the 2026-09-02 security rebuild |
 | Next mandatory review | **2026-10-01** or when nginx.org publishes a new stable branch |
 
 ### Redis (dev only)
@@ -141,7 +141,7 @@ All digests below are **OCI image index / Docker manifest list** digests (multi-
 | `python:3.11-slim-trixie` | `sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7` | amd64, arm64 | Hub tag API + official-images GitCommit `fe89472bda6128fef7e964d1f1991534e32dcfb7` (development backend only) |
 | `python:3.11-alpine3.24` | `sha256:6857d2dae63e052057f2db389a7061188ac9a92a3fa8d402bde68f36df6fada1` | amd64, arm64 (production backend) | S3d4c3 production migration; S3d5 retired candidate jobs |
 | `postgres:16-alpine` | `sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
-| `nginx:1.30-alpine` | `sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
+| `public.ecr.aws/docker/library/nginx:1.30-alpine` | `sha256:02b1b2a0445514891a14aa371845f6085d5d9d10d385b30d6aad606a50a29a05` | amd64, arm64 | AWS Public ECR OCI index; image annotations identify Docker Official Image nginx 1.30.4-alpine, rebuilt 2026-09-02 |
 | `redis:7-alpine` | `sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2` | amd64, arm64 | Hub tag API + Registry `Docker-Content-Digest` |
 
 **Canonical pin format:**

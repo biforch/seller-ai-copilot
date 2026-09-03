@@ -468,7 +468,8 @@ def test_frontend_runtime_contract_requires_pinned_node_npm_toolchain() -> None:
 
 def test_nginx_runtime_uses_current_stable_branch() -> None:
     nginx_digest = (
-        "nginx:1.30-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46"
+        "public.ecr.aws/docker/library/nginx:1.30-alpine@"
+        "sha256:02b1b2a0445514891a14aa371845f6085d5d9d10d385b30d6aad606a50a29a05"
     )
     assert nginx_digest in _read(REPO_ROOT / "nginx" / "Dockerfile.rc")
     assert nginx_digest in _read(REPO_ROOT / "docker-compose.yml")
