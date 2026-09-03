@@ -11,7 +11,7 @@ Vulnerability scanning, SBOM generation, and supply-chain enforcement are docume
 
 ## 1. Image inventory
 
-Expected external pinned references: **15** (validated by `validate_container_image_pins.py`).
+Expected external pinned references: **17** (validated by `validate_container_image_pins.py`).
 
 | File | Line | Repository | Tag | Environment | Architectures required |
 | --- | --- | --- | --- | --- | --- |
@@ -21,13 +21,15 @@ Expected external pinned references: **15** (validated by `validate_container_im
 | `frontend/Dockerfile` | 1 | `node` | `24-alpine` | development | linux/amd64; linux/arm64 |
 | `nginx/Dockerfile.rc` | 1 | `nginx` | `1.30-alpine` | RC / production | linux/amd64; linux/arm64 |
 | `nginx/Dockerfile.render` | 1 | `nginx` | `1.30-alpine` | Render internal RC adapter | linux/amd64; linux/arm64 |
+| `nginx/Dockerfile.vultr` | 1 | `nginx` | `1.30-alpine` | Vultr internal RC adapter | linux/amd64; linux/arm64 |
 | `docker-compose.rc.yml` | 7 | `postgres` | `16-alpine` | RC | linux/amd64; linux/arm64 |
+| `docker-compose.vultr.yml` | 7 | `postgres` | `16-alpine` | Vultr internal RC adapter | linux/amd64; linux/arm64 |
 | `docker-compose.yml` | 3 | `postgres` | `16-alpine` | development | linux/amd64; linux/arm64 |
 | `docker-compose.yml` | 21 | `redis` | `7-alpine` | development only | linux/amd64; linux/arm64 |
 | `docker-compose.yml` | 87 | `nginx` | `1.30-alpine` | development | linux/amd64; linux/arm64 |
 | `.github/workflows/quality.yml` | 21 | `postgres` | `16-alpine` | CI service | linux/amd64 |
 
-**Not pinned (by design):** locally built application images (`sellerai-backend-prod:rc`, `sellerai-frontend-prod:rc`, `sellerai-nginx-prod:rc`) plus the CI-built Render edge image — **4 internal build references** on the validator allowlist. The Render edge image is built from the pinned `nginx/Dockerfile.render` base and is included as the fifth production scan target in Syft/Trivy policy evaluation.
+**Not pinned (by design):** locally built application images for RC, Render, and Vultr are restricted to the explicit validator allowlist. The Render and Vultr edge images are built from their pinned nginx Dockerfiles and are separate production scan targets in Syft/Trivy policy evaluation. The Vultr Compose file contributes four internal build references because backend and migrate intentionally share one image identity. The production workflow evaluates six image targets and uploads thirteen JSON artifacts: six CycloneDX SBOMs, six Trivy reports, and one policy summary.
 
 **Redis retention (dev only):** Redis remains in `docker-compose.yml` because the backend references `REDIS_URL` and the dev stack models the intended cache/queue sidecar even though production business paths do not depend on Redis today. It is pinned for dev parity; no production lifecycle commitment is made for Redis in S3b.
 

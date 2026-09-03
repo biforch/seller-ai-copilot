@@ -307,6 +307,16 @@ def test_rc_compose_disposable_database_and_migrate_flow() -> None:
     assert "redis:" not in content.split("services:")[1].split("volumes:")[0]
 
 
+def test_quality_workflow_validates_vultr_compose_without_real_secrets() -> None:
+    content = _read(QUALITY_WORKFLOW)
+    block = content.split("- name: Validate Vultr Compose configuration", 1)[1].split(
+        "- name:", 1
+    )[0]
+    assert "LISTNARA_ENV_FILE: .env.vultr.example" in block
+    assert "docker compose --env-file .env.vultr.example" in block
+    assert "-f docker-compose.vultr.yml config --quiet" in block
+
+
 def test_rc_compose_requires_critical_env_vars() -> None:
     content = _read(RC_COMPOSE)
     for var in (
@@ -748,8 +758,10 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "frontend.trivy.json" in upload_block
     assert "nginx.trivy.json" in upload_block
     assert "nginx-render.trivy.json" in upload_block
+    assert "nginx-vultr.cdx.json" in upload_block
+    assert "nginx-vultr.trivy.json" in upload_block
     assert "scan-summary.json" in upload_block
-    assert len([line for line in upload_block.splitlines() if line.strip().endswith(".json")]) == 11
+    assert len([line for line in upload_block.splitlines() if line.strip().endswith(".json")]) == 13
     assert "timeout-minutes: 45" in content
     assert "SYFT_CHECK_FOR_APP_UPDATE=false" in content
     assert "docker-archive:/input/backend.tar" in content
@@ -768,6 +780,23 @@ def test_quality_workflow_s3c_sbom_and_vulnerability_scan() -> None:
     assert "frontend: trivy scan command failed" in content
     assert "nginx: trivy scan command failed" in content
     assert "nginx-render: trivy scan command failed" in content
+    assert "nginx-vultr: trivy scan command failed" in content
+
+
+def test_quality_workflow_scans_vultr_edge_as_a_production_target() -> None:
+    content = _read(QUALITY_WORKFLOW)
+    build = content.index("- name: Build Vultr edge nginx image")
+    save = content.index("- name: Save production images for offline scan")
+    syft = content.index("- name: Generate CycloneDX SBOMs")
+    trivy = content.index("- name: Generate Trivy vulnerability reports")
+    policy = content.index("- name: Evaluate vulnerability policy")
+    assert build < save < syft < trivy < policy
+    assert "--file nginx/Dockerfile.vultr" in content
+    assert "sellerai-nginx-vultr-ci:${{ github.sha }}" in content
+    assert "nginx-vultr.tar" in content
+    assert "docker-archive:/input/nginx-vultr.tar" in content
+    assert "cyclonedx-json@1.6=/output/nginx-vultr.cdx.json" in content
+    assert "--input /input/nginx-vultr.tar" in content
     assert "Cleanup supply-chain scan workspace" in content
     assert 'rm -rf "${CLEANUP_TARGET}"' in content
     assert 'CLEANUP_TARGET="${RUNNER_TEMP}/sellerai-scan"' in content

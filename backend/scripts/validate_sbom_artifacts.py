@@ -19,6 +19,7 @@ REQUIRED_FILES = (
     "frontend.cdx.json",
     "nginx.cdx.json",
     "nginx-render.cdx.json",
+    "nginx-vultr.cdx.json",
 )
 ALLOWED_SPEC_VERSIONS = frozenset({"1.4", "1.5", "1.6"})
 MAX_FILE_BYTES = 50 * 1024 * 1024

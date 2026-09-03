@@ -129,6 +129,12 @@ jobs:
         run: >-
           docker compose --env-file .env.rc.example
           -f docker-compose.rc.yml config --quiet
+      - name: Validate Vultr Compose configuration
+        env:
+          LISTNARA_ENV_FILE: .env.vultr.example
+        run: >-
+          docker compose --env-file .env.vultr.example
+          -f docker-compose.vultr.yml config --quiet
       - name: Build production backend image
         run: >-
           docker build --file backend/Dockerfile.prod
@@ -266,6 +272,10 @@ jobs:
         run: >-
           docker build --file nginx/Dockerfile.render
           --tag sellerai-nginx-render-ci:${{ github.sha }} nginx
+      - name: Build Vultr edge nginx image
+        run: >-
+          docker build --file nginx/Dockerfile.vultr
+          --tag sellerai-nginx-vultr-ci:${{ github.sha }} nginx
       - name: Prepare supply-chain scan workspace
         run: |
           set -euo pipefail
@@ -281,6 +291,7 @@ jobs:
           docker image save "sellerai-frontend-ci:${IMAGE_TAG}" -o "${SCAN_INPUT}/frontend.tar"
           docker image save "sellerai-nginx-ci:${IMAGE_TAG}" -o "${SCAN_INPUT}/nginx.tar"
           docker image save "sellerai-nginx-render-ci:${IMAGE_TAG}" -o "${SCAN_INPUT}/nginx-render.tar"
+          docker image save "sellerai-nginx-vultr-ci:${IMAGE_TAG}" -o "${SCAN_INPUT}/nginx-vultr.tar"
       - name: Generate CycloneDX SBOMs
         run: |
           set -euo pipefail
@@ -321,6 +332,13 @@ jobs:
             "${SYFT_IMAGE}" \
             docker-archive:/input/nginx-render.tar \
             -o cyclonedx-json@1.6=/output/nginx-render.cdx.json
+          docker run --rm \
+            -e SYFT_CHECK_FOR_APP_UPDATE=false \
+            -v "${SCAN_INPUT}:/input:ro" \
+            -v "${SCAN_OUTPUT}:/output:rw" \
+            "${SYFT_IMAGE}" \
+            docker-archive:/input/nginx-vultr.tar \
+            -o cyclonedx-json@1.6=/output/nginx-vultr.cdx.json
       - name: Validate SBOM artifacts
         run: python backend/scripts/validate_sbom_artifacts.py "${RUNNER_TEMP}/sellerai-scan/output"
       - name: Generate Trivy vulnerability reports
@@ -394,6 +412,17 @@ jobs:
             echo "nginx-render: trivy scan command failed" >&2
             scan_status=1
           fi
+          if ! docker run --rm \
+            --user "${RUNNER_UID}:${RUNNER_GID}" \
+            -e HOME=/tmp/trivy-home \
+            -v "${SCAN_INPUT}:/input:ro" \
+            -v "${SCAN_OUTPUT}:/output:rw" \
+            -v "${TRIVY_CACHE_DIR}:/trivy-cache:rw" \
+            "${TRIVY_IMAGE}" \
+            image --cache-dir /trivy-cache --input /input/nginx-vultr.tar --format json --output /output/nginx-vultr.trivy.json --scanners vuln --exit-code 0; then
+            echo "nginx-vultr: trivy scan command failed" >&2
+            scan_status=1
+          fi
           exit "${scan_status}"
       - name: Evaluate vulnerability policy
         run: python backend/scripts/evaluate_vulnerability_report.py "${RUNNER_TEMP}/sellerai-scan/output"
@@ -408,11 +437,13 @@ jobs:
             ${{ runner.temp }}/sellerai-scan/output/frontend.cdx.json
             ${{ runner.temp }}/sellerai-scan/output/nginx.cdx.json
             ${{ runner.temp }}/sellerai-scan/output/nginx-render.cdx.json
+            ${{ runner.temp }}/sellerai-scan/output/nginx-vultr.cdx.json
             ${{ runner.temp }}/sellerai-scan/output/backend.trivy.json
             ${{ runner.temp }}/sellerai-scan/output/backend-arm64.trivy.json
             ${{ runner.temp }}/sellerai-scan/output/frontend.trivy.json
             ${{ runner.temp }}/sellerai-scan/output/nginx.trivy.json
             ${{ runner.temp }}/sellerai-scan/output/nginx-render.trivy.json
+            ${{ runner.temp }}/sellerai-scan/output/nginx-vultr.trivy.json
             ${{ runner.temp }}/sellerai-scan/output/scan-summary.json
           retention-days: 14
           if-no-files-found: error

@@ -301,6 +301,9 @@ def test_reference_count_drop_fails_closed(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_internal_allowlist_is_explicit() -> None:
     assert INTERNAL_BUILD_IMAGES == {
+        "listnara-backend-prod:vultr",
+        "listnara-edge-prod:vultr",
+        "listnara-frontend-prod:vultr",
         "sellerai-backend-prod:rc",
         "sellerai-frontend-prod:rc",
         "sellerai-nginx-prod:rc",
@@ -319,8 +322,10 @@ def test_validator_script_runs_from_repo_root() -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().startswith(SUCCESS_MESSAGE)
     assert "16 runtime external pinned references" not in result.stdout
-    assert "15 runtime external pinned references" in result.stdout
-    assert "10 scanner pinned references" in result.stdout
+    assert "17 runtime external pinned references" in result.stdout
+    assert "12 scanner pinned references" in result.stdout
+    assert "8 internal build references" in result.stdout
+    assert "10 scanner pinned references" not in result.stdout
 
 
 def test_scanner_allowlist_is_explicit() -> None:

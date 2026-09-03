@@ -22,6 +22,7 @@ backend/tests/evals/listing_audit/runs/
 # ---- General ----
 .env
 .env.rc
+.env.vultr
 .DS_Store
 *.log
 .idea/

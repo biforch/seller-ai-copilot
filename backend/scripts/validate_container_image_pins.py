@@ -21,17 +21,19 @@ SCAN_TARGETS = (
     REPO_ROOT / "frontend" / "Dockerfile.prod",
     REPO_ROOT / "nginx" / "Dockerfile.rc",
     REPO_ROOT / "nginx" / "Dockerfile.render",
+    REPO_ROOT / "nginx" / "Dockerfile.vultr",
     REPO_ROOT / "docker-compose.yml",
     REPO_ROOT / "docker-compose.rc.yml",
+    REPO_ROOT / "docker-compose.vultr.yml",
     REPO_ROOT / ".github" / "workflows" / "quality.yml",
 )
 
 EXPECTED_SCAN_FILE_COUNT = len(SCAN_TARGETS)
-EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 15
-EXPECTED_INTERNAL_BUILD_REF_COUNT = 4
-EXPECTED_SCANNER_PINNED_REF_COUNT = 10
+EXPECTED_RUNTIME_EXTERNAL_PINNED_REF_COUNT = 17
+EXPECTED_INTERNAL_BUILD_REF_COUNT = 8
+EXPECTED_SCANNER_PINNED_REF_COUNT = 12
 EXPECTED_SCANNER_APPROVED_IDENTITY_COUNT = 2
-EXPECTED_PRODUCTION_SCAN_TARGET_COUNT = 5
+EXPECTED_PRODUCTION_SCAN_TARGET_COUNT = 6
 
 ALLOWED_SCANNER_SHELL_VARS = frozenset(
     {
@@ -86,11 +88,13 @@ PRODUCTION_ARTIFACT_JSON_FILES = (
     "frontend.cdx.json",
     "nginx.cdx.json",
     "nginx-render.cdx.json",
+    "nginx-vultr.cdx.json",
     "backend.trivy.json",
     "backend-arm64.trivy.json",
     "frontend.trivy.json",
     "nginx.trivy.json",
     "nginx-render.trivy.json",
+    "nginx-vultr.trivy.json",
     "scan-summary.json",
 )
 
@@ -142,6 +146,9 @@ INTERNAL_BUILD_IMAGES = frozenset(
         "sellerai-backend-prod:rc",
         "sellerai-frontend-prod:rc",
         "sellerai-nginx-prod:rc",
+        "listnara-backend-prod:vultr",
+        "listnara-frontend-prod:vultr",
+        "listnara-edge-prod:vultr",
     }
 )
 

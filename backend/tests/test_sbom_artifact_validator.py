@@ -41,11 +41,11 @@ def _write_sboms(directory: Path) -> None:
         (directory / filename).write_text(json.dumps(_minimal_sbom(filename.split(".")[0])), encoding="utf-8")
 
 
-def test_five_valid_minimal_cyclonedx_files_pass(tmp_path: Path) -> None:
+def test_six_valid_minimal_cyclonedx_files_pass(tmp_path: Path) -> None:
     _write_sboms(tmp_path)
     findings, checked = validate_sbom_directory(tmp_path)
     assert findings == []
-    assert checked == 5
+    assert checked == 6
 
 
 def test_missing_required_file_fails(tmp_path: Path) -> None:
