@@ -8,6 +8,7 @@ import uuid
 from openai import AsyncOpenAI
 
 from app.analysis.prompt import ListingAuditPrompt
+from app.analysis.schemas import ListingAuditLLMOutput
 from app.analysis.service import ListingAuditProviderResponse
 from app.core.config import settings
 from app.core.exceptions import AI_PROVIDER_UNAVAILABLE, AppException, ai_response_invalid_exception
@@ -43,7 +44,14 @@ class OpenAIListingAuditProvider:
                 ],
                 temperature=0.2,
                 max_tokens=MAX_OUTPUT_TOKENS["listing_audit"],
-                response_format={"type": "json_object"},
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "listing_audit_llm_output",
+                        "strict": True,
+                        "schema": ListingAuditLLMOutput.model_json_schema(),
+                    },
+                },
                 store=False,
             )
         except Exception as exc:

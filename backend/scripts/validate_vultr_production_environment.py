@@ -80,8 +80,8 @@ def validate_vultr_production_environment() -> None:
         raise VultrProductionEnvironmentError("LEGACY_GENERATION_MUST_REMAIN_DISABLED")
     if _is_true("ANALYSIS_PUBLIC_ENABLED"):
         raise VultrProductionEnvironmentError("ANALYSIS_PUBLIC_MUST_REMAIN_DISABLED")
-    if _is_true("LISTING_AUDIT_INTERNAL_ENABLED"):
-        raise VultrProductionEnvironmentError("LISTING_AUDIT_MUST_REMAIN_DISABLED")
+    if not _is_true("LISTING_AUDIT_INTERNAL_ENABLED"):
+        raise VultrProductionEnvironmentError("LISTING_AUDIT_INTERNAL_MUST_BE_ENABLED")
     if _is_true("AMAZON_SP_API_ENABLED") or _is_true("AMAZON_OAUTH_ENABLED"):
         raise VultrProductionEnvironmentError("AMAZON_MUST_REMAIN_DISABLED")
     if _require("AMAZON_SP_API_ENDPOINT_MODE") != "mock":

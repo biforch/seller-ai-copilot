@@ -1,18 +1,19 @@
 # Vultr Internal RC Runbook
 
 This adapter deploys the reviewed repository baseline to one Ubuntu 24.04 VPS.
-It does not authorize a public Listing Audit launch, Amazon enablement, DNS
-changes, or production-data acceptance.
+It enables the registered-user Listing Audit internal slice, but does not
+authorize anonymous/public Analysis, Amazon enablement, or unreviewed feature
+work.
 
 ## Release boundary
 
 - Deploy only a clean, reviewed commit reachable from `origin/main`.
 - Record the exact commit SHA before building. Never deploy from a dirty
   worktree or copy individual files from one.
-- Keep `ANALYSIS_PUBLIC_ENABLED=false`, `LISTING_AUDIT_INTERNAL_ENABLED=false`,
+- Keep `ANALYSIS_PUBLIC_ENABLED=false`, `LISTING_AUDIT_INTERNAL_ENABLED=true`,
   `LEGACY_GENERATION_ENABLED=false`, and both Amazon flags false.
-- The first RC is infrastructure-only. Enabling the registered-user Listing
-  Audit requires a later, explicit gate and matching backend/frontend flags.
+- Listing Audit remains available only to registered users with a valid Cookie
+  session and completed MFA. Anonymous/public Analysis remains fail closed.
 - Keep the Docker edge bound to `127.0.0.1:8080`; only host nginx exposes 80/443.
 
 ## Minimum host preparation

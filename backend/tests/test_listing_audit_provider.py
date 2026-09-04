@@ -8,6 +8,7 @@ import pytest
 
 from app.analysis.prompt import ListingAuditPrompt
 from app.analysis.provider import OpenAIListingAuditProvider
+from app.analysis.schemas import ListingAuditLLMOutput
 from app.core.exceptions import AI_RESPONSE_INVALID, AppException
 
 from .test_listing_audit_baseline import valid_output
@@ -32,7 +33,13 @@ async def test_provider_uses_json_mode_no_store_and_accounting_metadata() -> Non
     )
 
     assert captured["store"] is False
-    assert captured["response_format"] == {"type": "json_object"}
+    response_format = captured["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"] == {
+        "name": "listing_audit_llm_output",
+        "strict": True,
+        "schema": ListingAuditLLMOutput.model_json_schema(),
+    }
     assert captured["temperature"] == 0.2
     assert captured["messages"][1]["content"] == "untrusted listing"
     assert result.input_tokens == 12

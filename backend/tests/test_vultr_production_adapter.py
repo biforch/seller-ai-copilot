@@ -36,7 +36,7 @@ VALID_ENV = {
     "DEBUG": "false",
     "LEGACY_GENERATION_ENABLED": "false",
     "ANALYSIS_PUBLIC_ENABLED": "false",
-    "LISTING_AUDIT_INTERNAL_ENABLED": "false",
+    "LISTING_AUDIT_INTERNAL_ENABLED": "true",
     "AMAZON_SP_API_ENABLED": "false",
     "AMAZON_OAUTH_ENABLED": "false",
     "AMAZON_SP_API_ENDPOINT_MODE": "mock",
@@ -70,7 +70,11 @@ def test_valid_vultr_environment_passes(monkeypatch: pytest.MonkeyPatch) -> None
         ("DEBUG", "true", "DEBUG_NOT_FALSE"),
         ("LEGACY_GENERATION_ENABLED", "true", "LEGACY_GENERATION_MUST_REMAIN_DISABLED"),
         ("ANALYSIS_PUBLIC_ENABLED", "true", "ANALYSIS_PUBLIC_MUST_REMAIN_DISABLED"),
-        ("LISTING_AUDIT_INTERNAL_ENABLED", "true", "LISTING_AUDIT_MUST_REMAIN_DISABLED"),
+        (
+            "LISTING_AUDIT_INTERNAL_ENABLED",
+            "false",
+            "LISTING_AUDIT_INTERNAL_MUST_BE_ENABLED",
+        ),
         ("AMAZON_SP_API_ENABLED", "true", "AMAZON_MUST_REMAIN_DISABLED"),
         ("AMAZON_OAUTH_ENABLED", "true", "AMAZON_MUST_REMAIN_DISABLED"),
         ("AMAZON_SP_API_ENDPOINT_MODE", "production", "AMAZON_ENDPOINT_NOT_MOCK"),
@@ -122,6 +126,10 @@ def test_vultr_compose_is_private_and_migration_gated() -> None:
     assert services["edge"]["ports"] == ["127.0.0.1:8080:80"]
     assert services["migrate"]["restart"] == "no"
     assert services["backend"]["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
+    assert (
+        services["frontend"]["build"]["args"]["NEXT_PUBLIC_LISTING_AUDIT_INTERNAL_ENABLED"]
+        == "true"
+    )
     command = " ".join(services["migrate"]["command"])
     assert "validate_vultr_production_environment.py" in command
     assert "alembic upgrade head" in command
