@@ -16,6 +16,7 @@ from app.core.config import settings
 
 _ENVELOPE_PREFIX = b"MFA1"
 _NONCE_BYTES = 12
+_AES_GCM_TAG_BYTES = 16
 _TOTP_PERIOD_SECONDS = 30
 
 
@@ -44,15 +45,30 @@ class MfaService:
         return _ENVELOPE_PREFIX + nonce + ciphertext
 
     def decrypt_secret(self, value: bytes, *, user_id: str) -> str:
-        minimum_size = len(_ENVELOPE_PREFIX) + _NONCE_BYTES + 16
-        if len(value) < minimum_size or not value.startswith(_ENVELOPE_PREFIX):
+        minimum_size = _NONCE_BYTES + _AES_GCM_TAG_BYTES
+        if value.startswith(_ENVELOPE_PREFIX):
+            if len(value) < len(_ENVELOPE_PREFIX) + minimum_size:
+                raise ValueError("Unsupported MFA secret envelope")
+            nonce_start = len(_ENVELOPE_PREFIX)
+            nonce_end = nonce_start + _NONCE_BYTES
+            plaintext = self._cipher.decrypt(
+                value[nonce_start:nonce_end], value[nonce_end:], self._aad(user_id)
+            )
+            return plaintext.decode("ascii")
+
+        # Legacy Sprint 0.5 records used nonce || ciphertext and the raw user ID
+        # as AAD. Keep read compatibility so existing users are not locked out;
+        # successful verification rewrites the value using the MFA1 envelope.
+        if len(value) < minimum_size:
             raise ValueError("Unsupported MFA secret envelope")
-        nonce_start = len(_ENVELOPE_PREFIX)
-        nonce_end = nonce_start + _NONCE_BYTES
         plaintext = self._cipher.decrypt(
-            value[nonce_start:nonce_end], value[nonce_end:], self._aad(user_id)
+            value[:_NONCE_BYTES], value[_NONCE_BYTES:], user_id.encode()
         )
         return plaintext.decode("ascii")
+
+    @staticmethod
+    def needs_envelope_upgrade(value: bytes) -> bool:
+        return not value.startswith(_ENVELOPE_PREFIX)
 
     @staticmethod
     def provisioning_uri(secret: str, *, email: str) -> str:
@@ -98,9 +114,21 @@ class MfaService:
         ).hexdigest()
 
     @staticmethod
-    def find_recovery_hash(candidate: str, stored_hashes: list[str]) -> str | None:
+    def hash_legacy_recovery_code(code: str) -> str:
+        return hashlib.sha256(code.lower().strip().encode()).hexdigest()
+
+    @staticmethod
+    def find_recovery_hash(
+        candidate: str,
+        stored_hashes: list[str],
+        *,
+        legacy_candidate: str | None = None,
+    ) -> str | None:
         for stored_hash in stored_hashes:
-            if hmac.compare_digest(candidate, stored_hash):
+            if hmac.compare_digest(candidate, stored_hash) or (
+                legacy_candidate is not None
+                and hmac.compare_digest(legacy_candidate, stored_hash)
+            ):
                 return stored_hash
         return None
 

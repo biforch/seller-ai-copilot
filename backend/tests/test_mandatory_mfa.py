@@ -8,6 +8,13 @@ ORIGIN = "http://localhost:3000"
 PASSWORD = "Password1"
 
 
+def _legacy_ciphertext(secret: str, *, user_id: str) -> bytes:
+    nonce = b"legacy-nonce"
+    return nonce + mfa_service._cipher.encrypt(
+        nonce, secret.encode(), user_id.encode()
+    )
+
+
 def _post(client, path: str, body: dict | None = None):
     headers = {"Origin": ORIGIN}
     csrf = client.cookies.get(CSRF_COOKIE_NAME)
@@ -90,6 +97,53 @@ def test_recovery_code_is_single_use(client, user_factory, monkeypatch) -> None:
     _login_pending(client, user)
     reused = _post(client, "/api/v1/auth/mfa/verify", {"code": recovery})
     assert reused.status_code == 401
+
+
+def test_legacy_mfa_secret_is_verified_and_upgraded(
+    client, user_factory, db_session, monkeypatch
+) -> None:
+    now = 1_800_000_000
+    monkeypatch.setattr("app.services.mfa_service.time.time", lambda: now)
+    user = user_factory("legacy-mfa@example.com")
+    secret = mfa_service.generate_secret()
+    user.mfa_secret_ciphertext = _legacy_ciphertext(secret, user_id=str(user.id))
+    user.mfa_enabled_at = datetime.now(UTC)
+    user.mfa_recovery_code_hashes = []
+    db_session.commit()
+
+    _login_pending(client, user)
+    code = mfa_service._totp(secret, now // 30)
+    verified = _post(client, "/api/v1/auth/mfa/verify", {"code": code})
+
+    assert verified.status_code == 200
+    db_session.refresh(user)
+    assert user.mfa_secret_ciphertext.startswith(b"MFA1")
+    assert mfa_service.decrypt_secret(
+        user.mfa_secret_ciphertext, user_id=str(user.id)
+    ) == secret
+
+
+def test_legacy_recovery_code_is_accepted_once_and_secret_is_upgraded(
+    client, user_factory, db_session
+) -> None:
+    user = user_factory("legacy-recovery@example.com")
+    secret = mfa_service.generate_secret()
+    recovery = "abcd1234-ef567890"
+    user.mfa_secret_ciphertext = _legacy_ciphertext(secret, user_id=str(user.id))
+    user.mfa_enabled_at = datetime.now(UTC)
+    user.mfa_recovery_code_hashes = [
+        mfa_service.hash_legacy_recovery_code(recovery)
+    ]
+    db_session.commit()
+
+    _login_pending(client, user)
+    verified = _post(client, "/api/v1/auth/mfa/verify", {"code": recovery})
+
+    assert verified.status_code == 200
+    assert verified.json()["data"]["recovery_code_used"] is True
+    db_session.refresh(user)
+    assert user.mfa_recovery_code_hashes == []
+    assert user.mfa_secret_ciphertext.startswith(b"MFA1")
 
 
 def test_five_invalid_codes_revoke_pending_session(

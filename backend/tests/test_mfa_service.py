@@ -2,6 +2,7 @@ import base64
 
 import pytest
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.services.mfa_service import MfaService
 
@@ -34,6 +35,21 @@ def test_secret_envelope_rejects_unknown_format() -> None:
         service.decrypt_secret(b"legacy-value", user_id="user-1")
 
 
+def test_legacy_secret_envelope_is_readable_and_marked_for_upgrade() -> None:
+    service = MfaService(TEST_KEY)
+    nonce = b"n" * 12
+    legacy = nonce + AESGCM(b"m" * 32).encrypt(
+        nonce, b"ABCDEF", b"user-1"
+    )
+
+    assert service.decrypt_secret(legacy, user_id="user-1") == "ABCDEF"
+    assert service.needs_envelope_upgrade(legacy) is True
+    current = service.encrypt_secret("ABCDEF", user_id="user-1")
+    assert service.needs_envelope_upgrade(current) is False
+    with pytest.raises(InvalidTag):
+        service.decrypt_secret(legacy, user_id="user-2")
+
+
 def test_recovery_codes_are_high_entropy_unique_and_keyed() -> None:
     service = MfaService(TEST_KEY)
     other = MfaService(base64.b64encode(b"n" * 32).decode("ascii"))
@@ -45,6 +61,22 @@ def test_recovery_codes_are_high_entropy_unique_and_keyed() -> None:
     candidate = service.hash_recovery_code(codes[0])
     assert service.find_recovery_hash(candidate, [candidate]) == candidate
     assert service.find_recovery_hash(service.hash_recovery_code("wrong"), [candidate]) is None
+
+
+def test_legacy_recovery_hash_remains_single_use_compatible() -> None:
+    service = MfaService(TEST_KEY)
+    legacy = service.hash_legacy_recovery_code("ABCD-EFGH")
+    keyed = service.hash_recovery_code("ABCD-EFGH")
+
+    assert service.find_recovery_hash(keyed, [legacy]) is None
+    assert (
+        service.find_recovery_hash(
+            keyed,
+            [legacy],
+            legacy_candidate=service.hash_legacy_recovery_code("ABCD-EFGH"),
+        )
+        == legacy
+    )
 
 
 @pytest.mark.parametrize("count", [0, 21])

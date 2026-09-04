@@ -221,15 +221,21 @@ def verify_mfa(
     secret = mfa_service.decrypt_secret(
         user.mfa_secret_ciphertext, user_id=str(user.id)
     )
+    upgrade_secret_envelope = mfa_service.needs_envelope_upgrade(
+        user.mfa_secret_ciphertext
+    )
     counter = mfa_service.matching_totp_counter(secret, body.code)
     replayed_totp = counter is not None and (
         user.mfa_last_totp_counter is not None
         and counter <= user.mfa_last_totp_counter
     )
     recovery_candidate = mfa_service.hash_recovery_code(body.code)
+    legacy_recovery_candidate = mfa_service.hash_legacy_recovery_code(body.code)
     stored_hashes = list(user.mfa_recovery_code_hashes or [])
     recovery_hash = mfa_service.find_recovery_hash(
-        recovery_candidate, stored_hashes
+        recovery_candidate,
+        stored_hashes,
+        legacy_candidate=legacy_recovery_candidate,
     )
     if (counter is None or replayed_totp) and recovery_hash is None:
         _reject_mfa(db, current_user)
@@ -239,6 +245,10 @@ def verify_mfa(
         user.mfa_recovery_code_hashes = stored_hashes
     else:
         user.mfa_last_totp_counter = counter
+    if upgrade_secret_envelope:
+        user.mfa_secret_ciphertext = mfa_service.encrypt_secret(
+            secret, user_id=str(user.id)
+        )
     _complete_mfa(db, current_user)
     db.commit()
     data = MfaVerifyResponse(
