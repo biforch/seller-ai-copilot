@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -514,8 +515,11 @@ class AmazonAccountService(AmazonAccountReadService):
                     .all()
                 )
                 for generation in linked_generations:
-                    payload = generation.input if isinstance(generation.input, dict) else {}
-                    if payload.get("snapshot_id") in snapshot_id_values:
+                    payload: dict[str, Any] = (
+                        generation.input if isinstance(generation.input, dict) else {}
+                    )
+                    snapshot_id = payload.get("snapshot_id")
+                    if snapshot_id is not None and str(snapshot_id) in snapshot_id_values:
                         self._db.delete(generation)
                 (
                     self._db.query(ListingAuditSnapshot)
