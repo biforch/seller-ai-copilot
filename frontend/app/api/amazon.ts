@@ -1,5 +1,6 @@
 import { apiClient } from '@/app/api/client';
-import type { ListingAuditReport, PaginatedResponse } from '@/types';
+import type { ListingAuditReport } from '@/app/api/listing-audit';
+import type { PaginatedResponse } from '@/types';
 
 export type AmazonAccountStatus =
   | 'active'
