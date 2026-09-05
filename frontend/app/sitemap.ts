@@ -25,4 +25,3 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: path === '' ? 1 : path === '/amazon-listing-audit' || path === '/sample-report' ? 0.9 : 0.7,
   }));
 }
-
