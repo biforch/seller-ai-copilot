@@ -67,19 +67,12 @@ export default function PrivacyPage() {
       <h2>3. AI processing</h2>
       <p>
         Content you manually submit for a listing audit may be sent to a configured AI service provider to generate the
-        requested report. Depending on environment configuration, requests may route through OpenRouter to an underlying
-        model provider or directly to the OpenAI API. Where supported by the provider, we configure requests with{' '}
-        <code>store=false</code> so the provider does not retain request content for provider-side storage by default.
+        requested report. Amazon-derived data is not currently sent to OpenAI, OpenRouter, or other AI providers. We will
+        update our technical controls, privacy disclosures, and Amazon disclosures before changing this behavior.
       </p>
       <p>
         We do not use your listing content to train our own models. Do not submit confidential information, buyer
         personal information, payment data, credentials, or material you are not authorized to process.
-      </p>
-      <p>
-        <strong>Amazon-derived data and AI:</strong> in the current production configuration (
-        <code>OPENAI_AMAZON_DATA_ENABLED=false</code>), Amazon-imported listing attributes are not sent to OpenAI,
-        OpenRouter, or other AI providers. If that behavior changes in the future, we will update technical controls,
-        this policy, and our Amazon disclosure before enabling it.
       </p>
 
       <h2>4. Amazon seller data</h2>
@@ -120,8 +113,7 @@ export default function PrivacyPage() {
       <p>
         You may request account deletion by emailing{' '}
         <a href="mailto:support@listnara.com">support@listnara.com</a> from your account email. After we verify a valid
-        request, we remove user-owned records, including associated Amazon data and audit history, from active application
-        systems within 30 days.
+        account-deletion request, user-owned records are removed from active application systems within 30 days.
       </p>
 
       <h2>5. Retention</h2>
@@ -141,22 +133,21 @@ export default function PrivacyPage() {
           part of the disconnect operation.
         </li>
         <li>
-          <strong>After verified account deletion (active systems):</strong> user-owned records are removed from active
-          application systems within 30 days of a verified deletion request. There is no automated self-service purge
-          worker; deletions are performed through an operator-controlled administrative process.
+          <strong>After verified account deletion (active systems):</strong> after we verify a valid account-deletion
+          request, user-owned records are removed from active application systems within 30 days.
         </li>
         <li>
-          <strong>Encrypted operational backups:</strong> automated scheduled backup upload is a target control and is not
-          yet confirmed enabled in production. Manual backup copies may exist; their final location and retention are not
-          yet fully confirmed. When operational backups are enabled, any backup that may contain Amazon-derived data,
-          including refresh-token ciphertext, is subject to a maximum retention of 35 days. Deleted active-system data may
-          therefore remain in encrypted operational backups until that backup rotation completes. If disaster recovery
-          restores from backup, disconnect and deletion actions must be re-applied where required.
+          <strong>Encrypted operational backups:</strong> before production Amazon connectivity is enabled, backup
+          retention and deletion controls for Amazon-derived data will be activated and verified. When enabled,
+          encrypted operational backups that may contain Amazon-derived data will be retained for no longer than 35 days.
+          Deleted data may remain in those backups until the applicable rotation period ends. Operational backups are
+          used only for disaster recovery and not for normal business queries. If disaster recovery restores from
+          backup, disconnect and deletion actions must be re-applied where required.
         </li>
         <li>
-          <strong>Long-term archives:</strong> Listnara does not currently retain 12-month full-database archives that
-          contain Amazon-derived data. A separate long-term archive that excludes Amazon tables and Amazon-linked audit
-          content may be introduced only after it is implemented and restore-tested.
+          <strong>Long-term archives:</strong> long-term full-database archives containing Amazon-derived data are not
+          maintained. Any future long-term archive must exclude Amazon credentials, Amazon-imported records, and
+          Amazon-linked audit content.
         </li>
         <li>
           <strong>Legal and security exceptions:</strong> we may retain minimal records longer when required by law,

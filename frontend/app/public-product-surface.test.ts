@@ -32,18 +32,21 @@ describe('public Listnara product surface', () => {
     for (const route of ['about', 'contact', 'pricing', 'privacy', 'terms', 'refund']) {
       expect(footer).toContain(`href="/${route}"`);
     }
-    expect(read('app/pricing/page.tsx')).toContain('Coming soon');
+    expect(read('app/pricing/page.tsx')).toContain('Free');
+    expect(read('app/pricing/page.tsx')).not.toMatch(/Coming soon|Not yet available/i);
     expect(read('app/refund/page.tsx')).toContain('paid plans');
   });
 
-  it('preserves manual ASIN submission and the pending SP-API entry', () => {
+  it('preserves manual ASIN submission and the public Amazon integration disclosure', () => {
     const auditPage = read('app/(dashboard)/audits/new/page.tsx');
     expect(read('lib/amazon-asin.ts')).toContain('parseAmazonReference');
     expect(auditPage).toContain('Start with ASIN or URL');
     expect(auditPage).toContain('Verified product context supplied by the seller');
     expect(auditPage).not.toContain('type="file"');
-    expect(read('app/amazon-integration/page.tsx')).toContain('approval is pending');
-    expect(read('components/common/Header.tsx')).toContain('Amazon SP-API');
+    expect(read('app/amazon-integration/page.tsx')).toContain(
+      'Production Amazon connectivity is currently disabled',
+    );
+    expect(read('components/common/Header.tsx')).toContain('Amazon integration');
   });
 
   it('keeps private application routes out of search indexes', () => {

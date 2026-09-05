@@ -75,6 +75,8 @@ def test_delete_user_account_removes_amazon_data_and_audits(
     )
     db_session.commit()
     user_id = user.id
+    snapshot_id = snapshot.id
+    account_id = summary.id
 
     service = UserAccountDeletionService(db_session, token_encryption_service)
     result = service.delete_user_account(
@@ -86,8 +88,8 @@ def test_delete_user_account_removes_amazon_data_and_audits(
     assert result.amazon_accounts_removed == 1
     assert result.deleted_at is not None
     assert db_session.get(User, user_id) is None
-    assert db_session.get(AmazonAccount, summary.id) is None
-    assert db_session.get(ListingAuditSnapshot, snapshot.id) is None
+    assert db_session.get(AmazonAccount, account_id) is None
+    assert db_session.get(ListingAuditSnapshot, snapshot_id) is None
     assert db_session.get(Generation, report_id) is None
 
 

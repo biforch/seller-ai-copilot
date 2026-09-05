@@ -41,9 +41,9 @@ export default function AmazonIntegrationPage() {
         <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6">
           <h2 className="text-xl font-semibold text-slate-950">Availability</h2>
           <p className="mt-3 leading-7 text-slate-600">
-            Amazon production connectivity is enabled only after Listnara receives the necessary authorization and the
-            feature is turned on in your environment. You can still run listing audits from content you enter manually
-            without connecting Amazon.
+            Production Amazon connectivity is currently disabled. You can run listing audits from content you enter
+            manually without connecting Amazon. When connectivity becomes available, authorization will be offered through
+            Amazon&apos;s standard OAuth consent flow.
           </p>
         </div>
 
@@ -154,17 +154,18 @@ export default function AmazonIntegrationPage() {
             .
           </p>
 
-          <h2 className="pt-6 text-2xl font-semibold text-slate-950">Production status and backups</h2>
+          <h2 className="pt-6 text-2xl font-semibold text-slate-950">Production status and data retention</h2>
           <p>
             Production Amazon connectivity is currently disabled, and Listnara does not currently process production
             Amazon Information. Before production Amazon connectivity is enabled, operational backup retention and
             deletion controls for Amazon-derived data will be activated and verified.
           </p>
           <p>
-            Disconnect and account deletion remove Amazon connection, tokens, and imported data from active application
-            systems immediately. Encrypted operational backups are not used for normal business queries; deleted data may
-            persist in those backups until the applicable backup rotation completes (target maximum 35 days for backups
-            that may contain Amazon-derived data).
+            When you disconnect in Listnara, we immediately remove the stored refresh token and imported Amazon account,
+            listing, catalog, and linked audit snapshot data from active application systems. Encrypted operational
+            backups are used only for disaster recovery, not for normal business queries. When Amazon connectivity is
+            enabled, backups that may contain Amazon-derived data will be retained for no longer than 35 days; deleted
+            active-system data may remain in those backups until that rotation period ends.
           </p>
 
           <h2 className="pt-6 text-2xl font-semibold text-slate-950">Support</h2>
