@@ -1,5 +1,7 @@
 import type { MetadataRoute } from 'next';
 
+import { PUBLIC_SITE_URL } from '@/lib/site-url';
+
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
@@ -18,7 +20,7 @@ export default function robots(): MetadataRoute.Robots {
         '/register',
       ],
     },
-    sitemap: 'https://listnara.com/sitemap.xml',
-    host: 'https://listnara.com',
+    sitemap: `${PUBLIC_SITE_URL}/sitemap.xml`,
+    host: PUBLIC_SITE_URL,
   };
 }

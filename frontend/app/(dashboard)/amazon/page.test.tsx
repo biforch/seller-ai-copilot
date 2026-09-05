@@ -120,6 +120,10 @@ function paginatedListings(
 describe('AmazonConnectionsPage async races', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(amazonApi, 'getCapabilities').mockResolvedValue({
+      oauth_enabled: true,
+      sp_api_enabled: true,
+    });
     vi.spyOn(amazonApi, 'listAccounts').mockResolvedValue({
       items: [baseAccount('acc-a'), baseAccount('acc-b', 'eu')],
       total: 2,
@@ -527,7 +531,7 @@ describe('AmazonConnectionsPage async races', () => {
       expect(screen.getByText('SKU-M1')).toBeInTheDocument();
     });
 
-    const productSelect = screen.getByRole('combobox', { name: /Listnara product for SKU-M1/i });
+    const productSelect = screen.getByRole('combobox', { name: /SellerAI product for SKU-M1/i });
     await user.selectOptions(productSelect, 'prod-1');
     await user.click(screen.getByRole('button', { name: /EU account/i }));
     await waitFor(() => {
@@ -540,7 +544,7 @@ describe('AmazonConnectionsPage async races', () => {
     });
     await Promise.resolve();
 
-    expect(screen.queryByText('Listing linked to a Listnara product.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Listing linked to a SellerAI product.')).not.toBeInTheDocument();
     expect(screen.getByText('SKU-M-B1')).toBeInTheDocument();
   });
 
@@ -842,13 +846,13 @@ describe('AmazonConnectionsPage async races', () => {
     });
 
     await user.selectOptions(
-      screen.getByRole('combobox', { name: /Listnara product for SKU-M1/i }),
+      screen.getByRole('combobox', { name: /SellerAI product for SKU-M1/i }),
       'prod-1',
     );
     await waitFor(() => {
-      expect(screen.getByText('Listing linked to a Listnara product.')).toBeInTheDocument();
+      expect(screen.getByText('Listing linked to a SellerAI product.')).toBeInTheDocument();
     });
-    expect(screen.getByRole('combobox', { name: /Listnara product for SKU-M1/i })).toHaveValue('prod-1');
+    expect(screen.getByRole('combobox', { name: /SellerAI product for SKU-M1/i })).toHaveValue('prod-1');
   });
 
   it('aborts the first StrictMode accounts request and keeps loading until the latest lease finishes', async () => {
@@ -881,6 +885,10 @@ describe('AmazonConnectionsPage async races', () => {
   });
 
   it('does not start OAuth twice for a single connect click in StrictMode', async () => {
+    vi.spyOn(amazonApi, 'getCapabilities').mockResolvedValue({
+      oauth_enabled: true,
+      sp_api_enabled: true,
+    });
     vi.spyOn(amazonApi, 'listAccounts').mockResolvedValue({ items: [], total: 0 });
     const startDeferred = createDeferred<{
       authorization_url: string;
@@ -902,6 +910,77 @@ describe('AmazonConnectionsPage async races', () => {
 
     await user.click(screen.getByRole('button', { name: /Connect Amazon/i }));
     expect(amazonApi.startAuthorization).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show Connect Amazon when OAuth is disabled', async () => {
+    vi.spyOn(amazonApi, 'getCapabilities').mockResolvedValue({
+      oauth_enabled: false,
+      sp_api_enabled: false,
+    });
+    vi.spyOn(amazonApi, 'listAccounts').mockResolvedValue({ items: [], total: 0 });
+
+    render(<AmazonConnectionsPage />);
+    await waitFor(() => {
+      expect(screen.getByText(/Amazon OAuth is not enabled/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /Connect Amazon/i })).not.toBeInTheDocument();
+  });
+
+  it('shows disconnect only when OAuth is enabled and an account exists', async () => {
+    vi.spyOn(amazonApi, 'getCapabilities').mockResolvedValue({
+      oauth_enabled: true,
+      sp_api_enabled: true,
+    });
+    vi.spyOn(amazonApi, 'listAccounts').mockResolvedValue({
+      items: [baseAccount('acc-a')],
+      total: 1,
+    });
+    vi.spyOn(amazonApi, 'listMarketplaces').mockResolvedValue({
+      items: [marketplace('a', 'M-A1', 'United States')],
+      total: 1,
+    });
+    vi.spyOn(amazonApi, 'listListings').mockResolvedValue(paginatedListings([]));
+
+    render(<AmazonConnectionsPage />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Disconnect Amazon/i })).toBeInTheDocument();
+    });
+  });
+
+  it('requires confirmation before disconnecting an account', async () => {
+    vi.spyOn(amazonApi, 'getCapabilities').mockResolvedValue({
+      oauth_enabled: true,
+      sp_api_enabled: true,
+    });
+    vi.spyOn(amazonApi, 'listAccounts').mockResolvedValue({
+      items: [baseAccount('acc-a')],
+      total: 1,
+    });
+    vi.spyOn(amazonApi, 'listMarketplaces').mockResolvedValue({
+      items: [marketplace('a', 'M-A1', 'United States')],
+      total: 1,
+    });
+    vi.spyOn(amazonApi, 'listListings').mockResolvedValue(paginatedListings([]));
+    vi.spyOn(amazonApi, 'disconnectAccount').mockResolvedValue({
+      account_id: 'acc-a',
+      already_disconnected: false,
+      disconnected_at: '2026-01-01T00:00:00.000Z',
+    });
+
+    const user = userEvent.setup();
+    render(<AmazonConnectionsPage />);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Disconnect Amazon/i })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Disconnect Amazon/i }));
+    expect(amazonApi.disconnectAccount).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Disconnect and delete imported data/i }));
+    await waitFor(() => {
+      expect(amazonApi.disconnectAccount).toHaveBeenCalledWith('acc-a');
+    });
   });
 });
 

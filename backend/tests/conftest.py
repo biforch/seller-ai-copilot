@@ -19,6 +19,9 @@ os.environ.setdefault(
 )
 os.environ["CORS_ORIGINS"] = "http://localhost:3000"
 os.environ["AUTH_TESTING_AUTO_VERIFY_MFA"] = "true"
+os.environ["AMAZON_TOKEN_ACTIVE_KEY_VERSION"] = "1"
+os.environ["AMAZON_TOKEN_KEY_V1"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
+os.environ["AMAZON_TOKEN_FINGERPRINT_PEPPER"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
 # Legacy generation remains covered by its regression suite while production
 # defaults to frozen/off. Individual freeze tests instantiate default settings.
 os.environ["LEGACY_GENERATION_ENABLED"] = "true"

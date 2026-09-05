@@ -1,18 +1,19 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { PUBLIC_SITE_URL } from "@/lib/site-url";
 
 export const metadata: Metadata = {
-    metadataBase: new URL("https://listnara.com"),
+    metadataBase: new URL(PUBLIC_SITE_URL),
     title: "Amazon Listing Audit Tool | Listnara",
-    description: "Find what your Amazon listing fails to explain before you rewrite it.",
+    description: "Audit your Amazon listing for buyer clarity, information gaps, conversion readiness, and search coverage. Get evidence-backed issues and prioritized actions.",
     applicationName: "Listnara",
     keywords: ["Amazon listing audit", "Amazon listing optimization", "listing quality", "Amazon seller tool"],
     robots: { index: true, follow: true },
     openGraph: {
         title: "Amazon Listing Audit Tool | Listnara",
         description: "Evidence-backed listing audits for Amazon sellers.",
-        url: "https://listnara.com",
+        url: PUBLIC_SITE_URL,
         siteName: "Listnara",
         type: "website",
     },
@@ -29,3 +30,4 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         </html>
     );
 }
+

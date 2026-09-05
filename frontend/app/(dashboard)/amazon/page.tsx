@@ -14,12 +14,14 @@ import {
   RefreshCw,
   RotateCcw,
   Store,
+  Unplug,
   WandSparkles,
 } from 'lucide-react';
 
 import {
   amazonApi,
   type AmazonAccount,
+  type AmazonCapabilities,
   type AmazonCatalogSnapshot,
   type AmazonListing,
   type AmazonLinkProduct,
@@ -61,8 +63,13 @@ function errorMessage(error: unknown) {
 function pickDefaultMarketplaceId(
   items: AmazonMarketplace[],
   current: string | null,
+  preferredCountryCode?: string | null,
 ): string | null {
   if (current && items.some((item) => item.marketplace_id === current)) return current;
+  if (preferredCountryCode) {
+    const preferred = items.find((item) => item.country_code === preferredCountryCode && item.sync_eligible);
+    if (preferred) return preferred.marketplace_id;
+  }
   return items.find((item) => item.sync_eligible)?.marketplace_id ?? items[0]?.marketplace_id ?? null;
 }
 
@@ -102,6 +109,10 @@ export default function AmazonConnectionsPage() {
   const [action, setAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [targetAsin, setTargetAsin] = useState<string | null>(null);
+  const [targetMarketplaceCode, setTargetMarketplaceCode] = useState<string | null>(null);
+  const [capabilities, setCapabilities] = useState<AmazonCapabilities | null>(null);
+  const [disconnectConfirmAccountId, setDisconnectConfirmAccountId] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
   const accountsGateRef = useRef(new LatestRequestGate());
@@ -219,6 +230,9 @@ export default function AmazonConnectionsPage() {
     () => marketplaces.find((item) => item.marketplace_id === selectedMarketplaceId) ?? null,
     [marketplaces, selectedMarketplaceId],
   );
+  const amazonOAuthEnabled = capabilities?.oauth_enabled ?? false;
+  const showAmazonConnect = amazonOAuthEnabled;
+  const showAmazonDisconnect = amazonOAuthEnabled && accounts.length > 0;
 
   const applyLoadedAccounts = useCallback(
     (result: { items: AmazonAccount[] }, lease: RequestLease) => {
@@ -262,7 +276,7 @@ export default function AmazonConnectionsPage() {
       setMarketplaces(result.items);
 
       const currentMarketplaceId = selectedMarketplaceIdRef.current;
-      const nextMarketplaceId = pickDefaultMarketplaceId(result.items, currentMarketplaceId);
+      const nextMarketplaceId = pickDefaultMarketplaceId(result.items, currentMarketplaceId, targetMarketplaceCode);
       if (nextMarketplaceId !== currentMarketplaceId) {
         listingGateRef.current.invalidate();
         bumpActionScope();
@@ -272,7 +286,7 @@ export default function AmazonConnectionsPage() {
       selectedMarketplaceIdRef.current = nextMarketplaceId;
       setSelectedMarketplaceId(nextMarketplaceId);
     },
-    [bumpActionScope, clearListingScopeState],
+    [bumpActionScope, clearListingScopeState, targetMarketplaceCode],
   );
 
   const applyMarketplacesRequestError = useCallback(
@@ -376,6 +390,7 @@ export default function AmazonConnectionsPage() {
             page: targetPage,
             pageSize: PAGE_SIZE,
             includeInactive: expectedIncludeInactive,
+            asin: targetAsin ?? undefined,
           },
           lease.signal,
         );
@@ -392,7 +407,7 @@ export default function AmazonConnectionsPage() {
         finishListingsLease(lease);
       }
     },
-    [applyListingsRequestError, applyLoadedListings, finishListingsLease],
+    [applyListingsRequestError, applyLoadedListings, finishListingsLease, targetAsin],
   );
 
   useEffect(() => {
@@ -411,10 +426,23 @@ export default function AmazonConnectionsPage() {
   }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const asin = params.get('asin')?.trim().toUpperCase() ?? '';
+    const marketplace = params.get('marketplace')?.trim().toUpperCase() ?? '';
+    queueMicrotask(() => {
+      if (/^[A-Z0-9]{10}$/.test(asin)) setTargetAsin(asin);
+      if (MARKETPLACE_CODES.includes(marketplace)) setTargetMarketplaceCode(marketplace);
+    });
+  }, []);
+
+  useEffect(() => {
     const accountsLease = accountsGateRef.current.begin();
-    void amazonApi.listAccounts()
-      .then((result) => {
-        applyLoadedAccounts(result, accountsLease);
+    void Promise.all([amazonApi.getCapabilities(), amazonApi.listAccounts()])
+      .then(([capabilityResult, accountResult]) => {
+        if (mountedRef.current) {
+          setCapabilities(capabilityResult);
+        }
+        applyLoadedAccounts(accountResult, accountsLease);
       })
       .catch((requestError) => {
         applyAccountsRequestError(requestError, accountsLease);
@@ -473,6 +501,7 @@ export default function AmazonConnectionsPage() {
         page: 1,
         pageSize: PAGE_SIZE,
         includeInactive: expectedIncludeInactive,
+        asin: targetAsin ?? undefined,
       },
       lease.signal,
     )
@@ -498,9 +527,11 @@ export default function AmazonConnectionsPage() {
     includeInactive,
     selectedAccountId,
     selectedMarketplaceId,
+    targetAsin,
   ]);
 
   const startOAuth = async (intent: 'connect' | 'reauthorize', accountId?: string) => {
+    if (!amazonOAuthEnabled) return;
     setAction(intent === 'connect' ? 'connect' : `reauthorize:${accountId}`);
     setError(null);
     try {
@@ -581,7 +612,7 @@ export default function AmazonConnectionsPage() {
         item.id === updated.id ? updated : item,
       );
       commitListings(listingsRef, setListings, nextListings);
-      setNotice(productId ? 'Listing linked to a Listnara product.' : 'Listing unlinked.');
+      setNotice(productId ? 'Listing linked to a SellerAI product.' : 'Listing unlinked.');
     } catch (requestError) {
       if (!mountedRef.current || !isActionScopeActive(scope)) return;
       setError(errorMessage(requestError));
@@ -616,6 +647,58 @@ export default function AmazonConnectionsPage() {
     }
   };
 
+  const auditListing = async (listing: AmazonListing) => {
+    if (!selectedAccountId || !selectedMarketplaceId) return;
+    const scope = beginActionScope(selectedAccountId, selectedMarketplaceId, listing.id);
+    setAction(`audit:${listing.id}`);
+    setError(null);
+    try {
+      const report = await amazonApi.auditListing(
+        scope.accountId,
+        scope.marketplaceId!,
+        listing.id,
+      );
+      if (!mountedRef.current || !isActionScopeActive(scope)) return;
+      router.push(`/audits/${report.report_id}`);
+    } catch (requestError) {
+      if (!mountedRef.current || !isActionScopeActive(scope)) return;
+      setError(errorMessage(requestError));
+      setAction(null);
+    }
+  };
+
+  const disconnectAmazonAccount = async (accountId: string) => {
+    const scope = beginActionScope(accountId);
+    setAction(`disconnect:${accountId}`);
+    setError(null);
+    try {
+      const result = await amazonApi.disconnectAccount(accountId);
+      if (!mountedRef.current || !isActionScopeActive(scope)) return;
+      setDisconnectConfirmAccountId(null);
+      setNotice(
+        result.already_disconnected
+          ? 'This Amazon connection was already removed.'
+          : 'Amazon connection removed. Imported listing data for this account has been deleted from Listnara.',
+      );
+      invalidateAccountSelection();
+      selectedAccountIdRef.current = null;
+      setSelectedAccountId(null);
+      setAccounts([]);
+      setLoadingAccounts(true);
+      const accountsLease = accountsGateRef.current.begin();
+      const accountResult = await amazonApi.listAccounts();
+      applyLoadedAccounts(accountResult, accountsLease);
+      finishAccountsLease(accountsLease);
+    } catch (requestError) {
+      if (!mountedRef.current || !isActionScopeActive(scope)) return;
+      setError(errorMessage(requestError));
+    } finally {
+      if (mountedRef.current && isActionScopeActive(scope)) {
+        setAction(null);
+      }
+    }
+  };
+
   const openOptimizationWorkspace = (product: AmazonLinkProduct, listingId: string) => {
     const params = new URLSearchParams({
       product_id: product.id,
@@ -629,30 +712,40 @@ export default function AmazonConnectionsPage() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-wider text-orange-600">Amazon workspace</p>
-          <h1 className="mt-1 text-3xl font-bold text-slate-950">Connections & listings</h1>
+          <p className="text-sm font-semibold uppercase tracking-wider text-emerald-700">Import from Amazon</p>
+          <h1 className="mt-1 text-3xl font-bold text-slate-950">Choose a live listing to audit</h1>
           <p className="mt-2 max-w-2xl text-slate-600">
-            Connect Seller Central, refresh eligible marketplaces, and bring your live listing identities into Listnara.
+            When Amazon connectivity is enabled, Listnara imports authorized listing content, captures an immutable
+            snapshot, and supports evidence-based audits you review before acting.
           </p>
         </div>
-        <div className="flex items-center gap-2 rounded-xl border bg-white p-2 shadow-sm">
-          <select
-            aria-label="Seller Central marketplace"
-            value={marketplaceCode}
-            onChange={(event) => setMarketplaceCode(event.target.value)}
-            className="rounded-lg border-0 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-orange-500"
-          >
-            {MARKETPLACE_CODES.map((code) => <option key={code}>{code}</option>)}
-          </select>
-          <button
-            onClick={() => void startOAuth('connect')}
-            disabled={action !== null}
-            className="inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:opacity-50"
-          >
-            {action === 'connect' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-            Connect Amazon
-          </button>
-        </div>
+        {showAmazonConnect ? (
+          <div className="flex items-center gap-2 rounded-xl border bg-white p-2 shadow-sm">
+            <select
+              aria-label="Seller Central marketplace"
+              value={marketplaceCode}
+              onChange={(event) => setMarketplaceCode(event.target.value)}
+              className="rounded-lg border-0 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-orange-500"
+            >
+              {MARKETPLACE_CODES.map((code) => (
+                <option key={code}>{code}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => void startOAuth('connect')}
+              disabled={action !== null}
+              className="inline-flex items-center gap-2 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:opacity-50"
+            >
+              {action === 'connect' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+              Connect Amazon
+            </button>
+          </div>
+        ) : (
+          <div className="max-w-md rounded-xl border border-slate-200 bg-white p-4 text-sm leading-6 text-slate-600 shadow-sm">
+            Amazon OAuth is not enabled in this environment yet. When it becomes available, you will authorize Listnara
+            through Amazon&apos;s consent screen to import eligible marketplace, listing, and catalog data for review.
+          </div>
+        )}
       </div>
 
       {error && (
@@ -665,6 +758,12 @@ export default function AmazonConnectionsPage() {
         <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
           <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
           <span>{notice}</span>
+        </div>
+      )}
+      {targetAsin && (
+        <div className="flex flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 sm:flex-row sm:items-center sm:justify-between">
+          <span><strong>ASIN {targetAsin}</strong> · Showing only matching listings authorized by your connected account.</span>
+          <button onClick={() => { setTargetAsin(null); setTargetMarketplaceCode(null); router.push('/amazon'); }} className="self-start font-semibold text-emerald-800 underline underline-offset-4">Clear filter</button>
         </div>
       )}
 
@@ -680,7 +779,11 @@ export default function AmazonConnectionsPage() {
             <div className="rounded-xl border border-dashed p-6 text-center">
               <Store className="mx-auto h-8 w-8 text-slate-400" />
               <p className="mt-3 font-medium text-slate-800">No Amazon account yet</p>
-              <p className="mt-1 text-sm text-slate-500">Choose a marketplace above to connect Seller Central.</p>
+              <p className="mt-1 text-sm text-slate-500">
+                {showAmazonConnect
+                  ? 'Choose a marketplace above to connect Seller Central.'
+                  : 'Amazon connection will appear here after OAuth is enabled for your environment.'}
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -720,13 +823,22 @@ export default function AmazonConnectionsPage() {
                     <p className="mt-1 text-sm text-slate-500">Last verified: {formatDate(selectedAccount.last_verified_at)}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {selectedAccount.status !== 'active' && (
+                    {selectedAccount.status !== 'active' && showAmazonConnect && (
                       <button
                         onClick={() => void startOAuth('reauthorize', selectedAccount.id)}
                         disabled={action !== null}
                         className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
                       >
                         <RotateCcw className="h-4 w-4" /> Reauthorize
+                      </button>
+                    )}
+                    {showAmazonDisconnect && (
+                      <button
+                        onClick={() => setDisconnectConfirmAccountId(selectedAccount.id)}
+                        disabled={action !== null}
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 hover:bg-red-100 disabled:opacity-50"
+                      >
+                        <Unplug className="h-4 w-4" /> Disconnect Amazon
                       </button>
                     )}
                     <button
@@ -800,14 +912,14 @@ export default function AmazonConnectionsPage() {
                   ) : listings.length === 0 ? (
                     <div className="p-12 text-center">
                       <Store className="mx-auto h-9 w-9 text-slate-300" />
-                      <p className="mt-3 font-medium text-slate-700">No synced listings</p>
-                      <p className="mt-1 text-sm text-slate-500">Run a listing sync to import seller SKU identities.</p>
+                      <p className="mt-3 font-medium text-slate-700">{targetAsin ? `ASIN ${targetAsin} was not found` : 'No synced listings'}</p>
+                      <p className="mt-1 text-sm text-slate-500">{targetAsin ? 'Confirm the marketplace and run a listing sync. Only products belonging to the authorized seller account can be imported.' : 'Run a listing sync to import seller SKU identities.'}</p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-slate-200 text-sm">
                         <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                          <tr><th className="px-5 py-3">SKU</th><th className="px-5 py-3">ASIN</th><th className="px-5 py-3">Listnara product</th><th className="px-5 py-3">Product type</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Last seen</th></tr>
+                          <tr><th className="px-5 py-3">SKU</th><th className="px-5 py-3">ASIN</th><th className="px-5 py-3">SellerAI product</th><th className="px-5 py-3">Product type</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Last seen</th><th className="px-5 py-3">Audit</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {listings.map((listing) => {
@@ -849,7 +961,7 @@ export default function AmazonConnectionsPage() {
                               <td className="min-w-56 px-5 py-4">
                                 <div className="flex items-center gap-2">
                                   <select
-                                    aria-label={`Listnara product for ${listing.seller_sku}`}
+                                    aria-label={`SellerAI product for ${listing.seller_sku}`}
                                     value={listing.product_id ?? ''}
                                     disabled={action !== null}
                                     onChange={(event) =>
@@ -887,6 +999,17 @@ export default function AmazonConnectionsPage() {
                               <td className="whitespace-nowrap px-5 py-4 text-slate-600">{listing.product_type ?? '—'}</td>
                               <td className="px-5 py-4"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${listing.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{listing.is_active ? listing.status_codes.join(', ') || 'Active' : 'Inactive'}</span></td>
                               <td className="whitespace-nowrap px-5 py-4 text-slate-500">{formatDate(listing.last_seen_at)}</td>
+                              <td className="whitespace-nowrap px-5 py-4">
+                                <button
+                                  type="button"
+                                  disabled={action !== null || !listing.is_active}
+                                  onClick={() => void auditListing(listing)}
+                                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-800 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-900 disabled:opacity-50"
+                                >
+                                  {action === `audit:${listing.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageSearch className="h-4 w-4" />}
+                                  Audit listing
+                                </button>
+                              </td>
                             </tr>
                           )})}
                         </tbody>
@@ -936,8 +1059,54 @@ export default function AmazonConnectionsPage() {
 
       <div className="flex items-center gap-2 text-xs text-slate-500">
         <ExternalLink className="h-3.5 w-3.5" />
-        Listnara reads listing identities and bounded catalog summaries. Publishing changes to Amazon is not enabled.
+        Read-only Amazon access. Listnara imports listing content for analysis and cannot publish changes to Amazon.
       </div>
+
+      {disconnectConfirmAccountId ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="disconnect-amazon-title"
+        >
+          <div className="max-w-lg rounded-2xl border bg-white p-6 shadow-xl">
+            <h2 id="disconnect-amazon-title" className="text-lg font-semibold text-slate-950">
+              Disconnect this Amazon account?
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              This immediately stops SP-API access for the selected connection, deletes the stored refresh token, and
+              removes imported marketplace, listing, catalog, and linked audit snapshot data from Listnara. This action
+              cannot be undone from the app.
+            </p>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              You should also revoke Listnara in Amazon Seller Central under Apps and Services → Manage Your Apps.
+            </p>
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDisconnectConfirmAccountId(null)}
+                disabled={action !== null}
+                className="rounded-lg border px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void disconnectAmazonAccount(disconnectConfirmAccountId)}
+                disabled={action !== null}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-50"
+              >
+                {action === `disconnect:${disconnectConfirmAccountId}` ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Unplug className="h-4 w-4" />
+                )}
+                Disconnect and delete imported data
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

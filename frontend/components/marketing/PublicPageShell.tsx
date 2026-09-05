@@ -12,3 +12,4 @@ export function PublicPageShell({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
