@@ -16,8 +16,11 @@ router = APIRouter()
 
 def _report_payload(record: Generation) -> dict:
     payload = dict(record.output)
-    payload.setdefault("report_id", str(record.id))
-    payload.setdefault("created_at", record.created_at.isoformat() if record.created_at else None)
+    # Persistence is the source of truth for identifiers and timestamps. The
+    # model-produced report carries its own request-scoped report_id, which is
+    # not the Generation primary key accepted by the detail endpoint.
+    payload["report_id"] = str(record.id)
+    payload["created_at"] = record.created_at.isoformat() if record.created_at else None
     return payload
 
 
