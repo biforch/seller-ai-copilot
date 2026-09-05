@@ -44,6 +44,7 @@ class UserInfo(BaseModel):
     id: str
     email: str
     plan: str
+    is_admin: bool = False
 
 
 class LoginResponse(BaseModel):
@@ -84,3 +85,4 @@ class UserResponse(BaseModel):
     id: str
     email: str
     plan: str
+    is_admin: bool = False

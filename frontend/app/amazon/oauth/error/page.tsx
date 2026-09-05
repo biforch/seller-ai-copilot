@@ -5,9 +5,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertCircle, ArrowLeft } from 'lucide-react';
 
 const ERROR_MESSAGES: Record<string, string> = {
-  AMAZON_OAUTH_STATE_EXPIRED: 'This connection request expired. Start a new connection from SellerAI.',
+  AMAZON_OAUTH_STATE_EXPIRED: 'This connection request expired. Start a new connection from Listnara.',
   AMAZON_OAUTH_STATE_REPLAY: 'This connection request was already used. Start a new connection if needed.',
-  AMAZON_OAUTH_SELLER_ALREADY_LINKED: 'This Amazon seller is already linked to another SellerAI account.',
+  AMAZON_OAUTH_SELLER_ALREADY_LINKED: 'This Amazon seller is already linked to another Listnara account.',
   AMAZON_OAUTH_SELLER_MISMATCH: 'The Amazon seller does not match the account being reauthorized.',
   AMAZON_OAUTH_TOKEN_EXCHANGE_FAILED: 'Amazon could not complete the authorization. Please try again.',
   AMAZON_OAUTH_REDIRECT_INVALID: 'Amazon did not return a complete authorization response.',

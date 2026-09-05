@@ -14,7 +14,10 @@ from app.api import (
     amazon_listings,
     amazon_marketplaces,
     amazon_oauth,
+    analytics,
+    audits,
     auth,
+    billing,
     generate,
     listing,
     products,
@@ -59,8 +62,8 @@ logger = logging.getLogger(__name__)
 
 
 app = FastAPI(
-    title="SellerAI Copilot API",
-    description="AI-powered eCommerce Assistant for Global Sellers",
+    title="Listnara API",
+    description="Evidence-based Amazon listing audits",
     version="1.0.0",
     docs_url="/docs" if settings.api_docs_enabled else None,
     redoc_url="/redoc" if settings.api_docs_enabled else None,
@@ -192,6 +195,24 @@ app.include_router(
 )
 
 app.include_router(
+    analytics.router,
+    prefix="/api/v1/analytics",
+    tags=["Analytics"],
+)
+
+app.include_router(
+    billing.router,
+    prefix="/api/v1/billing",
+    tags=["Billing"],
+)
+
+app.include_router(
+    audits.router,
+    prefix="/api/v1/audits",
+    tags=["Audits"],
+)
+
+app.include_router(
     analysis_api.router,
     prefix="/api/v1/analysis",
     tags=["Analysis"],
@@ -265,7 +286,7 @@ async def health_check():
     return success_response(
         data={
             "status": "healthy",
-            "service": "SellerAI Copilot API",
+            "service": "Listnara API",
         }
     )
 
@@ -277,7 +298,7 @@ def readiness_check(db: Session = Depends(get_db)):
     return success_response(
         data={
             "status": "ready",
-            "service": "SellerAI Copilot API",
+            "service": "Listnara API",
         }
     )
 
@@ -292,7 +313,7 @@ async def root():
         data["docs"] = "/docs"
     return success_response(
         data=data,
-        message="Welcome to SellerAI Copilot API",
+        message="Welcome to Listnara API",
     )
 
 

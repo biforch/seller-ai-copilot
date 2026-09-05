@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "openai/gpt-4o-mini"
     OPENAI_FALLBACK_MODELS: str = ""
     OPENAI_REFERER: str = "http://localhost:3000"
-    OPENAI_TITLE: str = "SellerAI Copilot"
+    OPENAI_TITLE: str = "Listnara"
     OPENAI_TIMEOUT: float = 120.0
 
     JWT_SECRET_KEY: str = ""
@@ -56,7 +56,7 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: str = "http://localhost:3000"
 
-    APP_NAME: str = "SellerAI Copilot"
+    APP_NAME: str = "Listnara"
     DEBUG: bool = False
 
     # Frozen product capabilities. Public Analysis requires a future B3 source
@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     AMAZON_LWA_TOKEN_URL: str = "https://api.amazon.com/auth/o2/token"
     AMAZON_SP_API_REGION: Literal["na", "eu", "fe"] = "na"
     AMAZON_SP_API_ENDPOINT_MODE: Literal["mock", "sandbox", "production"] = "mock"
-    AMAZON_SP_API_USER_AGENT: str = "SellerAI-Copilot/1.0.0 (Language=Python)"
+    AMAZON_SP_API_USER_AGENT: str = "Listnara/1.0.0 (Language=Python)"
 
     AMAZON_TOKEN_ACTIVE_KEY_VERSION: int = 0
     AMAZON_TOKEN_KEY_V1: str = ""
@@ -86,6 +86,17 @@ class Settings(BaseSettings):
     AMAZON_OAUTH_CONSENT_VERSION: str = ""
     AMAZON_OAUTH_STATE_TTL_SECONDS: int = 600
 
+    PADDLE_ENABLED: bool = False
+    PADDLE_ENVIRONMENT: Literal["sandbox", "production"] = "sandbox"
+    PADDLE_API_KEY: str = ""
+    PADDLE_WEBHOOK_SECRET: str = ""
+    PADDLE_CLIENT_TOKEN: str = ""
+    PADDLE_PLUS_PRODUCT_ID: str = "pro_01m1c22yfxjbsra1c71y65ra32"
+    PADDLE_PLUS_PRICE_ID: str = "pri_01m1c2ar1tcp3cv8d8ax72q7qm"
+    PADDLE_PRO_PRODUCT_ID: str = "pro_01m1c23v04xh4sj3n7n5rzb66q"
+    PADDLE_PRO_PRICE_ID: str = "pri_01m1c28ybwv2d5gt7wp1hzd8kp"
+    PADDLE_WEBHOOK_TOLERANCE_SECONDS: int = 300
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> str:
@@ -98,6 +109,13 @@ class Settings(BaseSettings):
     def validate_session_ttl_minutes(cls, value: int) -> int:
         if value < 5 or value > 60:
             raise ValueError("SESSION_TTL_MINUTES must be between 5 and 60")
+        return value
+
+    @field_validator("PADDLE_WEBHOOK_TOLERANCE_SECONDS")
+    @classmethod
+    def validate_paddle_webhook_tolerance(cls, value: int) -> int:
+        if value < 30 or value > 900:
+            raise ValueError("PADDLE_WEBHOOK_TOLERANCE_SECONDS must be between 30 and 900")
         return value
 
     @property
@@ -215,6 +233,12 @@ class Settings(BaseSettings):
         self._validate_mfa_key()
         if self.DEBUG:
             raise ValueError("DEBUG must remain false outside development/testing")
+        if self.PADDLE_ENABLED and (
+            not self.PADDLE_API_KEY
+            or not self.PADDLE_WEBHOOK_SECRET
+            or not self.PADDLE_CLIENT_TOKEN
+        ):
+            raise ValueError("Paddle credentials are required when PADDLE_ENABLED is true")
         if "*" in self.cors_origins_list:
             raise ValueError("CORS_ORIGINS must not contain a wildcard outside development/testing")
         if self.SESSION_COOKIE_SECURE is False:

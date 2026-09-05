@@ -1,4 +1,4 @@
-"""Explicit tenant-safe links between Amazon listings and SellerAI products."""
+"""Explicit tenant-safe links between Amazon listings and Listnara products."""
 
 from __future__ import annotations
 

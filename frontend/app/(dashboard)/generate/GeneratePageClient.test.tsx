@@ -92,7 +92,7 @@ describe('GeneratePageClient query/product loading', () => {
     expect(screen.queryByText('Select a project above before generating')).not.toBeInTheDocument();
     expect(screen.getByText('Project attached')).toBeInTheDocument();
     expect(productNameInput().value).toBe('');
-    expect(screen.queryByText('Loading your linked SellerAI product…')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading your linked Listnara product…')).not.toBeInTheDocument();
     expect(apiClient.get).not.toHaveBeenCalled();
   });
 
@@ -103,7 +103,7 @@ describe('GeneratePageClient query/product loading', () => {
     );
 
     render(<GeneratePageClient />);
-    expect(screen.getByText('Loading your linked SellerAI product…')).toBeInTheDocument();
+    expect(screen.getByText('Loading your linked Listnara product…')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(productNameInput().value).toBe('Loaded Product');

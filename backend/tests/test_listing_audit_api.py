@@ -8,6 +8,7 @@ from app.analysis.provider import OpenAIListingAuditProvider
 from app.analysis.service import ListingAuditProviderResponse
 from app.core.config import settings
 from app.core.exceptions import AI_PROVIDER_UNAVAILABLE, AppException
+from app.models.audit_usage import AuditUsage
 from app.models.generation_request import GenerationRequest, GenerationRequestStatus
 from app.services.quota_estimation import estimate_reserve_tokens
 
@@ -146,6 +147,9 @@ def test_success_and_replay_call_provider_and_charge_once(
     db_session.refresh(tenant["user"])
     assert tenant["user"].used_tokens == 200
     assert tenant["user"].reserved_tokens == 0
+    usage = db_session.query(AuditUsage).filter_by(user_id=tenant["user"].id).one()
+    assert usage.status == "completed"
+    assert usage.generation_id == record.generation_id
 
 
 def test_idempotency_key_reuse_with_different_input_conflicts(
@@ -206,6 +210,9 @@ def test_provider_failure_releases_reservation_without_charging(
     db_session.refresh(tenant["user"])
     assert tenant["user"].used_tokens == 0
     assert tenant["user"].reserved_tokens == 0
+    usage = db_session.query(AuditUsage).filter_by(user_id=tenant["user"].id).one()
+    assert usage.status == "released"
+    assert usage.generation_id is None
 
 
 def test_listing_audit_quota_reservation_covers_prompt_and_output_budget() -> None:

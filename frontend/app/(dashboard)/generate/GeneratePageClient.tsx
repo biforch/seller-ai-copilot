@@ -316,19 +316,19 @@ function GeneratePageClientSession(){
 
         {productId && loadedProductId === productId && !productLoading && !productLoadError && (
           <p className="mt-2 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm text-purple-700">
-            SellerAI product loaded from your Amazon listing link. Generated content will remain a review proposal and will not be published to Amazon.
+            Listnara product loaded from your Amazon listing link. Generated content will remain a review proposal and will not be published to Amazon.
           </p>
         )}
 
         {amazonListingId && loadedProductId === productId && !productLoading && !productLoadError && (
           <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
-            The latest saved Amazon catalog summary will be used as untrusted factual reference. SellerAI will still create a review proposal only.
+            The latest saved Amazon catalog summary will be used as untrusted factual reference. Listnara will still create a review proposal only.
           </p>
         )}
 
         {productLoading && (
           <p className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Loading your linked SellerAI product…
+            Loading your linked Listnara product…
           </p>
         )}
 

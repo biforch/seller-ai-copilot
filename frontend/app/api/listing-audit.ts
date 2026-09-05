@@ -28,7 +28,7 @@ export interface ListingAuditReport {
   report_id: string;
   report_type: 'listing_audit';
   schema_version: 'listing-audit-schema-v1';
-  prompt_version: 'listing-audit-prompt-v2';
+  prompt_version: `listing-audit-prompt-v${number}`;
   overall_score: number;
   result: {
     dimension_scores: Record<
@@ -51,6 +51,11 @@ export interface ListingAuditReport {
       why_now: string;
       expected_effect: string;
       effort: 'low' | 'medium' | 'high';
+    }>;
+    image_observations?: Array<{
+      image_index: number;
+      observation: string;
+      implication: string;
     }>;
     limitations: string[];
   };

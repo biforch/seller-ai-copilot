@@ -113,7 +113,7 @@ def _valid_rc_env(**overrides: str) -> dict[str, str]:
         "OPENAI_API_KEY": "rc-placeholder-not-for-real-llm",
         "CORS_ORIGINS": "http://127.0.0.1:8080",
         "NEXT_PUBLIC_API_URL": "/api/v1",
-        "NEXT_PUBLIC_APP_NAME": "SellerAI Copilot",
+        "NEXT_PUBLIC_APP_NAME": "Listnara",
         "RC_HTTP_PORT": "8080",
         "SESSION_COOKIE_SECURE": "false",
     }
@@ -131,7 +131,7 @@ def _amazon_enabled_rc_env(**overrides: str) -> dict[str, str]:
         AMAZON_LWA_CLIENT_ID="amzn-client-id-placeholder-for-rc",
         AMAZON_LWA_CLIENT_SECRET="amzn-client-secret-placeholder-for-rc",
         AMAZON_LWA_TOKEN_URL="https://api.amazon.com/auth/o2/token",
-        AMAZON_SP_API_USER_AGENT="SellerAI-Copilot/1.0.0 (Language=Python)",
+        AMAZON_SP_API_USER_AGENT="Listnara/1.0.0 (Language=Python)",
         AMAZON_TOKEN_ACTIVE_KEY_VERSION="1",
         AMAZON_TOKEN_KEY_V1=key,
         AMAZON_TOKEN_FINGERPRINT_PEPPER=pepper,
@@ -1056,7 +1056,7 @@ def test_alembic_head_unchanged() -> None:
         text=True,
         check=True,
     )
-    assert "1b2c3d4e5f6a (head)" in result.stdout
+    assert "4e5f6a7b8c9d (head)" in result.stdout
 
 
 def test_validator_accepts_valid_rc_environment() -> None:

@@ -41,7 +41,7 @@ MARKETPLACE_IDS: dict[str, str] = {
 }
 
 DEFAULT_LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token"
-DEFAULT_USER_AGENT = "SellerAI-Copilot/1.0.0 (Language=Python)"
+DEFAULT_USER_AGENT = "Listnara/1.0.0 (Language=Python)"
 
 
 def resolve_sp_api_base_url(*, region: SpApiRegion, endpoint_mode: EndpointMode) -> str:

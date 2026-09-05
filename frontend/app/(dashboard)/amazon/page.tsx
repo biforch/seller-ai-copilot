@@ -581,7 +581,7 @@ export default function AmazonConnectionsPage() {
         item.id === updated.id ? updated : item,
       );
       commitListings(listingsRef, setListings, nextListings);
-      setNotice(productId ? 'Listing linked to a SellerAI product.' : 'Listing unlinked.');
+      setNotice(productId ? 'Listing linked to a Listnara product.' : 'Listing unlinked.');
     } catch (requestError) {
       if (!mountedRef.current || !isActionScopeActive(scope)) return;
       setError(errorMessage(requestError));
@@ -632,7 +632,7 @@ export default function AmazonConnectionsPage() {
           <p className="text-sm font-semibold uppercase tracking-wider text-orange-600">Amazon workspace</p>
           <h1 className="mt-1 text-3xl font-bold text-slate-950">Connections & listings</h1>
           <p className="mt-2 max-w-2xl text-slate-600">
-            Connect Seller Central, refresh eligible marketplaces, and bring your live listing identities into SellerAI.
+            Connect Seller Central, refresh eligible marketplaces, and bring your live listing identities into Listnara.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-xl border bg-white p-2 shadow-sm">
@@ -807,7 +807,7 @@ export default function AmazonConnectionsPage() {
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-slate-200 text-sm">
                         <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                          <tr><th className="px-5 py-3">SKU</th><th className="px-5 py-3">ASIN</th><th className="px-5 py-3">SellerAI product</th><th className="px-5 py-3">Product type</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Last seen</th></tr>
+                          <tr><th className="px-5 py-3">SKU</th><th className="px-5 py-3">ASIN</th><th className="px-5 py-3">Listnara product</th><th className="px-5 py-3">Product type</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Last seen</th></tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {listings.map((listing) => {
@@ -849,7 +849,7 @@ export default function AmazonConnectionsPage() {
                               <td className="min-w-56 px-5 py-4">
                                 <div className="flex items-center gap-2">
                                   <select
-                                    aria-label={`SellerAI product for ${listing.seller_sku}`}
+                                    aria-label={`Listnara product for ${listing.seller_sku}`}
                                     value={listing.product_id ?? ''}
                                     disabled={action !== null}
                                     onChange={(event) =>
@@ -936,7 +936,7 @@ export default function AmazonConnectionsPage() {
 
       <div className="flex items-center gap-2 text-xs text-slate-500">
         <ExternalLink className="h-3.5 w-3.5" />
-        SellerAI reads listing identities and bounded catalog summaries. Publishing changes to Amazon is not enabled.
+        Listnara reads listing identities and bounded catalog summaries. Publishing changes to Amazon is not enabled.
       </div>
     </div>
   );

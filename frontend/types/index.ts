@@ -152,6 +152,8 @@ export interface User {
 
   plan: string;
 
+  is_admin?: boolean;
+
 }
 
 

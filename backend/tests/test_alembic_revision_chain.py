@@ -93,7 +93,7 @@ def test_alembic_revision_chain_is_valid():
     cfg = Config(str(backend_root / "alembic.ini"))
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    assert heads == ["1b2c3d4e5f6a"]
+    assert heads == ["4e5f6a7b8c9d"]
 
     revisions = {rev.revision: rev for rev in script.walk_revisions()}
     assert "34b6d855017a" in revisions
@@ -108,3 +108,6 @@ def test_alembic_revision_chain_is_valid():
     assert revisions["a0b1c2d3e4f6"].down_revision == "f9a0b1c2d3e4"
     assert revisions["0a1b2c3d4e5f"].down_revision == "a0b1c2d3e4f6"
     assert revisions["1b2c3d4e5f6a"].down_revision == "0a1b2c3d4e5f"
+    assert revisions["2c3d4e5f6a7b"].down_revision == "1b2c3d4e5f6a"
+    assert revisions["3d4e5f6a7b8c"].down_revision == "2c3d4e5f6a7b"
+    assert revisions["4e5f6a7b8c9d"].down_revision == "3d4e5f6a7b8c"

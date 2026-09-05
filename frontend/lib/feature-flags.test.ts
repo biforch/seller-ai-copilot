@@ -26,7 +26,8 @@ describe('frozen product capabilities', () => {
 
     expect(listingAuditPage).toContain('if (!LISTING_AUDIT_INTERNAL_VISIBLE)');
     expect(listingAuditPage).toContain('notFound()');
-    expect(dashboard).toContain('LISTING_AUDIT_INTERNAL_VISIBLE ?');
+    expect(dashboard).toContain("router.push('/audits/new')");
+    expect(dashboard).toContain('auditsApi.list');
     expect(ANALYSIS_PUBLIC_ENABLED).toBe(false);
   });
 

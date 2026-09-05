@@ -527,7 +527,7 @@ describe('AmazonConnectionsPage async races', () => {
       expect(screen.getByText('SKU-M1')).toBeInTheDocument();
     });
 
-    const productSelect = screen.getByRole('combobox', { name: /SellerAI product for SKU-M1/i });
+    const productSelect = screen.getByRole('combobox', { name: /Listnara product for SKU-M1/i });
     await user.selectOptions(productSelect, 'prod-1');
     await user.click(screen.getByRole('button', { name: /EU account/i }));
     await waitFor(() => {
@@ -540,7 +540,7 @@ describe('AmazonConnectionsPage async races', () => {
     });
     await Promise.resolve();
 
-    expect(screen.queryByText('Listing linked to a SellerAI product.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Listing linked to a Listnara product.')).not.toBeInTheDocument();
     expect(screen.getByText('SKU-M-B1')).toBeInTheDocument();
   });
 
@@ -842,13 +842,13 @@ describe('AmazonConnectionsPage async races', () => {
     });
 
     await user.selectOptions(
-      screen.getByRole('combobox', { name: /SellerAI product for SKU-M1/i }),
+      screen.getByRole('combobox', { name: /Listnara product for SKU-M1/i }),
       'prod-1',
     );
     await waitFor(() => {
-      expect(screen.getByText('Listing linked to a SellerAI product.')).toBeInTheDocument();
+      expect(screen.getByText('Listing linked to a Listnara product.')).toBeInTheDocument();
     });
-    expect(screen.getByRole('combobox', { name: /SellerAI product for SKU-M1/i })).toHaveValue('prod-1');
+    expect(screen.getByRole('combobox', { name: /Listnara product for SKU-M1/i })).toHaveValue('prod-1');
   });
 
   it('aborts the first StrictMode accounts request and keeps loading until the latest lease finishes', async () => {

@@ -1,4 +1,4 @@
-export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'SellerAI Copilot';
+export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Listnara';
 
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';

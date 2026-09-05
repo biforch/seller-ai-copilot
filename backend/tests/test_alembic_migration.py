@@ -157,7 +157,7 @@ def test_alembic_upgrade_downgrade_cycle(migration_database_url, monkeypatch):
 
     with engine.connect() as connection:
         current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert current == "1b2c3d4e5f6a"
+        assert current == "4e5f6a7b8c9d"
 
     amazon_unique = {
         tuple(constraint["column_names"])

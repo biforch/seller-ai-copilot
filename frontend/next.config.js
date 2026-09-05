@@ -13,6 +13,15 @@ const nextConfig = {
     ];
   },
 
+  async headers() {
+    return [
+      {
+        source: "/:path(login|register|dashboard|analytics|billing|generate|amazon|audits|products|projects|listing-audit)/:rest*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" }],
+      },
+    ];
+  },
+
   // 开发环境 webpack 配置
   webpack: (config, { dev }) => {
     if (dev) {

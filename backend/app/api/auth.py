@@ -36,6 +36,7 @@ from app.schemas.auth import (
 from app.services.auth_session_service import auth_session_service
 from app.services.login_abuse_service import login_abuse_service
 from app.services.mfa_service import mfa_service
+from app.services.product_analytics_service import record_product_event_best_effort
 
 router = APIRouter()
 
@@ -45,7 +46,7 @@ def _invalid_credentials() -> AppException:
 
 
 def _user_info(user: User) -> UserInfo:
-    return UserInfo(id=str(user.id), email=str(user.email), plan=str(user.plan))
+    return UserInfo(id=str(user.id), email=str(user.email), plan=str(user.plan), is_admin=bool(user.is_admin))
 
 
 @router.post("/register")
@@ -66,6 +67,11 @@ def register(request: Request, body: RegisterRequest, db: Session = Depends(get_
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    record_product_event_best_effort(
+        db,
+        user_id=new_user.id,
+        event_type="registration_completed",
+    )
 
     data = RegisterResponse(
         id=str(new_user.id),
@@ -296,5 +302,5 @@ def get_current_user_info(
     if not user:
         raise AppException("User not found", status.HTTP_404_NOT_FOUND)
 
-    data = UserResponse(id=str(user.id), email=str(user.email), plan=str(user.plan))
+    data = UserResponse(id=str(user.id), email=str(user.email), plan=str(user.plan), is_admin=bool(user.is_admin))
     return success_response(data=data.model_dump())

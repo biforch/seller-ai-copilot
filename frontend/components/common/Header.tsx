@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { LogOut, Sparkles } from 'lucide-react';
+import { BarChart3, ClipboardCheck, CreditCard, LogOut, ShoppingBag } from 'lucide-react';
 
 import { APP_NAME } from '@/lib/constants';
 import type { User } from '@/types';
@@ -22,8 +22,8 @@ export function Header({ user, onLogout, showAuth = false }: HeaderProps) {
           onClick={() => router.push(user ? '/dashboard' : '/')}
           className="flex items-center gap-2"
         >
-          <Sparkles className="w-6 h-6 text-blue-600" />
-          <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+          <ClipboardCheck className="w-6 h-6 text-emerald-700" />
+          <span className="text-xl font-bold text-slate-950">
             {APP_NAME}
           </span>
         </button>
@@ -31,6 +31,10 @@ export function Header({ user, onLogout, showAuth = false }: HeaderProps) {
         <div className="flex items-center gap-4">
           {user ? (
             <>
+              <button onClick={() => router.push('/audits/new')} className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 sm:block">New Audit</button>
+              <button onClick={() => router.push('/amazon-integration')} className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 lg:inline-flex"><ShoppingBag className="mr-2 h-4 w-4" />Amazon SP-API</button>
+              <button onClick={() => router.push('/billing')} className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 sm:inline-flex"><CreditCard className="mr-2 h-4 w-4" />Billing</button>
+              {user.is_admin ? <button onClick={() => router.push('/analytics')} className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 sm:inline-flex"><BarChart3 className="mr-2 h-4 w-4" />Analytics</button> : null}
               <span className="text-sm text-gray-600 hidden sm:inline">{user.email}</span>
               <button
                 onClick={onLogout}
@@ -42,6 +46,10 @@ export function Header({ user, onLogout, showAuth = false }: HeaderProps) {
             </>
           ) : showAuth ? (
             <>
+              <button onClick={() => router.push('/amazon-listing-audit')} className="hidden text-sm font-medium text-gray-600 hover:text-gray-900 lg:block">How it works</button>
+              <button onClick={() => router.push('/methodology')} className="hidden text-sm font-medium text-gray-600 hover:text-gray-900 lg:block">Methodology</button>
+              <button onClick={() => router.push('/pricing')} className="hidden text-sm font-medium text-gray-600 hover:text-gray-900 sm:block">Pricing</button>
+              <button onClick={() => router.push('/contact')} className="hidden text-sm font-medium text-gray-600 hover:text-gray-900 sm:block">Contact</button>
               <button
                 onClick={() => router.push('/login')}
                 className="text-sm font-medium text-gray-600 hover:text-gray-900"
@@ -52,7 +60,7 @@ export function Header({ user, onLogout, showAuth = false }: HeaderProps) {
                 onClick={() => router.push('/register')}
                 className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
               >
-                Get Started Free
+                Audit My Listing
               </button>
             </>
           ) : null}

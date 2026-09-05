@@ -1,92 +1,67 @@
-'use client';
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { ArrowRight, CheckCircle2, ClipboardCheck, Quote, Target } from 'lucide-react';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { ArrowRight, FileSearch, ListChecks, ShieldCheck, Sparkles } from 'lucide-react';
-
-import { Header } from '@/components/common/Header';
 import { Footer } from '@/components/common/Footer';
-import { useAuth } from '@/hooks/useAuth';
+import { Header } from '@/components/common/Header';
+
+export const metadata: Metadata = {
+  title: 'Amazon Listing Audit Tool | Listnara',
+  description: 'Audit your Amazon listing for buyer clarity, information gaps, conversion readiness, and search coverage.',
+  alternates: { canonical: '/' },
+};
+
+const features = [
+  { icon: ClipboardCheck, title: 'Find the problems', copy: 'Audit your title, bullets, and description across five consistent dimensions.' },
+  { icon: Quote, title: 'See the evidence', copy: 'Every issue points to the exact part of your listing that triggered it.' },
+  { icon: Target, title: 'Know what to fix first', copy: 'Get prioritized actions instead of a wall of generic suggestions.' },
+];
 
 export default function Home() {
-  const router = useRouter();
-  const { user, isLoading } = useAuth();
-
-  useEffect(() => {
-    if (!isLoading && user) {
-      router.push('/dashboard');
-    }
-  }, [user, isLoading, router]);
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'SoftwareApplication',
+    name: 'Listnara',
+    applicationCategory: 'BusinessApplication',
+    operatingSystem: 'Web',
+    url: 'https://listnara.com',
+    description: 'Evidence-backed Amazon listing audits.',
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col">
+    <div className="flex min-h-screen flex-col bg-[#f6f4ee] text-slate-950">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />
       <Header showAuth />
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-32 flex-1">
-        <div className="text-center">
-          <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-sm font-medium mb-6">
-            <FileSearch className="w-4 h-4" />
-            Evidence-grounded Listing Audit
-          </div>
-
-          <h1 className="text-5xl sm:text-6xl font-bold text-gray-900 leading-tight mb-6">
-            Find What Is Holding Your
-            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              {' '}Listing Back
-            </span>
-          </h1>
-
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto mb-10">
-            Paste your listing and get a structured score, evidence-backed issues,
-            clear limitations, and the three actions worth prioritizing first.
-          </p>
-
-          <button
-            onClick={() => router.push('/register')}
-            className="px-8 py-4 bg-blue-600 text-white text-lg font-semibold rounded-xl hover:bg-blue-700 transition-all hover:scale-105 shadow-lg shadow-blue-200 inline-flex items-center gap-2"
-          >
-            Audit Your Listing
-            <ArrowRight className="w-5 h-5" />
-          </button>
-
-          <p className="text-sm text-gray-500 mt-4">
-            Internal registered-user release • Amazon connection not required
-          </p>
-        </div>
-
-        <div className="grid md:grid-cols-3 gap-8 mt-24">
-          <div className="bg-white p-6 rounded-2xl border shadow-sm hover:shadow-md transition-shadow">
-            <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mb-4">
-              <FileSearch className="w-6 h-6 text-blue-600" />
+      <main className="flex-1">
+        <section className="mx-auto grid max-w-7xl gap-14 px-5 pb-24 pt-16 lg:grid-cols-[1.05fr_.95fr] lg:items-center lg:px-8 lg:pt-24">
+          <div>
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-900/10 bg-emerald-900/5 px-4 py-2 text-sm font-semibold text-emerald-900"><ClipboardCheck className="h-4 w-4" /> Amazon Listing Audit</div>
+            <h1 className="max-w-3xl text-5xl font-semibold tracking-[-0.045em] sm:text-6xl lg:text-7xl">Find what your listing fails to explain.</h1>
+            <p className="mt-7 max-w-2xl text-lg leading-8 text-slate-600 sm:text-xl">Audit your Amazon listing before you rewrite it. See evidence-backed issues, why they matter, and what to fix first.</p>
+            <div className="mt-9 flex flex-wrap gap-3">
+              <Link href="/register" className="inline-flex items-center gap-2 rounded-xl bg-emerald-800 px-6 py-3.5 font-semibold text-white hover:bg-emerald-900">Audit my listing <ArrowRight className="h-5 w-5" /></Link>
+              <Link href="/sample-report" className="rounded-xl border border-slate-300 bg-white px-6 py-3.5 font-semibold text-slate-800 hover:border-emerald-700">View sample report</Link>
             </div>
-            <h3 className="text-lg font-semibold mb-2">Structured Audit</h3>
-            <p className="text-gray-600 text-sm">
-              Score positioning, buyer clarity, information quality, conversion readiness, and discoverability.
-            </p>
+            <p className="mt-3 text-sm text-slate-500">No credit card required</p>
           </div>
-
-          <div className="bg-white p-6 rounded-2xl border shadow-sm hover:shadow-md transition-shadow">
-            <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center mb-4">
-              <ShieldCheck className="w-6 h-6 text-purple-600" />
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-2xl shadow-slate-900/10">
+            <div className="flex items-end justify-between border-b border-slate-100 pb-6">
+              <div><p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Listing health</p><p className="mt-2 text-6xl font-semibold">72<span className="text-2xl text-slate-400">/100</span></p></div>
+              <div className="rounded-xl bg-amber-50 px-4 py-3 text-right"><p className="text-xs font-semibold uppercase text-amber-700">Biggest opportunity</p><p className="mt-1 font-semibold text-amber-950">Differentiation</p></div>
             </div>
-            <h3 className="text-lg font-semibold mb-2">Grounded Findings</h3>
-            <p className="text-gray-600 text-sm">
-              Every issue points back to supplied listing evidence and states what the audit cannot know.
-            </p>
+            <div className="py-6"><p className="text-xs font-bold uppercase tracking-wider text-red-700">High priority</p><h2 className="mt-3 text-xl font-semibold">Your main differentiator is buried.</h2><p className="mt-5 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">“Designed with double-wall stainless steel construction…”</p><p className="mt-5 text-sm leading-6 text-slate-600">Lead with the primary customer benefit, then support it with the construction detail.</p></div>
+            <div className="border-t border-slate-100 pt-5 text-sm font-semibold text-emerald-800">3 high-priority issues found</div>
           </div>
-
-          <div className="bg-white p-6 rounded-2xl border shadow-sm hover:shadow-md transition-shadow">
-            <div className="w-12 h-12 bg-green-50 rounded-xl flex items-center justify-center mb-4">
-              <ListChecks className="w-6 h-6 text-green-600" />
-            </div>
-            <h3 className="text-lg font-semibold mb-2">Prioritized Actions</h3>
-            <p className="text-gray-600 text-sm">
-              Focus on no more than three concrete improvements, ranked by urgency and expected effect.
-            </p>
+        </section>
+        <section className="border-y border-slate-200 bg-white">
+          <div className="mx-auto grid max-w-7xl gap-10 px-5 py-20 md:grid-cols-3 lg:px-8">
+            {features.map(({ icon: Icon, title, copy }, index) => <div key={title}><div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-800"><Icon className="h-5 w-5" /></div><p className="text-xs font-bold tracking-[0.2em] text-slate-400">0{index + 1}</p><h2 className="mt-2 text-xl font-semibold">{title}</h2><p className="mt-3 leading-7 text-slate-600">{copy}</p></div>)}
           </div>
-        </div>
-      </div>
-
+        </section>
+        <section className="mx-auto max-w-4xl px-5 py-20 text-center"><CheckCircle2 className="mx-auto h-8 w-8 text-emerald-700" /><h2 className="mt-5 text-3xl font-semibold">A decision tool, not another listing writer.</h2><p className="mx-auto mt-4 max-w-2xl leading-7 text-slate-600">Listnara separates evidence from analysis and states what it cannot know from the listing alone.</p></section>
+        <section className="bg-emerald-950 text-white"><div className="mx-auto flex max-w-7xl flex-col gap-8 px-5 py-16 sm:flex-row sm:items-center sm:justify-between lg:px-8"><div><p className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-300">Start free</p><h2 className="mt-3 text-3xl font-semibold">Five completed audits each month.</h2><p className="mt-3 text-emerald-100">No credit card required. Paid plans remain unavailable until billing approval is complete.</p></div><div className="flex gap-3"><Link href="/pricing" className="rounded-xl border border-white/30 px-5 py-3 font-semibold">View pricing</Link><Link href="/register" className="rounded-xl bg-white px-5 py-3 font-semibold text-emerald-950">Create account</Link></div></div></section>
+      </main>
       <Footer />
     </div>
   );
