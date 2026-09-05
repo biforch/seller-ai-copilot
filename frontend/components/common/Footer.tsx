@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/constants';
+import { LEGAL_PRIVACY_EMAIL } from '@/lib/legal-entity';
 
 export function Footer() {
   return (
@@ -8,10 +9,13 @@ export function Footer() {
         <div>
           <p>&copy; {new Date().getFullYear()} {APP_NAME}. Evidence-based Amazon Listing Audit.</p>
           <p className="mt-2 max-w-2xl leading-6">Listnara is an independent service and is not affiliated with or endorsed by Amazon. Amazon and related marks are trademarks of their respective owners.</p>
-          <a className="mt-3 inline-block font-semibold text-emerald-800 hover:underline" href="mailto:support@listnara.com">support@listnara.com</a>
+          <a className="mt-3 inline-block font-semibold text-emerald-800 hover:underline" href={`mailto:${LEGAL_PRIVACY_EMAIL}`}>
+            {LEGAL_PRIVACY_EMAIL}
+          </a>
         </div>
         <nav aria-label="Footer" className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
           <Link href="/amazon-listing-audit" className="hover:text-slate-950">Listing audit</Link>
+          <Link href="/amazon-integration" className="hover:text-slate-950">Amazon integration</Link>
           <Link href="/methodology" className="hover:text-slate-950">Methodology</Link>
           <Link href="/about" className="hover:text-slate-950">About</Link>
           <Link href="/pricing" className="hover:text-slate-950">Pricing</Link>

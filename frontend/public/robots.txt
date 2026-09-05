@@ -1,1 +1,5 @@
 User-agent: *
+Allow: /
+
+Sitemap: https://app.listnara.com/sitemap.xml
+Host: https://app.listnara.com

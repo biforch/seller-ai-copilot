@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { BarChart3, ClipboardCheck, CreditCard, LogOut, ShoppingBag } from 'lucide-react';
+import { BarChart3, ClipboardCheck, CreditCard, LogOut } from 'lucide-react';
 
 import { APP_NAME } from '@/lib/constants';
 import type { User } from '@/types';
@@ -32,7 +32,6 @@ export function Header({ user, onLogout, showAuth = false }: HeaderProps) {
           {user ? (
             <>
               <button onClick={() => router.push('/audits/new')} className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 sm:block">New Audit</button>
-              <button onClick={() => router.push('/amazon-integration')} className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 lg:inline-flex"><ShoppingBag className="mr-2 h-4 w-4" />Amazon SP-API</button>
               <button onClick={() => router.push('/billing')} className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 sm:inline-flex"><CreditCard className="mr-2 h-4 w-4" />Billing</button>
               {user.is_admin ? <button onClick={() => router.push('/analytics')} className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 sm:inline-flex"><BarChart3 className="mr-2 h-4 w-4" />Analytics</button> : null}
               <span className="text-sm text-gray-600 hidden sm:inline">{user.email}</span>
@@ -46,6 +45,7 @@ export function Header({ user, onLogout, showAuth = false }: HeaderProps) {
             </>
           ) : showAuth ? (
             <>
+              <button onClick={() => router.push('/amazon-integration')} className="hidden text-sm font-medium text-gray-600 hover:text-gray-900 lg:block">Amazon integration</button>
               <button onClick={() => router.push('/amazon-listing-audit')} className="hidden text-sm font-medium text-gray-600 hover:text-gray-900 lg:block">How it works</button>
               <button onClick={() => router.push('/methodology')} className="hidden text-sm font-medium text-gray-600 hover:text-gray-900 lg:block">Methodology</button>
               <button onClick={() => router.push('/pricing')} className="hidden text-sm font-medium text-gray-600 hover:text-gray-900 sm:block">Pricing</button>

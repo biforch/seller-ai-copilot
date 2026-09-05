@@ -143,11 +143,15 @@ describe('login and register pages', () => {
   it('registers through the existing API and redirect without writing tokens', async () => {
     vi.mocked(apiClient.post).mockResolvedValue(undefined as never);
     render(<RegisterPage />);
-    const email = screen.getByPlaceholderText('you@example.com');
-    const [password, confirm] = screen.getAllByPlaceholderText('••••••••');
-    fireEvent.change(email, { target: { value: 'seller@example.com' } });
-    fireEvent.change(password, { target: { value: 'Secret12!abc' } });
-    fireEvent.change(confirm, { target: { value: 'Secret12!abc' } });
+    fireEvent.change(screen.getByLabelText('Email Address'), {
+      target: { value: 'seller@example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Password'), {
+      target: { value: 'Secret12!abc' },
+    });
+    fireEvent.change(screen.getByLabelText('Confirm Password'), {
+      target: { value: 'Secret12!abc' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
 
     await waitFor(() => {
@@ -159,5 +163,36 @@ describe('login and register pages', () => {
     });
     expect(localStorage.getItem('access_token')).toBeNull();
     expect(document.body.innerHTML).not.toMatch(/access_token|Authorization:\s*Bearer/i);
+  });
+
+  it('associates login fields with labels, autocomplete, and password toggle labels', () => {
+    render(<LoginPage />);
+
+    expect(screen.getByLabelText('Email Address')).toHaveAttribute('id', 'login-email');
+    expect(screen.getByLabelText('Email Address')).toHaveAttribute('name', 'email');
+    expect(screen.getByLabelText('Email Address')).toHaveAttribute('autocomplete', 'email');
+
+    expect(screen.getByLabelText('Password')).toHaveAttribute('id', 'login-password');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('name', 'password');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('autocomplete', 'current-password');
+
+    const toggle = screen.getByRole('button', { name: 'Show password' });
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Hide password' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('shows legal links and accessible register fields', () => {
+    render(<RegisterPage />);
+
+    expect(screen.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute('href', '/privacy');
+    expect(screen.getByRole('link', { name: 'Terms of Service' })).toHaveAttribute('href', '/terms');
+
+    expect(screen.getByLabelText('Email Address')).toHaveAttribute('autocomplete', 'email');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('autocomplete', 'new-password');
+    expect(screen.getByLabelText('Confirm Password')).toHaveAttribute('autocomplete', 'new-password');
+    expect(screen.getByLabelText('Confirm Password')).toHaveAttribute('name', 'confirmPassword');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(screen.getByRole('button', { name: 'Hide password' })).toBeInTheDocument();
   });
 });

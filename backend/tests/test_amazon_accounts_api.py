@@ -571,3 +571,69 @@ def test_create_account_via_service_still_works_for_fixture(db_session, user_fac
         token=f"{FAKE_A32_REFRESH_TOKEN}-fixture-smoke",
     )
     assert summary.user_id == user.id
+
+
+def test_disconnect_account_api_removes_account(
+    client,
+    user_factory,
+    auth_header,
+    db_session,
+    token_encryption_service,
+):
+    user = user_factory("amazon-disconnect-api@example.com")
+    account = _create_account(db_session, user, token_encryption_service)
+    response = client.delete(_detail_url(account.id), headers=auth_header(user))
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["account_id"] == str(account.id)
+    assert body["already_disconnected"] is False
+    assert body["disconnected_at"] is not None
+    assert db_session.get(AmazonAccount, account.id) is None
+
+
+def test_disconnect_account_api_is_idempotent(
+    client,
+    user_factory,
+    auth_header,
+):
+    user = user_factory("amazon-disconnect-api-idempotent@example.com")
+    missing_id = uuid.uuid4()
+    first = client.delete(_detail_url(missing_id), headers=auth_header(user))
+    second = client.delete(_detail_url(missing_id), headers=auth_header(user))
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["data"]["already_disconnected"] is True
+    assert second.json()["data"]["already_disconnected"] is True
+
+
+def test_disconnect_account_api_rejects_cross_tenant(
+    client,
+    user_factory,
+    auth_header,
+    db_session,
+    token_encryption_service,
+):
+    owner = user_factory("amazon-disconnect-owner@example.com")
+    other = user_factory("amazon-disconnect-intruder@example.com")
+    account = _create_account(db_session, owner, token_encryption_service)
+    response = client.delete(_detail_url(account.id), headers=auth_header(other))
+    assert response.status_code == 200
+    assert response.json()["data"]["already_disconnected"] is True
+    assert db_session.get(AmazonAccount, account.id) is not None
+
+
+def test_capabilities_endpoint_reports_feature_flags(
+    client,
+    user_factory,
+    auth_header,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from app.core.config import settings
+
+    user = user_factory("amazon-capabilities@example.com")
+    monkeypatch.setattr(settings, "AMAZON_OAUTH_ENABLED", False)
+    monkeypatch.setattr(settings, "AMAZON_SP_API_ENABLED", False)
+    response = client.get(f"{LIST_URL.rsplit('/', 1)[0]}/capabilities", headers=auth_header(user))
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload == {"oauth_enabled": False, "sp_api_enabled": False}

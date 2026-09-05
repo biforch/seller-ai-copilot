@@ -1,12 +1,16 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 
+import { LegalEntityNotice } from '@/components/marketing/LegalEntityNotice';
 import { PolicyLayout } from '@/components/marketing/PolicyLayout';
 
 export const metadata: Metadata = { title: 'Terms of Service — Listnara', description: 'Terms governing use of Listnara.' };
 
 export default function TermsPage() {
   return (
-    <PolicyLayout eyebrow="Legal" title="Terms of Service" summary="These terms govern your access to and use of Listnara, including its listing-audit and Amazon connectivity features.">
+    <PolicyLayout eyebrow="Legal" title="Terms of Service" summary="These terms govern your access to and use of Listnara, including its listing-audit and optional Amazon connectivity features.">
+      <LegalEntityNotice variant="terms" />
+
       <h2>1. Eligibility and accounts</h2>
       <p>You must be at least 18 years old and legally able to enter into these terms. You are responsible for accurate account information, protecting your credentials and MFA recovery methods, and activity under your account.</p>
 
@@ -20,10 +24,14 @@ export default function TermsPage() {
       <p>You may not use Listnara to violate law or marketplace rules; infringe intellectual-property or privacy rights; process buyer personal information without authorization; distribute malware; probe or bypass security or usage limits; automate abusive traffic; resell access without permission; or submit instructions intended to manipulate the AI system or expose confidential information.</p>
 
       <h2>5. Amazon</h2>
-      <p>Amazon and its trademarks belong to their respective owners. Listnara is independent and is not endorsed by or affiliated with Amazon. Your use of Amazon services remains subject to your agreements with Amazon. Amazon may change, restrict, or revoke API access, which can affect Listnara features.</p>
+      <p>Amazon and its trademarks belong to their respective owners. Listnara is independent and is not endorsed by or affiliated with Amazon. Optional Amazon connectivity uses OAuth authorization you initiate. Your use of Amazon services remains subject to your agreements with Amazon. Amazon may change, restrict, or revoke API access, which can affect Listnara features. See our <Link href="/amazon-integration">Amazon Integration</Link> page for scope and limitations.</p>
 
       <h2>6. Plans, allowances, and payment</h2>
-      <p>Plans include a monthly allowance of completed audits. Failed audits do not consume allowance; unused allowance does not roll over. The price, renewal period, taxes, and payment provider are disclosed before purchase. Subscriptions renew until canceled, and cancellation takes effect at the end of the paid billing period unless applicable law requires otherwise.</p>
+      <p>
+        Plans include a monthly allowance of completed audits. Failed audits do not consume allowance; unused allowance
+        does not roll over. The Free plan is currently available without payment. If paid plans are introduced later,
+        price, renewal period, taxes, and payment provider will be disclosed before purchase.
+      </p>
 
       <h2>7. Availability and changes</h2>
       <p>We may modify, suspend, rate-limit, or discontinue features to maintain security, comply with law or third-party requirements, or improve the service. Beta and pre-release features may change and may be unavailable or contain errors.</p>

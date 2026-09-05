@@ -1,4 +1,5 @@
 import { apiClient } from '@/app/api/client';
+import type { ListingAuditReport } from '@/app/api/listing-audit';
 import type { PaginatedResponse } from '@/types';
 
 export type AmazonAccountStatus =
@@ -95,6 +96,17 @@ interface OAuthStartResult {
   expires_at: string;
 }
 
+export interface AmazonCapabilities {
+  oauth_enabled: boolean;
+  sp_api_enabled: boolean;
+}
+
+export interface AmazonDisconnectResult {
+  account_id: string;
+  already_disconnected: boolean;
+  disconnected_at: string | null;
+}
+
 export interface AmazonSyncResult {
   account_id: string;
   sync_log_id: string;
@@ -106,6 +118,8 @@ export interface AmazonSyncResult {
 }
 
 export const amazonApi = {
+  getCapabilities: () => apiClient.get<AmazonCapabilities>('/amazon/capabilities'),
+
   listAccounts: () => apiClient.get<AmazonAccountList>('/amazon/accounts'),
 
   listLinkableProducts: (signal?: AbortSignal) =>
@@ -136,7 +150,7 @@ export const amazonApi = {
   listListings: (
     accountId: string,
     marketplaceId: string,
-    options: { page: number; pageSize: number; includeInactive: boolean },
+    options: { page: number; pageSize: number; includeInactive: boolean; asin?: string },
     signal?: AbortSignal,
   ) =>
     apiClient.get<PaginatedResponse<AmazonListing>>(
@@ -146,6 +160,7 @@ export const amazonApi = {
           page: options.page,
           page_size: options.pageSize,
           include_inactive: options.includeInactive ? 'true' : 'false',
+          ...(options.asin ? { asin: options.asin } : {}),
         },
         signal,
       },
@@ -176,4 +191,12 @@ export const amazonApi = {
     apiClient.post<AmazonCatalogSnapshot>(
       `/amazon/accounts/${accountId}/marketplaces/${encodeURIComponent(marketplaceId)}/listings/${listingId}/catalog/refresh?force_refresh=${forceRefresh ? 'true' : 'false'}`,
     ),
+
+  auditListing: (accountId: string, marketplaceId: string, listingId: string) =>
+    apiClient.post<ListingAuditReport>(
+      `/amazon/accounts/${accountId}/marketplaces/${encodeURIComponent(marketplaceId)}/listings/${listingId}/audit`,
+    ),
+
+  disconnectAccount: (accountId: string) =>
+    apiClient.delete<AmazonDisconnectResult>(`/amazon/accounts/${accountId}`),
 };

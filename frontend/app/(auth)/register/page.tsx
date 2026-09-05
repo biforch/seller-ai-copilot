@@ -68,18 +68,25 @@ export default function RegisterPage() {
 
         <div className="bg-white rounded-2xl shadow-lg border p-8">
           {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4">
+            <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4" role="alert">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" aria-labelledby="register-heading">
+            <h2 id="register-heading" className="sr-only">
+              Registration form
+            </h2>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="register-email" className="block text-sm font-medium text-gray-700 mb-1">
                 Email Address
               </label>
               <input
+                id="register-email"
+                name="email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
@@ -89,12 +96,15 @@ export default function RegisterPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="register-password" className="block text-sm font-medium text-gray-700 mb-1">
                 Password
               </label>
               <div className="relative">
                 <input
+                  id="register-password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none pr-10"
@@ -106,33 +116,51 @@ export default function RegisterPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
                 >
                   {showPassword ? (
-                    <EyeOff className="w-4 h-4" />
+                    <EyeOff className="w-4 h-4" aria-hidden="true" />
                   ) : (
-                    <Eye className="w-4 h-4" />
+                    <Eye className="w-4 h-4" aria-hidden="true" />
                   )}
                 </button>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p id="register-password-hint" className="text-xs text-gray-500 mt-1">
                 12–128 characters with uppercase, lowercase, number, and special character
               </p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="register-confirm-password" className="block text-sm font-medium text-gray-700 mb-1">
                 Confirm Password
               </label>
               <input
+                id="register-confirm-password"
+                name="confirmPassword"
                 type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                 placeholder="••••••••"
                 required
+                aria-describedby="register-password-hint"
               />
             </div>
+
+            <p className="text-xs leading-5 text-gray-600">
+              By creating an account, you agree to our{' '}
+              <Link href="/privacy" className="font-medium text-blue-600 underline hover:text-blue-700">
+                Privacy Policy
+              </Link>{' '}
+              and{' '}
+              <Link href="/terms" className="font-medium text-blue-600 underline hover:text-blue-700">
+                Terms of Service
+              </Link>
+              .
+            </p>
 
             <button
               type="submit"
@@ -141,7 +169,7 @@ export default function RegisterPage() {
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
                   Creating account...
                 </>
               ) : (

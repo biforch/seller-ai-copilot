@@ -6,7 +6,9 @@ import logging
 import re
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -31,7 +33,10 @@ from app.models.amazon_account import (
     AmazonAccount,
     AmazonAccountStatus,
 )
+from app.models.amazon_listing import AmazonListing
 from app.models.amazon_sync_log import AmazonSyncLog, AmazonSyncStatus
+from app.models.generation import Generation
+from app.models.listing_audit_snapshot import ListingAuditSnapshot
 from app.models.user import User
 from app.services.amazon_account_read_service import (
     AmazonAccountReadService,
@@ -43,6 +48,16 @@ from app.services.amazon_account_read_service import (
 from app.services.amazon_sync_log_service import AmazonSyncLogService
 
 logger = logging.getLogger(__name__)
+
+LISTING_AUDIT_GENERATION_TYPE = "listing_audit"
+
+
+@dataclass(frozen=True)
+class AmazonAccountDisconnectResult:
+    account_id: uuid.UUID
+    already_disconnected: bool
+    disconnected_at: datetime | None
+
 
 VALID_REGIONS = frozenset({"na", "eu", "fe"})
 VALID_ENDPOINT_MODES = frozenset({"sandbox", "production"})
@@ -434,3 +449,95 @@ class AmazonAccountService(AmazonAccountReadService):
         self._db.commit()
         self._db.refresh(account)
         return _to_summary(account)
+
+    def disconnect_account(
+        self,
+        *,
+        user_id: uuid.UUID,
+        account_id: uuid.UUID,
+    ) -> AmazonAccountDisconnectResult:
+        account = (
+            self._db.query(AmazonAccount)
+            .filter(
+                AmazonAccount.id == account_id,
+                AmazonAccount.user_id == user_id,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if account is None:
+            return AmazonAccountDisconnectResult(
+                account_id=account_id,
+                already_disconnected=True,
+                disconnected_at=None,
+            )
+
+        now = datetime.now(UTC)
+        processing_logs = (
+            self._db.query(AmazonSyncLog)
+            .filter(
+                AmazonSyncLog.amazon_account_id == account_id,
+                AmazonSyncLog.status == AmazonSyncStatus.PROCESSING,
+            )
+            .with_for_update()
+            .all()
+        )
+        for sync_log in processing_logs:
+            AmazonSyncLogService.finalize_failed(
+                self._db,
+                account_id=account_id,
+                sync_log_id=sync_log.id,
+                error_code=AMAZON_ACCOUNT_DISABLED,
+                finished_at=now,
+            )
+
+        listing_ids = [
+            row[0]
+            for row in self._db.query(AmazonListing.id)
+            .filter(AmazonListing.amazon_account_id == account_id)
+            .all()
+        ]
+        if listing_ids:
+            snapshot_ids = [
+                row[0]
+                for row in self._db.query(ListingAuditSnapshot.id)
+                .filter(ListingAuditSnapshot.amazon_listing_id.in_(listing_ids))
+                .all()
+            ]
+            if snapshot_ids:
+                snapshot_id_values = {str(snapshot_id) for snapshot_id in snapshot_ids}
+                linked_generations = (
+                    self._db.query(Generation)
+                    .filter(
+                        Generation.user_id == user_id,
+                        Generation.type == LISTING_AUDIT_GENERATION_TYPE,
+                    )
+                    .all()
+                )
+                for generation in linked_generations:
+                    payload: dict[str, Any] = (
+                        generation.input if isinstance(generation.input, dict) else {}
+                    )
+                    snapshot_id = payload.get("snapshot_id")
+                    if snapshot_id is not None and str(snapshot_id) in snapshot_id_values:
+                        self._db.delete(generation)
+                (
+                    self._db.query(ListingAuditSnapshot)
+                    .filter(ListingAuditSnapshot.id.in_(snapshot_ids))
+                    .delete(synchronize_session=False)
+                )
+
+        region = account.region
+        self._db.delete(account)
+        self._db.commit()
+        logger.info(
+            "amazon_account_disconnected user_id=%s account_id=%s region=%s",
+            user_id,
+            account_id,
+            region,
+        )
+        return AmazonAccountDisconnectResult(
+            account_id=account_id,
+            already_disconnected=False,
+            disconnected_at=now,
+        )

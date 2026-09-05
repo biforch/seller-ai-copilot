@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -229,3 +231,115 @@ def test_invalid_region_rejected(
             plaintext_refresh_token=FAKE_A32_REFRESH_TOKEN,
         )
     assert exc_info.value.error_code == AMAZON_CONFIG_INVALID
+
+
+def test_disconnect_account_removes_tokens_listings_and_snapshots(
+    db_session: Session,
+    token_encryption_service: TokenEncryptionService,
+    user_factory,
+) -> None:
+    from datetime import UTC, datetime
+
+    from app.models.amazon_listing import AmazonListing
+    from app.models.generation import Generation
+    from app.models.listing_audit_snapshot import ListingAuditSnapshot
+
+    user, summary = create_account_via_service(
+        db_session,
+        user_factory,
+        token_encryption_service,
+        token=FAKE_A32_REFRESH_TOKEN,
+    )
+    now = datetime.now(UTC)
+    listing = AmazonListing(
+        amazon_account_id=summary.id,
+        marketplace_id="ATVPDKIKX0DER",
+        seller_sku="DISCONNECT-SKU",
+        asin="B012345678",
+        status_codes=["BUYABLE"],
+        product_type="PRODUCT",
+        is_active=True,
+        first_seen_at=now,
+        last_seen_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add(listing)
+    db_session.commit()
+    db_session.refresh(listing)
+
+    snapshot = ListingAuditSnapshot(
+        user_id=user.id,
+        amazon_listing_id=listing.id,
+        source="amazon",
+        marketplace="US",
+        asin=listing.asin,
+        seller_sku=listing.seller_sku,
+        title="Disconnect title",
+        bullets=["one"],
+        description="Disconnect description",
+        specifications={},
+        image_urls=[],
+        content_hash="a" * 64,
+    )
+    db_session.add(snapshot)
+    db_session.commit()
+    db_session.refresh(snapshot)
+
+    report_id = uuid.uuid4()
+    db_session.add(
+        Generation(
+            id=report_id,
+            user_id=user.id,
+            type="listing_audit",
+            input={"snapshot_id": str(snapshot.id), "listing": {"title": "Disconnect title"}},
+            output={"report_id": str(report_id)},
+            tokens_used=100,
+        )
+    )
+    db_session.commit()
+
+    listing_id = listing.id
+    snapshot_id = snapshot.id
+    service = AmazonAccountService(db_session, token_encryption_service)
+    result = service.disconnect_account(user_id=user.id, account_id=summary.id)
+    assert result.already_disconnected is False
+    assert result.disconnected_at is not None
+    assert db_session.get(AmazonAccount, summary.id) is None
+    assert db_session.get(AmazonListing, listing_id) is None
+    assert db_session.get(ListingAuditSnapshot, snapshot_id) is None
+    assert db_session.get(Generation, report_id) is None
+
+
+def test_disconnect_account_is_idempotent_for_missing_account(
+    db_session: Session,
+    token_encryption_service: TokenEncryptionService,
+    user_factory,
+) -> None:
+    user = user_factory("amazon-disconnect-idempotent@example.com")
+    missing_id = uuid.uuid4()
+    service = AmazonAccountService(db_session, token_encryption_service)
+    result = service.disconnect_account(user_id=user.id, account_id=missing_id)
+    assert result.account_id == missing_id
+    assert result.already_disconnected is True
+    assert result.disconnected_at is None
+
+
+def test_disconnect_account_is_tenant_scoped(
+    db_session: Session,
+    token_encryption_service: TokenEncryptionService,
+    user_factory,
+) -> None:
+    owner, summary = create_account_via_service(
+        db_session,
+        user_factory,
+        token_encryption_service,
+        token=FAKE_A32_REFRESH_TOKEN,
+    )
+    other = user_factory("amazon-disconnect-other@example.com")
+    service = AmazonAccountService(db_session, token_encryption_service)
+    result = service.disconnect_account(user_id=other.id, account_id=summary.id)
+    assert result.already_disconnected is True
+    assert db_session.get(AmazonAccount, summary.id) is not None
+    owner_result = service.disconnect_account(user_id=owner.id, account_id=summary.id)
+    assert owner_result.already_disconnected is False

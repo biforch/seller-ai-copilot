@@ -29,5 +29,22 @@ class AmazonAccountListResponse(BaseModel):
     total: int = Field(ge=0)
 
 
+class AmazonAccountDisconnectResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: uuid.UUID
+    already_disconnected: bool
+    disconnected_at: datetime | None
+
+
+class AmazonCapabilitiesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    oauth_enabled: bool
+    sp_api_enabled: bool
+
+
 AmazonAccountListApiResponse = ApiResponse[AmazonAccountListResponse]
 AmazonAccountDetailApiResponse = ApiResponse[AmazonAccountPublic]
+AmazonAccountDisconnectApiResponse = ApiResponse[AmazonAccountDisconnectResponse]
+AmazonCapabilitiesApiResponse = ApiResponse[AmazonCapabilitiesResponse]
